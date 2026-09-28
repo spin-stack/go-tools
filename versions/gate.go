@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -38,7 +39,8 @@ var (
 	pinned = regexp.MustCompile(`\b[0-9a-f]{64}\b|\b[0-9a-f]{40}\b`)
 	// A Dockerfile's build argument that is one of an entry's (Entry.Args).
 	pinArg = regexp.MustCompile(`(?m)^ARG ([A-Z0-9_]+(?:_IMAGE|_VERSION|_COMMIT|_SHA256|_SNAPSHOT))(=.*)?$`)
-	// An action a workflow runs, by its commit: Dependabot's to move, as go.sum is Go's.
+	// An action a workflow or a composite action runs, by its commit: Dependabot's to move, as
+	// go.sum is Go's.
 	actionPin = regexp.MustCompile(`^\s*(?:-\s*)?uses:\s*[^@\s]+@[0-9a-f]{40}(?:\s|$)`)
 )
 
@@ -101,7 +103,7 @@ func (g Gate) Check() error {
 func pins(rel, body string, args map[string]bool) []error {
 	var errs []error
 	for i, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(rel, ".github/workflows/") && actionPin.MatchString(line) {
+		if strings.HasPrefix(rel, ".github/") && actionPin.MatchString(line) {
 			continue
 		}
 		if m := pinned.FindString(line); m != "" {
@@ -121,38 +123,61 @@ func pins(rel, body string, args map[string]bool) []error {
 	return errs
 }
 
-// files is every file of the repository a pin could be written or read in. _output and the
-// dot-directories but .github are what a build or a tool made.
+// files is every file of the repository a pin could be written or read in: what git tracks, and
+// what it would if added, so that a new file is held to the gate before its commit and a
+// dependency tree or a build's output that git ignores (node_modules, bin/) is not read at all.
+// _output and the dot-directories but .github are what a build or a tool made even when git is
+// not told so.
 func (g Gate) files() (map[string]string, error) {
+	cmd := exec.Command("git", "-C", g.Root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	list, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("versions: the gate reads the files git lists in %s: %w: %s", g.Root, err, strings.TrimSpace(stderr.String()))
+	}
 	top, err := os.OpenRoot(g.Root)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = top.Close() }() // read-only
 	out := map[string]string{}
-	err = fs.WalkDir(top.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
+	for rel := range strings.SplitSeq(strings.TrimSuffix(string(list), "\x00"), "\x00") {
+		if rel == "" || rel == File || g.exempt(rel) {
+			continue
+		}
+		info, err := top.Lstat(rel)
+		// A file deleted and not yet staged is still in git's index.
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("versions: %w", err)
 		}
-		if d.IsDir() {
-			if rel == "_output" || (strings.HasPrefix(d.Name(), ".") && rel != "." && rel != ".github") ||
-				slices.Contains(g.Elsewhere, rel+"/") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !d.Type().IsRegular() || rel == File || slices.Contains(g.Elsewhere, rel) {
-			return nil
+		if !info.Mode().IsRegular() {
+			continue
 		}
 		raw, err := top.ReadFile(rel)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("versions: %w", err)
 		}
 		out[rel] = string(raw)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("versions: %w", err)
 	}
 	return out, nil
+}
+
+// exempt is whether rel is one of Elsewhere's, or in a directory that a build or a tool made.
+func (g Gate) exempt(rel string) bool {
+	for _, e := range g.Elsewhere {
+		if rel == e || (strings.HasSuffix(e, "/") && strings.HasPrefix(rel, e)) {
+			return true
+		}
+	}
+	dirs := strings.Split(rel, "/")
+	for i, d := range dirs[:len(dirs)-1] {
+		if (i == 0 && d == "_output") || (strings.HasPrefix(d, ".") && (i != 0 || d != ".github")) {
+			return true
+		}
+	}
+	return false
 }

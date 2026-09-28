@@ -2,6 +2,7 @@ package versions
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -19,6 +20,11 @@ func repo(t *testing.T, files map[string]string) string {
 		}
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	return root
@@ -41,6 +47,11 @@ func TestTheGateSaysWhereAPinIsNotVersionsYAMLs(t *testing.T) {
 			"x_test.go":                 sha,
 			".github/workflows/ci.yml":  "steps:\n  - uses: actions/checkout@" + strings.Repeat("d", 40) + " # v5\n",
 			"records/measurements.json": sha,
+			// What git ignores is nobody's pin: a dependency tree, a build's binaries.
+			".gitignore":              "node_modules/\n",
+			"node_modules/x/index.js": sha,
+			// A composite action's own steps are Dependabot's too.
+			".github/actions/setup/action.yml": "runs:\n  steps:\n    - uses: actions/cache@" + strings.Repeat("e", 40) + " # v6\n",
 		}
 	}
 	for _, tc := range []struct {
