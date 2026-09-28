@@ -1,0 +1,16 @@
+# Dependabot moves what Go writes of its modules (go.sum). Everything else is versions.yaml's,
+# moved by task bump.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # A release a week old has had a week for anybody to find it was not what it said.
+    cooldown:
+      default-days: 7
+    groups:
+      go:
+        patterns: ["*"]
+    commit-message:
+      prefix: go

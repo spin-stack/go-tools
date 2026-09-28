@@ -1,0 +1,52 @@
+# A file with an entry of every kind, the way the repositories that use this package write them.
+
+- name: alloy
+  kind: git
+  source: https://github.com/grafana/alloy
+  version: v1.20.0
+  pin: 352ab819cf06611640a7e82048aa0671d24bbfb3
+  track: github-release
+  note: a tag's commit.
+
+- name: go
+  kind: image
+  source: golang
+  version: 1.27.1-trixie
+  pin: sha256:433790e515d27dc6003e847e644cc0af956985cf315c1c58a3b73ee2dd305183
+  track: go
+
+- name: alpine
+  kind: image
+  source: alpine
+  version: '3.24'
+  pin: sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+  track: digest
+
+- name: qemu
+  kind: download
+  source: https://download.qemu.org/qemu-{version}.tar.xz
+  version: 11.1.1
+  pin: 079ffbff8a7111bbc89022107cbabf3bbfd614d5fc9d7cc675991196aca12482
+  track: tags https://gitlab.com/qemu-project/qemu.git
+  note: >-
+    a note folded over
+    two lines.
+
+- name: qboot
+  kind: git
+  source: https://github.com/bonzini/qboot
+  version: master
+  pin: 8ca302e86d685fa05b16e2b208888243da319941
+  archive: 5d2e3a1d0a3f1f4e9f0c6a0c5b2c1f6b9e6a1c2d3e4f5a6b7c8d9e0f1a2b3c4d
+  track: branch
+
+- name: debian-snapshot
+  kind: date
+  version: 20260914T000000Z # the day the archive is read as of
+  track: today
+
+- name: google-crc32c
+  kind: pypi
+  source: google-crc32c
+  version: "1.7.1"
+  track: pypi

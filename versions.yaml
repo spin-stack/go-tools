@@ -1,0 +1,14 @@
+# Every input this repository pins, written once: versions/README.md says what each field means,
+# `task versions` what is behind, `task bump NAME=<name>` moves one. It is read by the same
+# package it pins for, and held to it by the same gate (versions/repo_test.go).
+
+- name: golangci-lint
+  kind: image
+  source: golangci/golangci-lint
+  version: v2.13.2
+  pin: sha256:ba07dffad130794ae79ebaa0056809d18c0168f3f846480ffd3eb6c04578b83d
+  track: github-release https://github.com/golangci/golangci-lint
+  note: >-
+    task lint, with spin's .golangci.yml: spin's version (GOLANGCI_VERSION in its Taskfile), so
+    every repository is measured by the same linters. Bumped with spin, not ahead of it; the
+    image's Go must be at least go.mod's.

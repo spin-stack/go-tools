@@ -1,0 +1,47 @@
+# go-tools - the Go the spin-stack repositories build with, and nothing any of them ships.
+#
+#   task test         the Go tests
+#   task lint         golangci-lint with spin's rules, at spin's version
+#   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
+
+version: '3'
+
+silent: true
+
+vars:
+  OUT: '{{.ROOT_DIR}}/_output'
+  VERSIONS: go run ./cmd/versions
+  OWNER:
+    sh: echo "$(id -u):$(id -g)"
+
+tasks:
+
+  test:
+    desc: The Go tests.
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: golangci-lint with spin's rules (.golangci.yml), at spin's version, over the Go.
+    cmds:
+      # As this user, on this host's module and build caches: the container fetches nothing a
+      # build here has not, and leaves nothing root's behind. Its own cache is under _output.
+      - mkdir -p {{.OUT}}/golangci-lint
+      - >-
+        docker run --rm -u {{.OWNER}} -v {{.ROOT_DIR}}:/work -w /work
+        -v "$(go env GOMODCACHE)":/go/pkg/mod -v "$(go env GOCACHE)":/cache/go-build
+        -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/cache/go-build -e GOLANGCI_LINT_CACHE=/work/_output/golangci-lint
+        -e HOME=/tmp
+        $({{.VERSIONS}} ref golangci-lint) golangci-lint run ./...
+
+  versions:
+    desc: Say which of versions.yaml's pins are behind their upstream (exits 1 when any is).
+    cmds:
+      - '{{.VERSIONS}} check'
+
+  bump:
+    desc: Pin one entry of versions.yaml at a version, the newest by default (task bump NAME=golangci-lint [VERSION=v2.14.0]).
+    requires:
+      vars: [NAME]
+    cmds:
+      - '{{.VERSIONS}} bump {{.NAME}} {{.VERSION}}'
