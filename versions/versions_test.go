@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -244,5 +245,73 @@ func TestTheNewestTagIsTheHighestRelease(t *testing.T) {
 	b, _ := numbers("11.9.9")
 	if slices.Compare(a, b) <= 0 {
 		t.Error("11.10 is not after 11.9.9")
+	}
+}
+
+// A tag without its download is not a version to move to: QEMU tagged v11.1.2 before its tarball
+// was published, and a bump to it failed on a 404.
+func TestTheNewestDownloadIsTheNewestPublished(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/qemu-11.1.1.tar.xz" && r.URL.Path != "/qemu-11.0.0.tar.xz" {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	e := Entry{Name: "qemu", Kind: Download, Source: srv.URL + "/qemu-{version}.tar.xz", Version: "11.0.0"}
+	for _, tc := range []struct {
+		tags []string
+		want string
+	}{
+		{[]string{"11.1.2", "11.1.1", "11.0.0"}, "11.1.1"},
+		{[]string{"11.1.2", "11.0.0"}, "11.0.0"},
+		{[]string{"11.0.0", "10.2.0"}, "11.0.0"},
+	} {
+		got, err := newestPublished(t.Context(), e, tc.tags)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != tc.want {
+			t.Errorf("tags %v: newest %q, want %q", tc.tags, got, tc.want)
+		}
+	}
+}
+
+// A file pinned to a commit of a branch that moves several times a day is behind when the file
+// changes, not when the branch moves: the repository is a local one and the file is served here.
+func TestACommitTrackedFileIsBehindOnlyWhenItChanged(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "master")
+	git("commit", "-q", "--allow-empty", "-m", "one")
+	first := git("rev-parse", "HEAD")
+	git("commit", "-q", "--allow-empty", "-m", "two")
+
+	body := "the same file"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	e := Entry{Name: "check-config", Kind: Download, Source: srv.URL + "/{version}/check-config.sh",
+		Version: first, Track: "commit " + repo + " master"}
+	pin, err := Resolve(t.Context(), e, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Pin = pin
+
+	if st := Check(t.Context(), &Versions{Entries: []Entry{e}})[0]; st.Behind {
+		t.Errorf("the branch moved and the file did not, and check calls it behind: %+v", st)
+	}
+	body = "a changed file"
+	if st := Check(t.Context(), &Versions{Entries: []Entry{e}})[0]; !st.Behind {
+		t.Errorf("the file changed, and check does not call it behind: %+v", st)
 	}
 }

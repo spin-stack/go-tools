@@ -46,7 +46,17 @@ func Newest(ctx context.Context, e Entry) (string, error) {
 	case "digest", "branch":
 		return e.Version, nil
 	case "tags":
-		return newestTag(ctx, arg, strings.HasPrefix(e.Version, "v"))
+		tags, err := releaseTags(ctx, arg, strings.HasPrefix(e.Version, "v"))
+		if err != nil {
+			return "", err
+		}
+		if e.Kind != Download {
+			return tags[0], nil
+		}
+		return newestPublished(ctx, e, tags)
+	case "commit":
+		repo, branch, _ := strings.Cut(arg, " ")
+		return branchHead(ctx, repo, branch)
 	case "pypi":
 		var p struct {
 			Info struct {
@@ -184,17 +194,17 @@ func githubRelease(ctx context.Context, repo string) (string, error) {
 // -pre or a WIP tag is not one, and neither is anything with a word in it.
 var release = regexp.MustCompile(`^v?(\d+(?:\.\d+)*)$`)
 
-// newestTag is the highest release tag of repo, spelled with a v only when the pin is: QEMU's
-// tags are v11.1.1 and its tarball is qemu-11.1.1.
-func newestTag(ctx context.Context, repo string, withV bool) (string, error) {
+// releaseTags is repo's release tags, highest first, spelled with a v only when the pin is:
+// QEMU's tags are v11.1.1 and its tarball is qemu-11.1.1.
+func releaseTags(ctx context.Context, repo string, withV bool) ([]string, error) {
 	if repo == "" {
-		return "", errors.New("versions: a tags track names no repository")
+		return nil, errors.New("versions: a tags track names no repository")
 	}
 	out, err := run(ctx, "git", "ls-remote", "--tags", "--refs", repo)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var newest []int
+	var found [][]int
 	for line := range strings.Lines(out) {
 		_, ref, _ := strings.Cut(strings.TrimSpace(line), "\t")
 		m := release.FindStringSubmatch(strings.TrimPrefix(ref, "refs/tags/"))
@@ -203,23 +213,75 @@ func newestTag(ctx context.Context, repo string, withV bool) (string, error) {
 		}
 		n, err := numbers(m[1])
 		if err != nil {
-			return "", fmt.Errorf("versions: %s's tag %s: %w", repo, ref, err)
+			return nil, fmt.Errorf("versions: %s's tag %s: %w", repo, ref, err)
 		}
-		if slices.Compare(n, newest) > 0 {
-			newest = n
+		found = append(found, n)
+	}
+	if found == nil {
+		return nil, fmt.Errorf("versions: %s has no release tag", repo)
+	}
+	slices.SortFunc(found, func(a, b []int) int { return slices.Compare(b, a) })
+	tags := make([]string, len(found))
+	for i, n := range found {
+		parts := make([]string, len(n))
+		for j, x := range n {
+			parts[j] = strconv.Itoa(x)
+		}
+		tags[i] = strings.Join(parts, ".")
+		if withV {
+			tags[i] = "v" + tags[i]
 		}
 	}
-	if newest == nil {
-		return "", fmt.Errorf("versions: %s has no release tag", repo)
+	return tags, nil
+}
+
+// newestPublished is the highest of tags, given highest first, whose download is there - and e's
+// own version when none newer is.
+//
+// A tag is not a release. QEMU tagged v11.1.2 before download.qemu.org had its tarball
+// (2026-09-28), so check called qemu behind and a bump to the newest failed on a 404. What a
+// download entry builds from is the download, so that is what is asked.
+func newestPublished(ctx context.Context, e Entry, tags []string) (string, error) {
+	current, err := numbers(strings.TrimPrefix(e.Version, "v"))
+	if err != nil {
+		return "", fmt.Errorf("versions: %s's version %q: %w", e.Name, e.Version, err)
 	}
-	parts := make([]string, len(newest))
-	for i, n := range newest {
-		parts[i] = strconv.Itoa(n)
+	for _, tag := range tags {
+		n, err := numbers(strings.TrimPrefix(tag, "v"))
+		if err != nil {
+			return "", fmt.Errorf("versions: %s's tag %q: %w", e.Name, tag, err)
+		}
+		if slices.Compare(n, current) <= 0 {
+			break
+		}
+		c := e
+		c.Version = tag
+		ok, err := fetch.Exists(ctx, c.URL())
+		if err != nil {
+			return "", fmt.Errorf("versions: %w", err)
+		}
+		if ok {
+			return tag, nil
+		}
 	}
-	if withV {
-		return "v" + strings.Join(parts, "."), nil
+	return e.Version, nil
+}
+
+// branchHead is the commit branch of repo is at: the newest of a download whose version is a
+// commit, from a project whose releases do not carry the file (moby's check-config.sh).
+func branchHead(ctx context.Context, repo, branch string) (string, error) {
+	if repo == "" || branch == "" {
+		return "", errors.New("versions: a commit track is `commit <repo> <branch>`")
 	}
-	return strings.Join(parts, "."), nil
+	out, err := run(ctx, "git", "ls-remote", repo, "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	sha, _, _ := strings.Cut(out, "\t")
+	if sha == "" {
+		return "", fmt.Errorf("versions: %s has no branch %s", repo, branch)
+	}
+	return sha, nil
 }
 
 // numbers is a dotted version as numbers, so 11.10 comes after 11.9.
@@ -326,6 +388,17 @@ func Check(ctx context.Context, v *Versions) []Status {
 		default:
 			st.Newest = newest
 			st.Behind = newest != e.Version
+			// A file pinned to a commit of a busy branch: the branch moves several times a day and
+			// the file almost never. Behind is the file changing, not the commit.
+			if st.Behind && e.Kind == Download && strings.HasPrefix(e.Track, "commit ") {
+				pin, err := Resolve(ctx, e, newest)
+				switch {
+				case err != nil:
+					st.Note = err.Error()
+				case pin == e.Pin:
+					st.Behind, st.Note = false, "the branch moved; the file did not"
+				}
+			}
 			if !st.Behind && (e.Kind == Image || e.Kind == Git) {
 				pin, err := Resolve(ctx, e, newest)
 				if err != nil {

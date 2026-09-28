@@ -86,6 +86,29 @@ func cause(ctx context.Context, err error) error {
 	return err
 }
 
+// Exists is whether url is there to be downloaded: a 200 to a HEAD, redirects followed, and a 404
+// is an answer rather than an error. Any other status is one, since it says nothing about the file.
+func Exists(ctx context.Context, url string) (bool, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, quiet, fmt.Errorf("%s sent nothing for %s", url, quiet))
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, cause(ctx, err)
+	}
+	_ = resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	}
+	return false, fmt.Errorf("%s answered %s", url, resp.Status)
+}
+
 // Bytes is url's body, refused past limit bytes rather than cut there.
 func Bytes(ctx context.Context, url string, limit int64) ([]byte, error) {
 	body, err := Get(ctx, url)

@@ -62,7 +62,8 @@ or `{{.VERSIONS}} ...`; `Gate.Reads` says otherwise.
 | track | the newest is |
 |---|---|
 | `github-release [repo]` | the repository's latest release (`source`'s by default), with a `v` only when the version has one |
-| `tags <repo>` | the highest release-numbered tag of a git repository |
+| `tags <repo>` | the highest release-numbered tag of a git repository; for a download, the highest whose file is published |
+| `commit <repo> <branch>` | the commit a branch is at, for a download whose version is a commit: behind only when the file changed |
 | `go` | the newest stable Go, spelled as the tag is (`1.27.1-trixie`) |
 | `kernel-stable` | the newest release of the same stable series; a series that is over is a decision |
 | `digest` | the same tag: behind when it names another image |
