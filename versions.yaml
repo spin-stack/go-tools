@@ -9,6 +9,6 @@
   pin: sha256:ba07dffad130794ae79ebaa0056809d18c0168f3f846480ffd3eb6c04578b83d
   track: github-release https://github.com/golangci/golangci-lint
   note: >-
-    task lint, with spin's .golangci.yml: spin's version (GOLANGCI_VERSION in its Taskfile), so
+    task lint, with spin's .golangci.yml: spin's version (its versions.yaml's golangci-lint), so
     every repository is measured by the same linters. Bumped with spin, not ahead of it; the
     image's Go must be at least go.mod's.
