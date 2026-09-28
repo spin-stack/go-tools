@@ -1,5 +1,5 @@
-# Dependabot moves what Go writes of its modules (go.sum). Everything else is versions.yaml's,
-# moved by task bump.
+# Dependabot moves what Go writes of its modules (go.sum) and the actions the workflows run.
+# Everything else is versions.yaml's, moved by task bump.
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -14,3 +14,16 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: go
+
+  # The workflows' `uses:`, each pinned by commit with its version in a comment for this to move.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
