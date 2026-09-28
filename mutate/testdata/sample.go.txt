@@ -1,0 +1,40 @@
+package sample
+
+type profiler struct {
+	last  int
+	marks int
+}
+
+func (p *profiler) Mark(now int) {
+	if now < p.last {
+		return
+	}
+	p.last = now
+	p.marks = p.marks + 1
+}
+
+func Bounded(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	keep := max - 3
+	// mutate-exempt: the mark is three bytes, and what that costs is the business of the test
+	// that measures it rather than of this one - a reason written over two lines on purpose,
+	// so that what it covers is the line under the whole comment.
+	if keep <= 0 {
+		return s[:max]
+	}
+	return s[:keep]
+}
+
+func Clamp(n int) int {
+	// mutate-exempt: one line of reason, directly over what it covers.
+	if n > 100 {
+		return 100
+	}
+	return n
+}
+
+func Untouched(a, b int) int {
+	return a + b
+}

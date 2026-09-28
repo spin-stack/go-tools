@@ -1,7 +1,9 @@
 # go-tools - the Go the spin-stack repositories build with, and nothing any of them ships.
 #
 #   task test         the Go tests
-#   task lint         golangci-lint with spin's rules, at spin's version
+#   task lint         golangci-lint with spin's rules, at spin's version, and mutate's stale
+#                     exemptions
+#   task mutate       break what the change against BASE (origin/main) touched, and ask the tests
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
 
 version: '3'
@@ -33,6 +35,15 @@ tasks:
         -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/cache/go-build -e GOLANGCI_LINT_CACHE=/work/_output/golangci-lint
         -e HOME=/tmp
         $({{.VERSIONS}} ref golangci-lint) golangci-lint run ./...
+      # What this repository gives the others, held to itself first.
+      - go run ./cmd/mutate -stale-exempts
+
+  mutate:
+    desc: Break what the change against BASE touched and fail on an edit no test refuses (BASE=origin/main).
+    vars:
+      BASE: '{{.BASE | default "origin/main"}}'
+    cmds:
+      - go run ./cmd/mutate -base {{.BASE}} -max 200
 
   versions:
     desc: Say which of versions.yaml's pins are behind their upstream (exits 1 when any is).

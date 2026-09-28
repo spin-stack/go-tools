@@ -1,7 +1,9 @@
 # go-tools
 
-The Go the spin-stack repositories build with. Nothing here is linked into what any of them
-ships.
+The Go the spin-stack repositories build with, and hold their code to: tools a repository runs
+from its go.mod (`go tool <name>`), each a package with a command beside it. Nothing here is
+linked into what any of them ships but versions' reading half, which spin's binaries use to read
+the pins they carry.
 
 ## versions
 
@@ -79,3 +81,19 @@ included; `Gate.Reads` says otherwise.
 
 `GITHUB_TOKEN`, when set, is sent to api.github.com, which answers sixty unauthenticated requests
 an hour.
+
+## mutate
+
+`go tool mutate -base origin/main` breaks what a change touched - a comparison inverted, a field
+no longer written, a bound moved by one, in each function the diff reaches - and asks the tests
+whether they notice. An edit no test refuses is either a behaviour nothing holds, answered with
+a test, or one that means nothing, answered with `mutate-exempt: <reason>` on the line; a
+function only a lane this run cannot reach (root, KVM, a cloud account) names the lane's test
+with `mutate-lane: <TestName>` in its doc comment. `-stale-exempts` fails on a reason over a line
+the tool would not break.
+
+A package's edits are built into one test binary and switched on one at a time, and only the
+tests whose coverage reaches a line are run for it; a package with no tests is asked through the
+packages that import it. What the tests need besides the code is the environment's: spin runs it
+under its hack/testpg, which starts one PostgreSQL for every test process.
+
