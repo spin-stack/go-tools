@@ -97,3 +97,17 @@ tests whose coverage reaches a line are run for it; a package with no tests is a
 packages that import it. What the tests need besides the code is the environment's: spin runs it
 under its hack/testpg, which starts one PostgreSQL for every test process.
 
+
+## ctxlife, testquality, refs
+
+Three gates a repository runs over itself from `task lint`, each failing with what to do:
+
+- `go tool ctxlife [dir...]` fails on a goroutine that uses the context its starter was given and
+  is not waited for: it stops working the moment the call that started it returns. A detached
+  context (`context.WithoutCancel`), or `ctx-lifetime: <reason>` on the line, answers it.
+- `go tool testquality [-allow file] ./...` fails on a test that cannot fail - nothing in it
+  reaches `t.Error`, `t.Fatal`, `t.Skip`, an assertion package, or a helper handed the test - and
+  on one skipped unconditionally. The allowlist is a ratchet: an entry nothing matches fails too.
+- `go tool refs [-files 'AGENTS.md ...'] [-allow file]` fails on a repository path or a `task
+  <name>` that the prose an agent loads (AGENTS.md and CLAUDE.md, by default) names and the tree
+  does not have; `-allow` lists the ones named on purpose, `<file><TAB><reference>  # why`.

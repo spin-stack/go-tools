@@ -1,8 +1,8 @@
 # go-tools - the Go the spin-stack repositories build with, and nothing any of them ships.
 #
 #   task test         the Go tests
-#   task lint         golangci-lint with spin's rules, at spin's version, and mutate's stale
-#                     exemptions
+#   task lint         golangci-lint with spin's rules, at spin's version, and this repository's own
+#                     gates run on itself: ctxlife, testquality, refs
 #   task mutate       break what the change against BASE (origin/main) touched, and ask the tests
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
 
@@ -36,6 +36,9 @@ tasks:
         -e HOME=/tmp
         $({{.VERSIONS}} ref golangci-lint) golangci-lint run ./...
       # What this repository gives the others, held to itself first.
+      - go run ./cmd/ctxlife
+      - go run ./cmd/testquality ./...
+      - go run ./cmd/refs
       - go run ./cmd/mutate -stale-exempts
 
   mutate:
