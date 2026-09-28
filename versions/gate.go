@@ -30,13 +30,15 @@ type Gate struct {
 }
 
 // DefaultReads is how a repository reads versions.yaml through this module's command: `versions
-// args go kernel` in a Taskfile, or `{{.VERSIONS}} args ...` where a variable runs it.
+// args go kernel` in a Taskfile, or `{{.VERSIONS}} args ...` where a variable runs it. Two
+// patterns and not one alternation, so that each starts with a literal the regexp package skips
+// to: the gate reads every file of a repository, under the race detector in a test.
 var DefaultReads = []*regexp.Regexp{
-	regexp.MustCompile(`(?:versions|\{\{\.VERSIONS\}\}) (?:args|env|ref|version)((?: [a-z][a-z0-9-]*)+)`),
+	regexp.MustCompile(`versions (?:args|env|ref|version)((?: [a-z][a-z0-9-]*)+)`),
+	regexp.MustCompile(`\{\{\.VERSIONS\}\} (?:args|env|ref|version)((?: [a-z][a-z0-9-]*)+)`),
 }
 
 var (
-	pinned = regexp.MustCompile(`\b[0-9a-f]{64}\b|\b[0-9a-f]{40}\b`)
 	// A Dockerfile's build argument that is one of an entry's (Entry.Args).
 	pinArg = regexp.MustCompile(`(?m)^ARG ([A-Z0-9_]+(?:_IMAGE|_VERSION|_COMMIT|_SHA256|_SNAPSHOT))(=.*)?$`)
 	// An action a workflow or a composite action runs, by its commit: Dependabot's to move, as
@@ -102,13 +104,14 @@ func (g Gate) Check() error {
 // default.
 func pins(rel, body string, args map[string]bool) []error {
 	var errs []error
-	for i, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(rel, ".github/") && actionPin.MatchString(line) {
+	n := 0
+	for line := range strings.Lines(body) {
+		n++
+		m := firstPin(line)
+		if m == "" || (strings.HasPrefix(rel, ".github/") && actionPin.MatchString(line)) {
 			continue
 		}
-		if m := pinned.FindString(line); m != "" {
-			errs = append(errs, fmt.Errorf("%s:%d pins %s: it belongs in %s", rel, i+1, m, File))
-		}
+		errs = append(errs, fmt.Errorf("%s:%d pins %s: it belongs in %s", rel, n, m, File))
 	}
 	if filepath.Base(rel) == "Dockerfile" || strings.HasSuffix(rel, ".Dockerfile") {
 		for _, m := range pinArg.FindAllStringSubmatch(body, -1) {
@@ -121,6 +124,39 @@ func pins(rel, body string, args map[string]bool) []error {
 		}
 	}
 	return errs
+}
+
+// firstPin is the first digest or commit in line: a word of 64 or of 40 lowercase hex digits,
+// what `\b[0-9a-f]{64}\b|\b[0-9a-f]{40}\b` finds. Read without a regexp: the gate reads every line
+// of a repository, and under the race detector that regexp made it slower than the tests it
+// runs beside.
+func firstPin(line string) string {
+	for i := 0; i < len(line); {
+		if !isWord(line[i]) {
+			i++
+			continue
+		}
+		j, hex := i, true
+		for ; j < len(line) && isWord(line[j]); j++ {
+			hex = hex && ('0' <= line[j] && line[j] <= '9' || 'a' <= line[j] && line[j] <= 'f')
+		}
+		if hex && (j-i == 64 || j-i == 40) {
+			return line[i:j]
+		}
+		i = j
+	}
+	return ""
+}
+
+// isWord is whether c is a character of a word, as the regexp package's \b says.
+func isWord(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '_'
+}
+
+// binary is whether body is not text: a NUL in its first 8 KiB, as git and grep decide it. An
+// image's bytes are nobody's pin and nobody's read.
+func binary(body string) bool {
+	return strings.IndexByte(body[:min(len(body), 8<<10)], 0) >= 0
 }
 
 // files is every file of the repository a pin could be written or read in: what git tracks, and
@@ -161,7 +197,9 @@ func (g Gate) files() (map[string]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("versions: %w", err)
 		}
-		out[rel] = string(raw)
+		if !binary(string(raw)) {
+			out[rel] = string(raw)
+		}
 	}
 	return out, nil
 }

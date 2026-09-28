@@ -105,3 +105,21 @@ func TestTheGateSaysWhereAPinIsNotVersionsYAMLs(t *testing.T) {
 		})
 	}
 }
+
+// The gate finds a digest or a commit where the regexp it replaced did, and nowhere else.
+func FuzzFirstPinIsTheRegexps(f *testing.F) {
+	re := regexp.MustCompile(`\b[0-9a-f]{64}\b|\b[0-9a-f]{40}\b`)
+	for _, s := range []string{
+		"FROM golang@sha256:" + strings.Repeat("a", 64),
+		"uses: actions/checkout@" + strings.Repeat("b", 40) + " # v5",
+		strings.Repeat("c", 41), strings.Repeat("d", 64) + "x", "é" + strings.Repeat("e", 40),
+		strings.Repeat("A", 40), "_" + strings.Repeat("f", 40), strings.Repeat("0", 40) + "-" + strings.Repeat("1", 64),
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, line string) {
+		if got, want := firstPin(line), re.FindString(line); got != want {
+			t.Errorf("%q: firstPin %q, the regexp %q", line, got, want)
+		}
+	})
+}
