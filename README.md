@@ -1,5 +1,7 @@
 # go-tools
 
+[![CI](https://github.com/spin-stack/go-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/spin-stack/go-tools/actions/workflows/ci.yml)
+
 The Go the spin-stack repositories build with, and hold their code to: tools a repository runs
 from its go.mod (`go tool <name>`), each a package with a command beside it. Nothing here is
 linked into what any of them ships but versions' reading half, which spin's binaries use to read
