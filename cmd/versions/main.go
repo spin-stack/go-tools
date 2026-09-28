@@ -20,6 +20,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spin-stack/go-tools/versions"
+	"github.com/spin-stack/go-tools/versions/upstream"
 )
 
 func main() {
@@ -139,7 +140,7 @@ func bump(ctx context.Context, v *versions.Versions, file string, names []string
 	if err != nil {
 		return err
 	}
-	e, out, err := v.Bump(ctx, was.Name, version)
+	e, out, err := upstream.Bump(ctx, v, was.Name, version)
 	if err != nil {
 		return err
 	}
@@ -171,7 +172,7 @@ func check(ctx context.Context, v *versions.Versions) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tPINNED\tNEWEST\t")
 	behind := 0
-	for _, st := range versions.Check(ctx, v) {
+	for _, st := range upstream.Check(ctx, v) {
 		mark := ""
 		if st.Behind {
 			mark, behind = "behind", behind+1

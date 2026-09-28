@@ -1,4 +1,8 @@
-package versions
+// Package upstream is where each entry of a versions.yaml stands against what it pins: the newest
+// its track finds, the pin of a version, and a bump. It is the half of versions that reaches the
+// network and runs git and docker, so that a program which embeds its versions.yaml links only
+// the half that reads it.
+package upstream
 
 import (
 	"bufio"
@@ -18,6 +22,7 @@ import (
 	"time"
 
 	"github.com/spin-stack/go-tools/internal/fetch"
+	"github.com/spin-stack/go-tools/versions"
 )
 
 // errFollows is an entry whose newest version is another's to say: a person reads it there.
@@ -25,7 +30,7 @@ var errFollows = errors.New("versions: follows another")
 
 // Newest is the version check says e could be at: the same for an image tracked by its digest,
 // or a branch, whose pin is what moves.
-func Newest(ctx context.Context, e Entry) (string, error) {
+func Newest(ctx context.Context, e versions.Entry) (string, error) {
 	kind, arg, _ := strings.Cut(e.Track, " ")
 	switch kind {
 	case "github-release":
@@ -50,7 +55,7 @@ func Newest(ctx context.Context, e Entry) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if e.Kind != Download {
+		if e.Kind != versions.Download {
 			return tags[0], nil
 		}
 		return newestPublished(ctx, e, tags)
@@ -79,16 +84,16 @@ func Newest(ctx context.Context, e Entry) (string, error) {
 
 // Resolve is the pin of e at version: an image's digest, a tag's or a branch's commit, a
 // download's sha256.
-func Resolve(ctx context.Context, e Entry, version string) (string, error) {
+func Resolve(ctx context.Context, e versions.Entry, version string) (string, error) {
 	e.Version = version
 	switch e.Kind {
-	case Image:
+	case versions.Image:
 		out, err := run(ctx, "docker", "buildx", "imagetools", "inspect", e.Source+":"+version, "--format", "{{.Manifest.Digest}}")
 		if err != nil {
 			return "", err
 		}
 		return strings.TrimSpace(out), nil
-	case Git:
+	case versions.Git:
 		out, err := run(ctx, "git", "ls-remote", e.Source,
 			"refs/tags/"+version, "refs/tags/"+version+"^{}", "refs/heads/"+version)
 		if err != nil {
@@ -107,9 +112,9 @@ func Resolve(ctx context.Context, e Entry, version string) (string, error) {
 			return "", fmt.Errorf("versions: %s has no tag or branch %s", e.Source, version)
 		}
 		return pin, nil
-	case Download:
+	case versions.Download:
 		return sha256Of(ctx, e.URL())
-	case Date, PyPI:
+	case versions.Date, versions.PyPI, versions.Module:
 		return "", nil
 	}
 	return "", fmt.Errorf("versions: %s is a %s, which nothing resolves", e.Name, e.Kind)
@@ -117,27 +122,27 @@ func Resolve(ctx context.Context, e Entry, version string) (string, error) {
 
 // Bump is v's file with name pinned at version - the newest its track finds when version is "" -
 // and the entry as that file has it. Nothing is written: that is the caller's.
-func (v *Versions) Bump(ctx context.Context, name, version string) (Entry, []byte, error) {
+func Bump(ctx context.Context, v *versions.Versions, name, version string) (versions.Entry, []byte, error) {
 	e, err := v.Get(name)
 	if err != nil {
-		return Entry{}, nil, err
+		return versions.Entry{}, nil, err
 	}
 	// A new commit with the old archive's sum is a build that fails on the checksum, at best.
 	if e.Archive != "" {
-		return Entry{}, nil, fmt.Errorf("versions: %s's archive is what a build's git writes of the commit, so it is bumped by hand: see its note", name)
+		return versions.Entry{}, nil, fmt.Errorf("versions: %s's archive is what a build's git writes of the commit, so it is bumped by hand: see its note", name)
 	}
 	if version == "" {
 		if version, err = Newest(ctx, e); err != nil {
-			return Entry{}, nil, fmt.Errorf("%w; name the version", err)
+			return versions.Entry{}, nil, fmt.Errorf("%w; name the version", err)
 		}
 	}
 	pin, err := Resolve(ctx, e, version)
 	if err != nil {
-		return Entry{}, nil, err
+		return versions.Entry{}, nil, err
 	}
 	out, err := v.Set(name, version, pin)
 	if err != nil {
-		return Entry{}, nil, err
+		return versions.Entry{}, nil, err
 	}
 	e.Version, e.Pin = version, pin
 	return e, out, nil
@@ -241,7 +246,7 @@ func releaseTags(ctx context.Context, repo string, withV bool) ([]string, error)
 // A tag is not a release. QEMU tagged v11.1.2 before download.qemu.org had its tarball
 // (2026-09-28), so check called qemu behind and a bump to the newest failed on a 404. What a
 // download entry builds from is the download, so that is what is asked.
-func newestPublished(ctx context.Context, e Entry, tags []string) (string, error) {
+func newestPublished(ctx context.Context, e versions.Entry, tags []string) (string, error) {
 	current, err := numbers(strings.TrimPrefix(e.Version, "v"))
 	if err != nil {
 		return "", fmt.Errorf("versions: %s's version %q: %w", e.Name, e.Version, err)
@@ -365,7 +370,7 @@ func kernelStable(ctx context.Context, version string) (string, error) {
 
 // Status is one entry as check finds it.
 type Status struct {
-	Entry  Entry
+	Entry  versions.Entry
 	Newest string
 	// Behind is a newer version, or the same one at another pin.
 	Behind bool
@@ -375,7 +380,7 @@ type Status struct {
 // Check is where each entry stands against its upstream. An image tracked by its digest, or a
 // commit tracked by its branch, is behind when the name now points at something else; a download
 // only when its version moves, since its pin is what that version was published as.
-func Check(ctx context.Context, v *Versions) []Status {
+func Check(ctx context.Context, v *versions.Versions) []Status {
 	var out []Status
 	for _, e := range v.Entries {
 		st := Status{Entry: e}
@@ -390,7 +395,7 @@ func Check(ctx context.Context, v *Versions) []Status {
 			st.Behind = newest != e.Version
 			// A file pinned to a commit of a busy branch: the branch moves several times a day and
 			// the file almost never. Behind is the file changing, not the commit.
-			if st.Behind && e.Kind == Download && strings.HasPrefix(e.Track, "commit ") {
+			if st.Behind && e.Kind == versions.Download && strings.HasPrefix(e.Track, "commit ") {
 				pin, err := Resolve(ctx, e, newest)
 				switch {
 				case err != nil:
@@ -399,7 +404,7 @@ func Check(ctx context.Context, v *Versions) []Status {
 					st.Behind, st.Note = false, "the branch moved; the file did not"
 				}
 			}
-			if !st.Behind && (e.Kind == Image || e.Kind == Git) {
+			if !st.Behind && (e.Kind == versions.Image || e.Kind == versions.Git) {
 				pin, err := Resolve(ctx, e, newest)
 				if err != nil {
 					st.Note = err.Error()

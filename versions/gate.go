@@ -72,7 +72,10 @@ func (g Gate) Check() error {
 	}
 	used := map[string]bool{}
 	for _, rel := range slices.Sorted(maps.Keys(files)) {
-		errs = append(errs, pins(rel, files[rel], args)...)
+		// A test's digests are fixtures, but what it reads of versions.yaml is read.
+		if !strings.HasSuffix(rel, "_test.go") {
+			errs = append(errs, pins(rel, files[rel], args)...)
+		}
 		for _, re := range reads {
 			for _, m := range re.FindAllStringSubmatch(files[rel], -1) {
 				for _, n := range strings.Fields(m[1]) {
@@ -118,8 +121,8 @@ func pins(rel, body string, args map[string]bool) []error {
 	return errs
 }
 
-// files is every file of the repository a pin could be written in. Tests are fixtures; _output
-// and the dot-directories but .github are what a build or a tool made.
+// files is every file of the repository a pin could be written or read in. _output and the
+// dot-directories but .github are what a build or a tool made.
 func (g Gate) files() (map[string]string, error) {
 	top, err := os.OpenRoot(g.Root)
 	if err != nil {
@@ -138,7 +141,7 @@ func (g Gate) files() (map[string]string, error) {
 			}
 			return nil
 		}
-		if !d.Type().IsRegular() || rel == File || slices.Contains(g.Elsewhere, rel) || strings.HasSuffix(rel, "_test.go") {
+		if !d.Type().IsRegular() || rel == File || slices.Contains(g.Elsewhere, rel) {
 			return nil
 		}
 		raw, err := top.ReadFile(rel)

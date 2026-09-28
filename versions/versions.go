@@ -34,6 +34,9 @@ const (
 	Date     Kind = "date"
 	// PyPI is a Python package by its version: a test's tool, never what a build ships.
 	PyPI Kind = "pypi"
+	// Module is a Go program `go install <source>@<version>` builds: pinned by its version,
+	// since the checksum database is what holds a module version to its bytes.
+	Module Kind = "module"
 )
 
 // Entry is one pinned input.
@@ -84,11 +87,15 @@ func (e Entry) Validate() error {
 		check(sum.MatchString(e.Pin), "the pin %q is not a sha256", e.Pin)
 	case Date:
 		check(e.Pin == "", "a date has no pin")
+	case Module:
+		check(e.Source != "" && !strings.Contains(e.Source, "://"), "a module with no package path")
+		check(strings.HasPrefix(e.Version, "v"), "a module's version %q is not a v-prefixed one", e.Version)
+		check(e.Pin == "", "a module is pinned by its version: the checksum database holds it to its bytes")
 	case PyPI:
 		check(e.Source != "", "a package with no name")
 		check(e.Pin == "", "a package is pinned by its version: pip has no one digest for its wheels")
 	default:
-		check(false, "kind %q is none of image, git, download, date, pypi", e.Kind)
+		check(false, "kind %q is none of image, git, download, date, module, pypi", e.Kind)
 	}
 	return errors.Join(errs...)
 }
@@ -118,7 +125,7 @@ func (e Entry) Args() map[string]string {
 		return args
 	case Download:
 		return map[string]string{prefix + "_VERSION": e.Version, prefix + "_SHA256": e.Pin}
-	case PyPI:
+	case PyPI, Module:
 		return map[string]string{prefix + "_VERSION": e.Version}
 	default:
 		return map[string]string{prefix: e.Version}
@@ -138,11 +145,12 @@ func Load(path string) (*Versions, error) {
 	if err != nil {
 		return nil, fmt.Errorf("versions: %w", err)
 	}
-	return parse(raw)
+	return Parse(raw)
 }
 
-// parse reads and validates raw: every entry whole, and no name twice.
-func parse(raw []byte) (*Versions, error) {
+// Parse reads and validates raw: every entry whole, and no name twice. It is how a program that
+// embeds versions.yaml reads it.
+func Parse(raw []byte) (*Versions, error) {
 	v := &Versions{raw: raw}
 	if err := yaml.Unmarshal(raw, &v.doc); err != nil {
 		return nil, fmt.Errorf("versions: %w", err)
@@ -220,7 +228,7 @@ func (v *Versions) Set(name, version, pin string) ([]byte, error) {
 	}
 	out := []byte(strings.Join(lines, ""))
 	// Read back: what the file now says is what was asked, of this entry and of every other.
-	reread, err := parse(out)
+	reread, err := Parse(out)
 	if err != nil {
 		return nil, err
 	}

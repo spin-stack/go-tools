@@ -16,7 +16,7 @@ func FuzzABumpChangesNothingElse(f *testing.F) {
 	f.Add([]byte("- {name: a, kind: date, version: '1', track: today}\n"))
 	f.Add([]byte("- name: a\n  kind: date\n  version: 1 # a comment\n  track: today\n"))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		v, err := parse(raw)
+		v, err := Parse(raw)
 		if err != nil {
 			return
 		}

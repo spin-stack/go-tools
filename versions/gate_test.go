@@ -68,6 +68,12 @@ func TestTheGateSaysWhereAPinIsNotVersionsYAMLs(t *testing.T) {
 		}, want: []string{"go's version: not written on one line"}},
 		{name: "a read of no entry", change: func(f map[string]string) { f["Taskfile.yml"] += "  - versions version rust\n" },
 			want: []string{"Taskfile.yml reads rust"}},
+		{name: "a test's fixture is not a pin, and what it reads is read",
+			change: func(f map[string]string) {
+				f["Taskfile.yml"] = "cmds:\n  - versions args kernel\n"
+				f["store_test.go"] = "const other = \"" + sha + "\"\nvar image = versions.MustGet(\"go\")\n"
+			},
+			reads: []*regexp.Regexp{regexp.MustCompile(`versions args((?: [a-z-]+)+)`), regexp.MustCompile(`\.MustGet\("([a-z0-9-]+)"\)`)}},
 		{name: "a repository's own way of reading", change: func(f map[string]string) { f["main.go"] = `v.Get("go")` },
 			reads: []*regexp.Regexp{regexp.MustCompile(`versions args((?: [a-z-]+)+)`), regexp.MustCompile(`\.Get\("([a-z0-9-]+)"\)`)}},
 	} {

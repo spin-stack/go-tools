@@ -7,9 +7,11 @@ ships.
 
 `versions.yaml` at a repository's root is every input it pins from outside it - a base image, an
 upstream tarball, a repository's commit, the day a package archive is read as of - written once.
-The package `versions` reads it, and a bump rewrites one entry's two lines and nothing else.
-`cmd/versions` is the command a Taskfile runs; `versions.Gate`, run from a test, is what fails
-when a pin is written anywhere else.
+The package `versions` reads it (`Load`, or `Parse` for a program that embeds the file), and
+`versions/upstream` says where each entry stands against its upstream and bumps one, rewriting
+its two lines and nothing else. The split is so that a program that ships its pins links only
+the reading half: no git, no docker, no network. `cmd/versions` is the command a Taskfile runs;
+`versions.Gate`, run from a test, is what fails when a pin is written anywhere else.
 
 A repository takes the command as a Go tool, at the version its go.mod pins:
 
@@ -36,8 +38,9 @@ func TestVersionsYAMLIsTheOnlyPin(t *testing.T) {
 The gate fails on a sha256 or a commit written outside versions.yaml (but in the files
 `Elsewhere` names, tests, `_output/`, dot-directories but `.github`, and an action a workflow
 runs by its commit), on a Dockerfile `ARG` that is a pin with a default or with no entry to hand
-it, and on an entry nothing reads. What reads an entry is `versions args|env|version|ref <name>...`
-or `{{.VERSIONS}} ...`; `Gate.Reads` says otherwise.
+it, on an entry nothing reads, and on one a bump could not rewrite in place. What reads an entry
+is `versions args|env|version|ref <name>...` or `{{.VERSIONS}} ...`, in any file, a test's
+included; `Gate.Reads` says otherwise.
 
 ### An entry
 
@@ -57,6 +60,7 @@ or `{{.VERSIONS}} ...`; `Gate.Reads` says otherwise.
 | `git` | a tag or a branch | the commit; `archive:` the sha256 of `git archive`, bumped by hand | `NAME_VERSION`, `NAME_COMMIT`, `NAME_ARCHIVE_SHA256` |
 | `download` | put in `source`'s `{version}` (and `{major}`) | the file's sha256 | `NAME_VERSION`, `NAME_SHA256` |
 | `date` | a point in time | none | `NAME` |
+| `module` | a Go program's version; `source` its package path, for `go install <source>@<version>` | none: the checksum database holds it | `NAME_VERSION` |
 | `pypi` | the package's version; `source` its name | none: a test's tool only | `NAME_VERSION` |
 
 | track | the newest is |
