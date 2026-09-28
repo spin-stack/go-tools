@@ -19,9 +19,9 @@ vars:
 tasks:
 
   test:
-    desc: The Go tests.
+    desc: The Go tests, with their coverage in coverage.out.
     cmds:
-      - go test ./...
+      - go test -covermode=atomic -coverprofile=coverage.out ./...
 
   lint:
     desc: golangci-lint with spin's rules (.golangci.yml), at spin's version, over the Go.

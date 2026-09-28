@@ -12,3 +12,13 @@
     task lint, with spin's .golangci.yml: spin's version (its versions.yaml's golangci-lint), so
     every repository is measured by the same linters. Bumped with spin, not ahead of it; the
     image's Go must be at least go.mod's.
+
+- name: task
+  kind: download
+  source: https://github.com/go-task/task/releases/download/v{version}/task_linux_amd64.tar.gz
+  version: 3.53.1
+  pin: a54a408f6861ff921f6e87774180db31bacd8c1e7c944ca696db9fea49a82fc7
+  track: github-release https://github.com/go-task/task
+  note: >-
+    the Task the CI workflow runs (go-task/setup-task, from go run ./cmd/versions env task). A
+    host brings its own.

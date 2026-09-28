@@ -1,2 +1,4 @@
 _output/
 .task/
+coverage.out
+coverage.html
