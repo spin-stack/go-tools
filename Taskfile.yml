@@ -1,8 +1,8 @@
 # go-tools - the Go the spin-stack repositories build with, and nothing any of them ships.
 #
-#   task test         the Go tests
-#   task lint         golangci-lint with spin's rules, at spin's version, and this repository's own
-#                     gates run on itself: ctxlife, testquality, refs
+#   task test         the Go tests, under the race detector
+#   task lint         golangci-lint with spin's rules, at spin's version, this repository's own
+#                     gates run on itself: ctxlife, testquality, refs, and actionlint over .github/
 #   task mutate       break what the change against BASE (origin/main) touched, and ask the tests
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
 
@@ -19,9 +19,9 @@ vars:
 tasks:
 
   test:
-    desc: The Go tests, with their coverage in coverage.out.
+    desc: The Go tests, under the race detector, with their coverage in coverage.out.
     cmds:
-      - go test -covermode=atomic -coverprofile=coverage.out ./...
+      - go test -race -covermode=atomic -coverprofile=coverage.out ./...
 
   lint:
     desc: golangci-lint with spin's rules (.golangci.yml), at spin's version, over the Go.
@@ -40,6 +40,20 @@ tasks:
       - go run ./cmd/testquality ./...
       - go run ./cmd/refs
       - go run ./cmd/mutate -stale-exempts
+      - task: lint:workflows
+
+  lint:workflows:
+    desc: actionlint over .github/, and every action pinned by its commit.
+    cmds:
+      # -shellcheck= because actionlint runs whatever shellcheck is on PATH: a runner has one and
+      # a laptop may not, and a gate whose answer depends on the machine is not a gate.
+      - go run github.com/rhysd/actionlint/cmd/actionlint@$({{.VERSIONS}} version actionlint) -shellcheck=
+      # A tag is whatever its owner points it at; the comment is the version Dependabot moves.
+      - cmd: |
+          if grep -rnE '^\s*(- )?uses: [^./][^ ]*@' .github | grep -vE '@[0-9a-f]{40} # v[0-9]'; then
+            echo "an action above is used by a tag its owner can move: pin it by commit SHA, with '# vX.Y.Z' after it"
+            exit 1
+          fi
 
   mutate:
     desc: Break what the change against BASE touched and fail on an edit no test refuses (BASE=origin/main).

@@ -23,7 +23,10 @@ jobs:
     # hours without printing a failure.
     timeout-minutes: 15
     steps:
-      - uses: useblacksmith/checkout@v1 # v7.0.1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
+        with:
+          # task mutate diffs against the branch point, which a shallow clone does not have.
+          fetch-depth: 0
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -74,3 +77,20 @@ jobs:
           path: coverage.html
           retention-days: 7
           if-no-files-found: ignore
+
+      # The tests are green; this asks what they would have refused. On a pull request the diff is
+      # against what it merges into, on a push against what was there before.
+      - name: What this change broke, and whether a test noticed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            base="origin/$BASE_REF"
+          else
+            base="$BEFORE"
+          fi
+          git rev-parse --verify "$base^{commit}" >/dev/null 2>&1 || base=HEAD~1
+          task mutate BASE="$base"

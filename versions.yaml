@@ -13,6 +13,13 @@
     every repository is measured by the same linters. Bumped with spin, not ahead of it; the
     image's Go must be at least go.mod's.
 
+- name: actionlint
+  kind: module
+  source: github.com/rhysd/actionlint/cmd/actionlint
+  version: v1.7.12
+  track: github-release https://github.com/rhysd/actionlint
+  note: task lint:workflows, the only thing that reads .github/ before GitHub does. spin's version.
+
 - name: task
   kind: download
   source: https://github.com/go-task/task/releases/download/v{version}/task_linux_amd64.tar.gz
