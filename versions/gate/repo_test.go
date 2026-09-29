@@ -1,4 +1,4 @@
-package versions
+package gate
 
 import "testing"
 
@@ -6,7 +6,7 @@ import "testing"
 // README's entries and commands, and the gate's own tests, are examples of the format, not pins
 // of this repository's.
 func TestThisRepositoryPassesTheGate(t *testing.T) {
-	g := Gate{Root: "..", Elsewhere: []string{"go.sum", "README.md", "versions/gate_test.go", "versions/testdata/"}}
+	g := Gate{Root: "../..", Elsewhere: []string{"go.sum", "README.md", "versions/gate/gate_test.go", "versions/testdata/"}}
 	if err := g.Check(); err != nil {
 		t.Error(err)
 	}
