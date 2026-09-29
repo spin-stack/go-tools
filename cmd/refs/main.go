@@ -23,11 +23,10 @@ func main() {
 	allowPath := flag.String("allow", "", "references made on purpose to something that is not here (none by default)")
 	pathspecs := flag.String("files", "AGENTS.md CLAUDE.md */AGENTS.md */CLAUDE.md",
 		"the prose to read, as git pathspecs separated by spaces: a tracked file one names is read")
-	root := flag.String("root", ".", "repository root")
 	taskExe := flag.String("task", taskExeFromEnv(), "the task binary to ask for names")
 	flag.Parse()
 
-	if err := run(*root, *allowPath, strings.Fields(*pathspecs), *taskExe); err != nil {
+	if err := run(".", *allowPath, strings.Fields(*pathspecs), *taskExe); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
