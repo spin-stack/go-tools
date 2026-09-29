@@ -88,11 +88,31 @@ func TestEachAskedTestIsCountedToItsPackage(t *testing.T) {
 	if got := find("example.com/b", "TestB"); got.N != 1 || got.Took != 100*time.Millisecond {
 		t.Errorf("TestB: %+v, want example.com/b's", got)
 	}
+}
+
+// The report is the longest first, and of two tests that took as long, in their names' order;
+// no entry is of no test.
+func TestTheTestsAreTheLongestFirst(t *testing.T) {
+	countTests("p/fast", []byte("--- PASS: TestQuick (0.01s)\n"))
+	countTests("p/tie", []byte("--- PASS: TestZ (4.00s)\n--- PASS: TestY (4.00s)\n"))
 	costs := TestCosts()
-	for i := 1; i < len(costs); i++ {
-		if costs[i].Took > costs[i-1].Took {
+	var y, z int
+	for i, c := range costs {
+		if c.Test == "" {
+			t.Errorf("an entry of no test: %v", costs)
+		}
+		if i > 0 && c.Took > costs[i-1].Took {
 			t.Errorf("tests are not the longest first: %v", costs)
 		}
+		switch {
+		case c.Package == "p/tie" && c.Test == "TestY":
+			y = i
+		case c.Package == "p/tie" && c.Test == "TestZ":
+			z = i
+		}
+	}
+	if y > z {
+		t.Errorf("of two tests that took as long, TestZ came before TestY: %v", costs)
 	}
 }
 

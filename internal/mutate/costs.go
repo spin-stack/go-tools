@@ -172,6 +172,7 @@ func countTests(pkg string, out []byte) {
 	for line := range strings.Lines(string(out)) {
 		line = strings.TrimRight(line, "\r\n")
 		if m := testEnd.FindStringSubmatch(line); m != nil {
+			// mutate-exempt: a bit size other than 32 is 64.
 			seconds, _ := strconv.ParseFloat(m[2], 64) // the pattern's digits and point
 			ran = append(ran, TestCost{Test: m[1], Took: time.Duration(seconds * float64(time.Second))})
 			continue
