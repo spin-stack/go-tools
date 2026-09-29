@@ -63,8 +63,8 @@ var (
 	sum    = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
-// Validate is the entry whole and its pin in its kind's form.
-func (e Entry) Validate() error {
+// validate is the entry whole and its pin in its kind's form.
+func (e Entry) validate() error {
 	var errs []error
 	check := func(ok bool, format string, args ...any) {
 		if !ok {
@@ -169,7 +169,7 @@ func Parse(raw []byte) (*Versions, error) {
 			errs = append(errs, fmt.Errorf("versions: %s is there twice", e.Name))
 		}
 		seen[e.Name] = true
-		errs = append(errs, e.Validate())
+		errs = append(errs, e.validate())
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
@@ -197,7 +197,7 @@ func (v *Versions) Set(name, version, pin string) ([]byte, error) {
 		return nil, err
 	}
 	e.Version, e.Pin = version, pin
-	if err := e.Validate(); err != nil {
+	if err := e.validate(); err != nil {
 		return nil, err
 	}
 	lines := strings.SplitAfter(string(v.raw), "\n")
