@@ -49,11 +49,11 @@ func TestTheNewestIsWhatThePageLinksTo(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	e := versions.Entry{Name: "icons", Source: "https://cdn/{version}/Icon-package_{version}.zip", Track: "page " + srv.URL}
-	if got, err := Newest(t.Context(), e); err != nil || got != "07312026.abc" {
-		t.Errorf("Newest = %q, %v", got, err)
+	if got, err := newest(t.Context(), e); err != nil || got != "07312026.abc" {
+		t.Errorf("newest = %q, %v", got, err)
 	}
 	e.Source = "https://cdn/Other_{version}.zip"
-	if _, err := Newest(t.Context(), e); err == nil {
+	if _, err := newest(t.Context(), e); err == nil {
 		t.Error("a page that links to no such file said a version")
 	}
 }
@@ -142,7 +142,7 @@ func TestACommitTrackedFileIsBehindOnlyWhenItChanged(t *testing.T) {
 	defer srv.Close()
 	e := versions.Entry{Name: "check-config", Kind: versions.Download, Source: srv.URL + "/{version}/check-config.sh",
 		Version: first, Track: "commit " + repo + " master"}
-	pin, err := Resolve(t.Context(), e, first)
+	pin, err := resolve(t.Context(), e, first)
 	if err != nil {
 		t.Fatal(err)
 	}
