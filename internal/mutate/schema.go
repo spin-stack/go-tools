@@ -378,7 +378,7 @@ func Ask(bin, dir string, id int, timeout string, only []string) (Outcome, strin
 	}
 	cmd := exec.Command(bin, args...) //nolint:gosec // a test binary this run built
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), switchEnv+"="+strconv.Itoa(id))
+	cmd.Env = testEnv(switchEnv + "=" + strconv.Itoa(id))
 	out, err := combined("schema: run one edit", cmd)
 	if err != nil {
 		return Killed, string(out)
