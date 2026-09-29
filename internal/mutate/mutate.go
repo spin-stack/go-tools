@@ -719,6 +719,7 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		}
 		cmd := exec.Command("go", args...) //nolint:gosec // go test over this repository's packages
 		cmd.Dir = set.dir
+		cmd.Env = testEnv()
 		out, err := combined(set.what, cmd)
 		said.Write(out)
 		if err == nil {

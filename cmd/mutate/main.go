@@ -83,6 +83,7 @@ func main() {
 		os.Exit(2)
 	}
 
+	mutate.Share(*jobs)
 	started := time.Now()
 	t := runAll(chosen, importers, *timeout, *jobs)
 	reportCosts(time.Since(started))

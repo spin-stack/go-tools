@@ -110,6 +110,7 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 			run := exec.Command(bin, "-test.run", "^"+test+"$", "-test.count=1", //nolint:gosec // the binary this built
 				"-test.timeout", timeout, "-test.coverprofile", profile)
 			run.Dir = dir
+			run.Env = testEnv()
 			// A failure here is the package's own tests' to report, not this gate's; what this
 			// gate does with it is ask the test about no edit, since it fails whatever the edit -
 			// and say so, since an edit only it reaches then reads as one nothing holds.
