@@ -688,13 +688,14 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		dir  string
 		pkgs []string
 		only []string
+		what string // what its process is counted under
 	}
 	var runs []testRun
 	if tests && (a.Reaching == nil || len(a.Reaching) > 0) {
-		runs = append(runs, testRun{dir: dir, pkgs: []string{"."}, only: a.Reaching})
+		runs = append(runs, testRun{dir: dir, pkgs: []string{"."}, only: a.Reaching, what: "alone: build and run the package's tests"})
 	}
 	if len(a.Importers) > 0 {
-		runs = append(runs, testRun{pkgs: a.Importers})
+		runs = append(runs, testRun{pkgs: a.Importers, what: "alone: build and run the importers' tests"})
 	}
 	var said strings.Builder
 	for _, set := range runs {
@@ -718,11 +719,7 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		}
 		cmd := exec.Command("go", args...) //nolint:gosec // go test over this repository's packages
 		cmd.Dir = set.dir
-		what := "alone: build and run the package's tests"
-		if set.dir == "" {
-			what = "alone: build and run the importers' tests"
-		}
-		out, err := combined(what, cmd)
+		out, err := combined(set.what, cmd)
 		said.Write(out)
 		if err == nil {
 			continue
