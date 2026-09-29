@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -53,5 +54,61 @@ func TestAProcessIsCountedUnderWhatItWasFor(t *testing.T) {
 		if costs[i].CPU > costs[i-1].CPU {
 			t.Errorf("costs are not the most CPU first: %v", costs)
 		}
+	}
+}
+
+// A test's runs are added to its package's: the package asked, or, for a go test over several,
+// the one go test names after them. Subtests are their test's, and a line that only looks like
+// an end is not one.
+func TestEachAskedTestIsCountedToItsPackage(t *testing.T) {
+	find := func(pkg, test string) TestCost {
+		for _, c := range TestCosts() {
+			if c.Package == pkg && c.Test == test {
+				return c
+			}
+		}
+		return TestCost{}
+	}
+	countTests("p/one", []byte("=== RUN   TestSlow\n    --- PASS: TestSlow/sub (0.50s)\n--- PASS: TestSlow (1.50s)\n--- FAIL: TestFast (0.25s)\nFAIL\n"))
+	countTests("p/one", []byte("--- PASS: TestSlow (2.00s)\r\nsaid: --- PASS: TestSlow (9.00s)\nPASS\n"))
+	countTests("", []byte("--- PASS: TestA (1.00s)\nok  \texample.com/a\t1.2s\n--- FAIL: TestB (0.10s)\nFAIL\texample.com/b\t0.3s\n"))
+
+	if got := find("p/one", "TestSlow"); got.N != 2 || got.Took != 3500*time.Millisecond {
+		t.Errorf("TestSlow: %+v, want asked twice for 3.5s", got)
+	}
+	if got := find("p/one", "TestFast"); got.N != 1 || got.Took != 250*time.Millisecond {
+		t.Errorf("TestFast: %+v", got)
+	}
+	if got := find("p/one", "TestSlow/sub"); got.N != 0 {
+		t.Errorf("a subtest was counted as a test: %+v", got)
+	}
+	if got := find("example.com/a", "TestA"); got.N != 1 || got.Took != time.Second {
+		t.Errorf("TestA: %+v, want example.com/a's", got)
+	}
+	if got := find("example.com/b", "TestB"); got.N != 1 || got.Took != 100*time.Millisecond {
+		t.Errorf("TestB: %+v, want example.com/b's", got)
+	}
+	costs := TestCosts()
+	for i := 1; i < len(costs); i++ {
+		if costs[i].Took > costs[i-1].Took {
+			t.Errorf("tests are not the longest first: %v", costs)
+		}
+	}
+}
+
+// A package is named by its directory from this module's root, however it was asked: by its
+// directory, relative or absolute, or by its import path.
+func TestAPackageIsNamedByItsDirectory(t *testing.T) {
+	abs, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, asked := range []string{".", abs, modulePath() + "/internal/mutate"} {
+		if got := packageOf(asked); got != "internal/mutate" {
+			t.Errorf("%s is named %q, want internal/mutate", asked, got)
+		}
+	}
+	if got := packageOf("example.com/elsewhere"); got != "example.com/elsewhere" {
+		t.Errorf("another module's package is named %q", got)
 	}
 }

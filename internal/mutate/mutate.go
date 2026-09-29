@@ -710,7 +710,7 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		}
 		// -p 1: this run is one of the caller's budget of test processes, and go test over several
 		// packages would otherwise run a binary per core, each with a PostgreSQL of its own.
-		args := append(append([]string{"test"}, set.pkgs...), "-p", "1", "-count=1", "-failfast", "-timeout", timeout)
+		args := append(append([]string{"test"}, set.pkgs...), "-p", "1", "-count=1", "-failfast", "-v", "-timeout", timeout)
 		if a.Overlay != "" {
 			args = append(args, "-overlay", a.Overlay)
 		}
@@ -721,6 +721,7 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		cmd.Dir = set.dir
 		cmd.Env = testEnv()
 		out, err := combined(set.what, cmd)
+		countTests("", out)
 		said.Write(out)
 		if err == nil {
 			continue

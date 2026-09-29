@@ -1,8 +1,13 @@
 package mutate
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -70,4 +75,112 @@ func account(what string, cmd *exec.Cmd, wall time.Duration) {
 	c.N++
 	c.Wall += wall
 	c.CPU += cpu
+}
+
+// TestCost is what one test cost a run's asking: how many times an edit was put to it, and how
+// long it ran in all. A test that starts a control plane and is asked of every edit in the code it
+// reaches is where a gate's time goes, and the test, not the gate, is what to make faster.
+type TestCost struct {
+	Package string
+	Test    string
+	N       int
+	Took    time.Duration
+}
+
+var testCosts = struct {
+	mu sync.Mutex
+	by map[[2]string]*TestCost
+}{by: map[[2]string]*TestCost{}}
+
+// TestCosts is every test asked so far, the longest in all first.
+func TestCosts() []TestCost {
+	testCosts.mu.Lock()
+	defer testCosts.mu.Unlock()
+	out := make([]TestCost, 0, len(testCosts.by))
+	for _, c := range testCosts.by {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Took != out[j].Took {
+			return out[i].Took > out[j].Took
+		}
+		return out[i].Package+" "+out[i].Test < out[j].Package+" "+out[j].Test
+	})
+	return out
+}
+
+var (
+	// A top-level test's end, as -test.v says it; a subtest's is indented.
+	testEnd = regexp.MustCompile(`^--- (?:PASS|FAIL|SKIP): (Test\S*) \(([0-9.]+)s\)$`)
+	// go test's line for a package it ran, after its tests' lines.
+	packageEnd = regexp.MustCompile(`^(?:ok|FAIL)\s+(\S+)\s`)
+)
+
+// modulePath is the import path of the module this runs in, "" outside one.
+var modulePath = sync.OnceValue(func() string {
+	out, err := output("listing", exec.Command("go", "list", "-m", "-f", "{{.Path}}"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+})
+
+// packageOf is how the report names a package: its directory from its module's root, whether it
+// was asked by a directory, relative or not, or named by go test by its import path.
+func packageOf(dirOrPath string) string {
+	if rel, ok := strings.CutPrefix(dirOrPath, modulePath()+"/"); ok && modulePath() != "" {
+		return rel
+	}
+	if info, err := os.Stat(dirOrPath); err != nil || !info.IsDir() {
+		return dirOrPath // an import path outside this module
+	}
+	abs, err := filepath.Abs(dirOrPath)
+	if err != nil {
+		return dirOrPath
+	}
+	root, err := moduleRoot(abs)
+	if err != nil {
+		return dirOrPath
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return dirOrPath
+	}
+	return filepath.ToSlash(rel)
+}
+
+// countTests adds the tests out says ran to their package's: pkg's, or where pkg is "" - a go test
+// over several packages - the one go test's line after them names.
+func countTests(pkg string, out []byte) {
+	var ran []TestCost
+	add := func(pkg string) {
+		pkg = packageOf(pkg)
+		testCosts.mu.Lock()
+		defer testCosts.mu.Unlock()
+		for _, r := range ran {
+			key := [2]string{pkg, r.Test}
+			c := testCosts.by[key]
+			if c == nil {
+				c = &TestCost{Package: pkg, Test: r.Test}
+				testCosts.by[key] = c
+			}
+			c.N++
+			c.Took += r.Took
+		}
+		ran = nil
+	}
+	for line := range strings.Lines(string(out)) {
+		line = strings.TrimRight(line, "\r\n")
+		if m := testEnd.FindStringSubmatch(line); m != nil {
+			seconds, _ := strconv.ParseFloat(m[2], 64) // the pattern's digits and point
+			ran = append(ran, TestCost{Test: m[1], Took: time.Duration(seconds * float64(time.Second))})
+			continue
+		}
+		if m := packageEnd.FindStringSubmatch(line); pkg == "" && m != nil {
+			add(m[1])
+		}
+	}
+	if pkg != "" {
+		add(pkg)
+	}
 }

@@ -86,4 +86,16 @@ func TestEveryTestProcessIsHeldToItsShare(t *testing.T) {
 	if outcome, out := Run(Mutation{File: filepath.Join(dir, "code.go")}, Asked{Timeout: "1m"}); outcome != Survived {
 		t.Errorf("an edit built alone was asked on every core: %s", out)
 	}
+
+	// And each says which tests it ran, under the package's directory from its module's root:
+	// the schema binary was asked by the directory, go test named the import path.
+	asked := map[string]int{}
+	for _, c := range TestCosts() {
+		if c.Test == "TestHeldToOneCore" {
+			asked[c.Package] = c.N
+		}
+	}
+	if asked["."] != 1 || asked["example.com/oneproc"] != 1 {
+		t.Errorf("the asked tests were not counted to their packages: %v", asked)
+	}
 }
