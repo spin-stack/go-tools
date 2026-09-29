@@ -28,9 +28,9 @@ import (
 // errFollows is an entry whose newest version is another's to say: a person reads it there.
 var errFollows = errors.New("versions: follows another")
 
-// Newest is the version check says e could be at: the same for an image tracked by its digest,
+// newest is the version check says e could be at: the same for an image tracked by its digest,
 // or a branch, whose pin is what moves.
-func Newest(ctx context.Context, e versions.Entry) (string, error) {
+func newest(ctx context.Context, e versions.Entry) (string, error) {
 	kind, arg, _ := strings.Cut(e.Track, " ")
 	switch kind {
 	case "github-release":
@@ -82,9 +82,9 @@ func Newest(ctx context.Context, e versions.Entry) (string, error) {
 	return "", fmt.Errorf("versions: %s tracks %q, which check does not know", e.Name, e.Track)
 }
 
-// Resolve is the pin of e at version: an image's digest, a tag's or a branch's commit, a
+// resolve is the pin of e at version: an image's digest, a tag's or a branch's commit, a
 // download's sha256.
-func Resolve(ctx context.Context, e versions.Entry, version string) (string, error) {
+func resolve(ctx context.Context, e versions.Entry, version string) (string, error) {
 	e.Version = version
 	switch e.Kind {
 	case versions.Image:
@@ -132,11 +132,11 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 		return versions.Entry{}, nil, fmt.Errorf("versions: %s's archive is what a build's git writes of the commit, so it is bumped by hand: see its note", name)
 	}
 	if version == "" {
-		if version, err = Newest(ctx, e); err != nil {
+		if version, err = newest(ctx, e); err != nil {
 			return versions.Entry{}, nil, fmt.Errorf("%w; name the version", err)
 		}
 	}
-	pin, err := Resolve(ctx, e, version)
+	pin, err := resolve(ctx, e, version)
 	if err != nil {
 		return versions.Entry{}, nil, err
 	}
@@ -149,7 +149,7 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 }
 
 // Pinned is e's download, refused past limit bytes, and unless its SHA-256 is e's pin: the check
-// beside the Resolve that wrote the pin.
+// beside the resolve that wrote the pin.
 func Pinned(ctx context.Context, e versions.Entry, limit int64) ([]byte, error) {
 	raw, err := fetch.Bytes(ctx, e.URL(), limit)
 	if err != nil {
@@ -398,19 +398,19 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 	var out []Status
 	for _, e := range v.Entries {
 		st := Status{Entry: e}
-		newest, err := Newest(ctx, e)
+		latest, err := newest(ctx, e)
 		switch {
 		case errors.Is(err, errFollows):
 			st.Note = "follows " + strings.TrimPrefix(e.Track, "follows ") + ": " + e.Note
 		case err != nil:
 			st.Note = err.Error()
 		default:
-			st.Newest = newest
-			st.Behind = newest != e.Version
+			st.Newest = latest
+			st.Behind = latest != e.Version
 			// A file pinned to a commit of a busy branch: the branch moves several times a day and
 			// the file almost never. Behind is the file changing, not the commit.
 			if st.Behind && e.Kind == versions.Download && strings.HasPrefix(e.Track, "commit ") {
-				pin, err := Resolve(ctx, e, newest)
+				pin, err := resolve(ctx, e, latest)
 				switch {
 				case err != nil:
 					st.Note = err.Error()
@@ -419,7 +419,7 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 				}
 			}
 			if !st.Behind && (e.Kind == versions.Image || e.Kind == versions.Git) {
-				pin, err := Resolve(ctx, e, newest)
+				pin, err := resolve(ctx, e, latest)
 				if err != nil {
 					st.Note = err.Error()
 				} else if pin != e.Pin {
