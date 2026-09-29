@@ -39,11 +39,11 @@ func TestACapIsSpreadOverTheChangedFunctions(t *testing.T) {
 }
 
 // Every edit is put to the tests and counted once, as the tests answered it, and each is said as
-// it comes: Double's refused by TestDouble, Half's let through by a test that checks nothing, and
+// it comes: Double's refused by TestDouble, Half's and Sign's let through by tests that check neither, and
 // a package with no tests named rather than counted as a survivor.
 func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 	dir := refuses(t)
-	plan, err := mutate.Plan(filepath.Join(dir, "code.go"), map[int]bool{4: true, 8: true})
+	plan, err := mutate.Plan(filepath.Join(dir, "code.go"), map[int]bool{4: true, 8: true, 13: true, 14: true})
 	require.NoError(t, err)
 
 	bare := t.TempDir()
@@ -61,21 +61,20 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 	tally, err := mutate.RunAll(chosen, nil, "2m", 2, &said)
 	require.NoError(t, err)
 
-	var double, half int
+	var double, unchecked int
 	for _, m := range plan {
-		switch m.Func {
-		case "Double":
+		if m.Func == "Double" {
 			double++
-		case "Half":
-			half++
+		} else {
+			unchecked++
 		}
 	}
 	require.Positive(t, double)
-	require.Positive(t, half)
+	require.GreaterOrEqual(t, unchecked, 2, "the order of the survivors needs two of them")
 	assert.Equal(t, double, tally.Killed, "Double's edits refused: %s", said.String())
-	assert.Len(t, tally.Survived, half, "Half's edits let through: %s", said.String())
+	assert.Len(t, tally.Survived, unchecked, "Half's and Sign's edits let through: %s", said.String())
 	for _, m := range tally.Survived {
-		assert.Equal(t, "Half", m.Func)
+		assert.NotEqual(t, "Double", m.Func)
 	}
 	assert.True(t, slices.IsSortedFunc(tally.Survived, func(a, b mutate.Mutation) int { return strings.Compare(a.String(), b.String()) }),
 		"the survivors are not in order: %v", tally.Survived)
@@ -83,7 +82,7 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 	assert.Equal(t, map[string]bool{bare: true}, tally.UntestedPackages)
 	assert.Zero(t, tally.Unbuildable)
 	assert.Equal(t, double, strings.Count(said.String(), "  refused   "))
-	assert.Equal(t, half, strings.Count(said.String(), "  SURVIVED  "))
+	assert.Equal(t, unchecked, strings.Count(said.String(), "  SURVIVED  "))
 	assert.Contains(t, said.String(), fmt.Sprintf("%s: %d edit(s) in one binary, 0 built alone", dir, len(plan)),
 		"the package's edits were not built into its schema")
 	assert.NotContains(t, said.String(), " took ", "a run under a minute was said to be slow")
@@ -124,4 +123,12 @@ func TestAPackageWithNoTestsIsAskedThroughItsImporters(t *testing.T) {
 	assert.Equal(t, double, tally.Killed, "Double's edits refused by the importer: %s", said.String())
 	assert.Len(t, tally.Survived, half, "Half's edits, which no importer's test reaches: %s", said.String())
 	assert.Zero(t, tally.Untested, "a package whose importers have tests was said untested")
+}
+
+// An edit the run cannot even build a way to ask is an error, not an outcome: a file that is not
+// there has no overlay.
+func TestAnEditThatCannotBeAskedIsAnError(t *testing.T) {
+	gone := mutate.Mutation{ID: 1, File: filepath.Join(t.TempDir(), "gone.go"), Func: "F", What: "+ becomes -"}
+	_, err := mutate.RunAll([]mutate.Mutation{gone}, nil, "1m", 1, &strings.Builder{})
+	assert.Error(t, err)
 }
