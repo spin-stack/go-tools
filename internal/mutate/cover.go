@@ -70,7 +70,7 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 	build := exec.Command("go", "test", "-c", "-cover", "-covermode=set", "-o", bin, ".")
 	build.Dir = dir
 	slots <- struct{}{}
-	out, err := build.CombinedOutput()
+	out, err := combined("cover: build the package's tests", build)
 	<-slots
 	if err != nil {
 		return nil, fmt.Errorf("mutate: building %s's tests with coverage: %w: %s", dir, err, out)
@@ -80,13 +80,13 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 	}
 	name := exec.Command("go", "list", "-f", "{{.ImportPath}}", ".")
 	name.Dir = dir
-	importPath, err := name.Output()
+	importPath, err := output("listing", name)
 	if err != nil {
 		return nil, fmt.Errorf("mutate: naming %s: %w", dir, err)
 	}
 	list := exec.Command(bin, "-test.list", ".*") //nolint:gosec // the binary this built
 	list.Dir = dir                                // mutate-exempt: listing runs no test, so where it runs changes nothing it says
-	listed, err := list.Output()
+	listed, err := output("listing", list)
 	if err != nil {
 		return nil, fmt.Errorf("mutate: listing %s's tests: %w", dir, err)
 	}
@@ -113,7 +113,7 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 			// A failure here is the package's own tests' to report, not this gate's; what this
 			// gate does with it is ask the test about no edit, since it fails whatever the edit -
 			// and say so, since an edit only it reaches then reads as one nothing holds.
-			said, runErr := run.CombinedOutput()
+			said, runErr := combined("cover: run one test", run)
 			failed := runErr != nil
 			if failed {
 				// mutate-exempt: how much of the failure is shown, not whether it is.
