@@ -1,8 +1,10 @@
 // Package versions is versions.yaml: every input a repository pins from outside it, in one file,
 // read by everything that uses one and rewritten one entry at a time by a bump.
 //
-// It is a build tool: what a repository ships does not import it. A pin decides what is built,
-// and the build checks what it fetched against the pin.
+// It is a build tool, and the one package here a repository ships: a program that carries its
+// pins embeds the file and reads it with Parse. Reading one runs nothing and reaches nothing; what
+// is behind and what a bump resolves is versions/upstream's. A pin decides what is built, and the
+// build checks what it fetched against the pin.
 package versions
 
 import (
