@@ -1,4 +1,4 @@
-package versions
+package gate
 
 import (
 	"os"
@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spin-stack/go-tools/versions"
 )
 
 // repo is a repository of files, rel to body.
@@ -36,7 +38,7 @@ func TestTheGateSaysWhereAPinIsNotVersionsYAMLs(t *testing.T) {
 	sha := strings.Repeat("c", 64)
 	good := func() map[string]string {
 		return map[string]string{
-			File: "- name: kernel\n  kind: download\n  source: https://x/{version}\n  version: '1'\n  pin: " + strings.Repeat("a", 64) +
+			versions.File: "- name: kernel\n  kind: download\n  source: https://x/{version}\n  version: '1'\n  pin: " + strings.Repeat("a", 64) +
 				"\n  track: kernel-stable\n- name: go\n  kind: image\n  source: golang\n  version: '1'\n  pin: sha256:" + strings.Repeat("b", 64) + "\n  track: go\n",
 			"Taskfile.yml":      "cmds:\n  - docker build $(go tool versions args kernel) .\n  - '{{.VERSIONS}} ref go'\n",
 			"kernel/Dockerfile": "ARG KERNEL_VERSION\nARG KERNEL_SHA256\nFROM scratch\n",
@@ -75,7 +77,7 @@ func TestTheGateSaysWhereAPinIsNotVersionsYAMLs(t *testing.T) {
 		{name: "an entry nothing reads", change: func(f map[string]string) { f["Taskfile.yml"] = "cmds: [true]\n" },
 			want: []string{"pins kernel, and nothing reads it", "pins go, and nothing reads it"}},
 		{name: "an entry a bump cannot rewrite in place", change: func(f map[string]string) {
-			f[File] = strings.Replace(f[File], "version: '1'\n  pin: sha256:", "version: >-\n    1\n  pin: sha256:", 1)
+			f[versions.File] = strings.Replace(f[versions.File], "version: '1'\n  pin: sha256:", "version: >-\n    1\n  pin: sha256:", 1)
 		}, want: []string{"go's version: not written on one line"}},
 		{name: "a read of no entry", change: func(f map[string]string) { f["Taskfile.yml"] += "  - versions version rust\n" },
 			want: []string{"Taskfile.yml reads rust"}},
@@ -122,4 +124,17 @@ func FuzzFirstPinIsTheRegexps(f *testing.F) {
 			t.Errorf("%q: firstPin %q, the regexp %q", line, got, want)
 		}
 	})
+}
+
+// A root git cannot list is refused in git's own words, not as a repository with nothing in it.
+func TestAGateOutsideARepositorySaysWhatGitSaid(t *testing.T) {
+	root := t.TempDir()
+	body := "- name: go\n  kind: image\n  source: golang\n  version: '1'\n  pin: sha256:" + strings.Repeat("b", 64) + "\n  track: go\n"
+	if err := os.WriteFile(filepath.Join(root, versions.File), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := Gate{Root: root}.Check()
+	if err == nil || !strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("err = %v, want git's word that this is no repository", err)
+	}
 }

@@ -1,6 +1,6 @@
 # Every input this repository pins, written once: README.md's "An entry" says what each field means,
 # `task versions` what is behind, `task bump NAME=<name>` moves one. It is read by the same
-# package it pins for, and held to it by the same gate (versions/repo_test.go).
+# package it pins for, and held to it by the same gate (versions/gate/repo_test.go).
 
 - name: golangci-lint
   kind: image

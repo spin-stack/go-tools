@@ -1,4 +1,6 @@
-package versions
+// Package gate holds a repository to its versions.yaml, from a test: a pin written anywhere else
+// fails it. It is apart from versions so that a program which embeds its pins does not link it.
+package gate
 
 import (
 	"errors"
@@ -11,6 +13,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/spin-stack/go-tools/versions"
 )
 
 // Gate holds a repository to its versions.yaml: a digest or a commit written anywhere else is a
@@ -48,7 +52,7 @@ var (
 
 // Check is every way the repository breaks the gate, joined; nil when it breaks none.
 func (g Gate) Check() error {
-	v, err := Load(filepath.Join(g.Root, File))
+	v, err := versions.Load(filepath.Join(g.Root, versions.File))
 	if err != nil {
 		return err
 	}
@@ -81,6 +85,7 @@ func (g Gate) Check() error {
 			errs = append(errs, pins(rel, files[rel], args)...)
 		}
 		for _, re := range reads {
+			// mutate-exempt: any n below zero is every match.
 			for _, m := range re.FindAllStringSubmatch(files[rel], -1) {
 				for _, n := range strings.Fields(m[1]) {
 					if _, err := v.Get(n); err != nil && !used[n] {
@@ -93,7 +98,7 @@ func (g Gate) Check() error {
 	}
 	for _, e := range v.Entries {
 		if !used[e.Name] {
-			errs = append(errs, fmt.Errorf("%s pins %s, and nothing reads it", File, e.Name))
+			errs = append(errs, fmt.Errorf("%s pins %s, and nothing reads it", versions.File, e.Name))
 		}
 	}
 	return errors.Join(errs...)
@@ -111,15 +116,16 @@ func pins(rel, body string, args map[string]bool) []error {
 		if m == "" || (strings.HasPrefix(rel, ".github/") && actionPin.MatchString(line)) {
 			continue
 		}
-		errs = append(errs, fmt.Errorf("%s:%d pins %s: it belongs in %s", rel, n, m, File))
+		errs = append(errs, fmt.Errorf("%s:%d pins %s: it belongs in %s", rel, n, m, versions.File))
 	}
 	if filepath.Base(rel) == "Dockerfile" || strings.HasSuffix(rel, ".Dockerfile") {
+		// mutate-exempt: any n below zero is every match.
 		for _, m := range pinArg.FindAllStringSubmatch(body, -1) {
 			if m[2] != "" {
-				errs = append(errs, fmt.Errorf("%s: ARG %s has a default; %s hands it in", rel, m[1], File))
+				errs = append(errs, fmt.Errorf("%s: ARG %s has a default; %s hands it in", rel, m[1], versions.File))
 			}
 			if !args[m[1]] {
-				errs = append(errs, fmt.Errorf("%s: ARG %s is no entry's: %s has nothing to hand it", rel, m[1], File))
+				errs = append(errs, fmt.Errorf("%s: ARG %s is no entry's: %s has nothing to hand it", rel, m[1], versions.File))
 			}
 		}
 	}
@@ -179,7 +185,7 @@ func (g Gate) files() (map[string]string, error) {
 	defer func() { _ = top.Close() }() // read-only
 	out := map[string]string{}
 	for rel := range strings.SplitSeq(strings.TrimSuffix(string(list), "\x00"), "\x00") {
-		if rel == "" || rel == File || g.exempt(rel) {
+		if rel == "" || rel == versions.File || g.exempt(rel) {
 			continue
 		}
 		info, err := top.Lstat(rel)

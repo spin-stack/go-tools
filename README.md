@@ -17,7 +17,7 @@ The package `versions` reads it (`Load`, or `Parse` for a program that embeds th
 its two lines and nothing else; `upstream.Pinned` is an entry's download, taken only when it is
 the bytes the entry pins. The split is so that a program that ships its pins links only
 the reading half: reading one runs nothing and reaches nothing. `cmd/versions` is the command a Taskfile runs;
-`versions.Gate`, run from a test, is what fails when a pin is written anywhere else.
+`gate.Gate` (`versions/gate`), run from a test, is what fails when a pin is written anywhere else.
 
 A repository takes the command as a Go tool, at the version its go.mod pins:
 
@@ -34,7 +34,7 @@ and holds itself to the file from a test:
 
 ```go
 func TestVersionsYAMLIsTheOnlyPin(t *testing.T) {
-	g := versions.Gate{Root: "..", Elsewhere: []string{"go.sum"}}
+	g := gate.Gate{Root: "..", Elsewhere: []string{"go.sum"}}
 	if err := g.Check(); err != nil {
 		t.Error(err)
 	}

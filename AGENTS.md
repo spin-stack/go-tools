@@ -9,7 +9,7 @@ spin-machine take it by the version their go.mod pins, and spin will.
   by all of them: it adds, it does not rename.
 - **Decisions are Go, and tested.** A track is a function with a test that needs no network.
 - **Comments say why.** Not what the line does, and never what it used to be.
-- **This repository pins with its own tool**: `versions.yaml`, held by `versions/repo_test.go`.
+- **This repository pins with its own tool**: `versions.yaml`, held by `versions/gate/repo_test.go`.
 
 | changed | run |
 |---|---|
