@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
-	"github.com/spin-stack/go-tools/testquality"
+	"github.com/spin-stack/go-tools/internal/testquality"
 )
 
 func TestTestsThatCannotFailAreFlagged(t *testing.T) {

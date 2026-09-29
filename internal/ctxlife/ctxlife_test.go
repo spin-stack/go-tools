@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/spin-stack/go-tools/ctxlife"
+	"github.com/spin-stack/go-tools/internal/ctxlife"
 )
 
 // Each case is a function body; the gate reports it or it does not. The first is the shape that

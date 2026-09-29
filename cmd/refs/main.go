@@ -16,7 +16,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/spin-stack/go-tools/refs"
+	"github.com/spin-stack/go-tools/internal/refs"
 )
 
 func main() {
