@@ -1,8 +1,10 @@
 package mutate_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -51,7 +53,7 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, untested)
 
-	chosen := append(plan, untested...)
+	chosen := slices.Concat(plan, untested)
 	for i := range chosen {
 		chosen[i].ID = i + 1
 	}
@@ -75,18 +77,51 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 	for _, m := range tally.Survived {
 		assert.Equal(t, "Half", m.Func)
 	}
+	assert.True(t, slices.IsSortedFunc(tally.Survived, func(a, b mutate.Mutation) int { return strings.Compare(a.String(), b.String()) }),
+		"the survivors are not in order: %v", tally.Survived)
 	assert.Equal(t, len(untested), tally.Untested)
 	assert.Equal(t, map[string]bool{bare: true}, tally.UntestedPackages)
 	assert.Zero(t, tally.Unbuildable)
 	assert.Equal(t, double, strings.Count(said.String(), "  refused   "))
 	assert.Equal(t, half, strings.Count(said.String(), "  SURVIVED  "))
-	assert.Contains(t, said.String(), dir+": ")
+	assert.Contains(t, said.String(), fmt.Sprintf("%s: %d edit(s) in one binary, 0 built alone", dir, len(plan)),
+		"the package's edits were not built into its schema")
+	assert.NotContains(t, said.String(), " took ", "a run under a minute was said to be slow")
 }
 
-// An edit the run cannot even build a way to ask is an error, not an outcome: a file that is not
-// there has no overlay.
-func TestAnEditThatCannotBeAskedIsAnError(t *testing.T) {
-	gone := mutate.Mutation{ID: 1, File: filepath.Join(t.TempDir(), "gone.go"), Func: "F", What: "+ becomes -"}
-	_, err := mutate.RunAll([]mutate.Mutation{gone}, nil, "1m", 1, &strings.Builder{})
-	assert.Error(t, err)
+// A package with no tests of its own is asked through the packages that import it, each built
+// once: Double's edits are refused by the importer's test and Half's, which it never calls, are not.
+func TestAPackageWithNoTestsIsAskedThroughItsImporters(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod":          "module example.com/imp\n\ngo 1.24\n",
+		"lib/lib.go":      "package lib\n\nfunc Double(n int) int {\n\treturn n + n\n}\n\nfunc Half(n int) int {\n\treturn n / 2\n}\n",
+		"use/use.go":      "package use\n\nimport \"example.com/imp/lib\"\n\nfunc Four() int { return lib.Double(2) }\n",
+		"use/use_test.go": "package use\n\nimport \"testing\"\n\nfunc TestFour(t *testing.T) {\n\tif Four() != 4 {\n\t\tt.Fatal(\"not four\")\n\t}\n}\n",
+		"also/also.go":    "package also\n\nimport \"example.com/imp/lib\"\n\nvar _ = lib.Half\n",
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, filepath.Dir(name)), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	t.Chdir(dir)
+	plan, err := mutate.Plan(filepath.Join("lib", "lib.go"), map[int]bool{4: true, 8: true})
+	require.NoError(t, err)
+	var double, half int
+	for i := range plan {
+		plan[i].ID = i + 1
+		if plan[i].Func == "Double" {
+			double++
+		} else {
+			half++
+		}
+	}
+	require.Positive(t, double)
+	require.Positive(t, half)
+
+	var said strings.Builder
+	tally, err := mutate.RunAll(plan, map[string][]string{"lib": {"./use", "./also"}}, "2m", 2, &said)
+	require.NoError(t, err)
+	assert.Equal(t, double, tally.Killed, "Double's edits refused by the importer: %s", said.String())
+	assert.Len(t, tally.Survived, half, "Half's edits, which no importer's test reaches: %s", said.String())
+	assert.Zero(t, tally.Untested, "a package whose importers have tests was said untested")
 }
