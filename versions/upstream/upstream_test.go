@@ -1,6 +1,8 @@
 package upstream
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -152,5 +154,33 @@ func TestACommitTrackedFileIsBehindOnlyWhenItChanged(t *testing.T) {
 	body = "a changed file"
 	if st := Check(t.Context(), &versions.Versions{Entries: []versions.Entry{e}})[0]; !st.Behind {
 		t.Errorf("the file changed, and check does not call it behind: %+v", st)
+	}
+}
+
+// A pinned download is answered only when it is the bytes its entry pins, and the refusal names
+// the entry.
+func TestAPinnedDownloadIsOnlyThePinnedBytes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("the package"))
+	}))
+	t.Cleanup(srv.Close)
+	sumOf := func(s string) string {
+		sum := sha256.Sum256([]byte(s))
+		return hex.EncodeToString(sum[:])
+	}
+	for _, tc := range []struct {
+		name, pin, wantErr string
+	}{
+		{name: "pinned", pin: sumOf("the package")},
+		{name: "another", pin: sumOf("another package"), wantErr: "another is not what versions.yaml pins"},
+	} {
+		e := versions.Entry{Name: tc.name, Kind: versions.Download, Source: srv.URL, Pin: tc.pin}
+		got, err := Pinned(t.Context(), e, 64)
+		switch {
+		case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.wantErr)
+		case tc.wantErr == "" && (err != nil || string(got) != "the package"):
+			t.Errorf("%s: %q, %v", tc.name, got, err)
+		}
 	}
 }
