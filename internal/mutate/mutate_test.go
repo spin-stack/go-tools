@@ -387,6 +387,21 @@ func TestAnEditATestRefusesIsCountedRefused(t *testing.T) {
 	assert.Contains(t, out, "not doubled", "what refused it was not the package's own test")
 }
 
+// A package whose tests are all of another build has none to ask, as Schemata finds: an edit
+// built alone is said untested, not counted as a survivor of tests that never ran.
+func TestAPackageWhoseTestsAreOfAnotherBuildIsUntested(t *testing.T) {
+	dir := refuses(t)
+	test := filepath.Join(dir, "code_test.go")
+	body, err := os.ReadFile(test)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(test, append([]byte("//go:build never\n\n"), body...), 0o600))
+	m := doubling(t, dir)
+	overlay, err := mutate.Overlay(m, t.TempDir())
+	require.NoError(t, err)
+	outcome, out := mutate.Run(m, mutate.Asked{Overlay: overlay, Timeout: "2m"})
+	assert.Equal(t, mutate.Untested, outcome, "tests of another build were counted as asked: %s", out)
+}
+
 // refuses is a module of its own: Double, which TestDouble holds, and Half, which only TestHalf
 // runs and nothing checks.
 func refuses(t *testing.T) string {
