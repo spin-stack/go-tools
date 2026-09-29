@@ -204,7 +204,7 @@ func (b *builds) importer(dir, importer, overlay string) (string, string) {
 		defer func() { <-b.sem }()
 		var err error
 		ib.bin, ib.dir, err = ImporterBinary(importer, overlay, filepath.Join(b.work, "importer-"+strconv.Itoa(n)+".test"))
-		if err != nil {
+		if err != nil { // mutate-exempt: what is said on stderr; an importer with no binary asks nothing either way
 			fmt.Fprintf(os.Stderr, "  (%v)\n", err)
 		}
 	})
@@ -257,7 +257,7 @@ func (cs *coverages) of(dir string) *Coverage {
 	cs.mu.Unlock()
 	c.once.Do(func() {
 		measured, err := Cover(dir, cs.timeout, cs.slots)
-		if err != nil {
+		if err != nil { // mutate-exempt: what is said on stderr; the coverage is nil either way
 			fmt.Fprintf(os.Stderr, "  (%s: no coverage, every test is asked: %v)\n", dir, err)
 		}
 		c.c = measured

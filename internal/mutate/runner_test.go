@@ -48,8 +48,8 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 
 	bare := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(bare, "go.mod"), []byte("module example.com/bare\n\ngo 1.24\n"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(bare, "code.go"), []byte("package bare\n\nfunc Double(n int) int {\n\treturn n + n\n}\n"), 0o600))
-	untested, err := mutate.Plan(filepath.Join(bare, "code.go"), map[int]bool{4: true})
+	require.NoError(t, os.WriteFile(filepath.Join(bare, "code.go"), []byte("package bare\n\nfunc Double(n int) int {\n\treturn n + n\n}\n\nfunc Wide() int64 {\n\treturn 5\n}\n"), 0o600))
+	untested, err := mutate.Plan(filepath.Join(bare, "code.go"), map[int]bool{4: true, 8: true})
 	require.NoError(t, err)
 	require.NotEmpty(t, untested)
 
@@ -85,7 +85,34 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 	assert.Equal(t, unchecked, strings.Count(said.String(), "  SURVIVED  "))
 	assert.Contains(t, said.String(), fmt.Sprintf("%s: %d edit(s) in one binary, 0 built alone", dir, len(plan)),
 		"the package's edits were not built into its schema")
+	assert.Contains(t, said.String(), bare+": 2 edit(s) in one binary, 1 built alone",
+		"Wide's int64 literal is built alone, and a run of one is what is timed")
 	assert.NotContains(t, said.String(), " took ", "a run under a minute was said to be slow")
+}
+
+// A test that fails with nothing broken refuses no edit: the coverage the run measures first says
+// so, for an edit in the package's binary and for one built alone. Asked anyway, it would refuse
+// every edit, and a change would pass the gate on a broken test.
+func TestATestThatAlwaysFailsRefusesNothing(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod":       "module example.com/broken\n\ngo 1.24\n",
+		"code.go":      "package broken\n\nfunc One() int {\n\treturn 1\n}\n\nfunc Wide() int64 {\n\treturn 5\n}\n",
+		"code_test.go": "package broken\n\nimport \"testing\"\n\nfunc TestBroken(t *testing.T) {\n\t_, _ = One(), Wide()\n\tt.Fatal(\"broken regardless\")\n}\n",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	plan, err := mutate.Plan(filepath.Join(dir, "code.go"), map[int]bool{4: true, 8: true})
+	require.NoError(t, err)
+	for i := range plan {
+		plan[i].ID = i + 1
+	}
+	var said strings.Builder
+	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
+	require.NoError(t, err)
+	assert.Contains(t, said.String(), dir+": 1 edit(s) in one binary, 1 built alone", "One's literal in the binary, Wide's alone")
+	assert.Zero(t, tally.Killed, "a test broken regardless refused an edit: %s", said.String())
+	assert.Len(t, tally.Survived, 2, "%s", said.String())
 }
 
 // A package with no tests of its own is asked through the packages that import it, each built
