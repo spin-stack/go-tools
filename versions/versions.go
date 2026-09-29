@@ -210,7 +210,7 @@ func (v *Versions) Set(name, version, pin string) ([]byte, error) {
 		if n := field(item, "name"); n == nil || n.Value != name {
 			continue
 		}
-		for _, kv := range [][2]string{{"version", version}, {"pin", pin}} {
+		for _, kv := range [][2]string{{"version", version}, {"pin", pin}} { // mutate-exempt: the pair's length; nothing reads past kv[1]
 			n := field(item, kv[0])
 			if n == nil {
 				continue
