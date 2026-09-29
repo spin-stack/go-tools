@@ -22,7 +22,6 @@ import (
 
 func main() {
 	allowPath := flag.String("allow", "", "file of allowed exemptions, one key per line with the reason")
-	tags := flag.String("tags", "integration,e2e", "build tags to analyze under")
 	flag.Parse()
 
 	patterns := flag.Args()
@@ -36,7 +35,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	findings, err := analyze(patterns, *tags)
+	findings, err := analyze(patterns)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(2)
@@ -76,13 +75,17 @@ type finding struct {
 	message string
 }
 
-func analyze(patterns []string, tags string) ([]finding, error) {
+// tests is the build tags a test of another build is written under, in every spin-stack
+// repository: analyzed with them, a test behind one is held like any other.
+const tests = "integration,e2e"
+
+func analyze(patterns []string) ([]finding, error) {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps |
 			packages.NeedImports | packages.NeedModule,
 		Tests:      true,
-		BuildFlags: []string{"-tags=" + tags},
+		BuildFlags: []string{"-tags=" + tests},
 	}
 	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
