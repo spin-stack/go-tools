@@ -259,7 +259,7 @@ func Schemata(dir string, ms []Mutation, work string) (*Schema, error) {
 			build = exec.Command("go", "test", "-c", "-vet=off", "-gcflags=-e", "-overlay", overlay, "-o", bin, ".")
 		}
 		build.Dir = dir
-		out, err := build.CombinedOutput()
+		out, err := combined("schema: build the package's tests", build)
 		if err == nil {
 			s.Overlay, s.Binary = overlay, bin
 			return s, nil
@@ -379,7 +379,7 @@ func Ask(bin, dir string, id int, timeout string, only []string) (Outcome, strin
 	cmd := exec.Command(bin, args...) //nolint:gosec // a test binary this run built
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), switchEnv+"="+strconv.Itoa(id))
-	out, err := cmd.CombinedOutput()
+	out, err := combined("schema: run one edit", cmd)
 	if err != nil {
 		return Killed, string(out)
 	}
@@ -397,7 +397,7 @@ func ImporterBinary(importer, overlay, out string) (string, string, error) {
 	}
 	build := exec.Command("go", "test", "-c", "-vet=off", "-overlay", overlay, "-o", out, importer)
 	build.Dir = root
-	if said, err := build.CombinedOutput(); err != nil {
+	if said, err := combined("schema: build an importer's tests", build); err != nil {
 		return "", "", fmt.Errorf("mutate: building %s's tests with the schema: %w: %s", importer, err, said)
 	}
 	if _, err := os.Stat(out); err != nil {

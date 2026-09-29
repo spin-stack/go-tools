@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spin-stack/go-tools/internal/mutate"
@@ -82,7 +83,9 @@ func main() {
 		os.Exit(2)
 	}
 
+	started := time.Now()
 	t := runAll(chosen, importers, *timeout, *jobs)
+	reportCosts(time.Since(started))
 	survived := t.survived
 	fmt.Printf("mutate: %d refused, %d survived, %d did not build, %d in packages with no tests\n",
 		t.killed, len(survived), t.unbuildable, t.untested)
@@ -357,6 +360,20 @@ func (cs *coverages) of(dir string) *mutate.Coverage {
 		c.c = measured
 	})
 	return c.c
+}
+
+// reportCosts says where the run's time went, by what each process was for: the processes of
+// one purpose run side by side, so their wall is summed and can pass the run's own.
+func reportCosts(took time.Duration) {
+	var cpu time.Duration
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
+	_, _ = fmt.Fprintln(tw, "\tprocesses\twall\tCPU\t")
+	for _, c := range mutate.Costs() {
+		cpu += c.CPU
+		_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t\n", c.What, c.N, c.Wall.Round(time.Second), c.CPU.Round(time.Second))
+	}
+	fmt.Printf("mutate: %s, %s of CPU\n", took.Round(time.Second), cpu.Round(time.Second))
+	_ = tw.Flush()
 }
 
 // reportStale lists every reason over nothing this tool breaks, in the tracked Go that is not a

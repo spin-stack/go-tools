@@ -59,7 +59,7 @@ func (m Mutation) String() string {
 // Changed is the lines a diff against base touches, by file: the Go files that are not tests,
 // because a mutation of a test is a question about nothing.
 func Changed(base string) (map[string]map[int]bool, error) {
-	out, err := exec.Command("git", "diff", "--unified=0", "--no-color", base, "--", "*.go").Output()
+	out, err := output("listing", exec.Command("git", "diff", "--unified=0", "--no-color", base, "--", "*.go"))
 	if err != nil {
 		return nil, fmt.Errorf("reading the diff against %s: %w", base, err)
 	}
@@ -87,7 +87,7 @@ func Changed(base string) (map[string]map[int]bool, error) {
 	}
 	// A file nothing has yet been committed of is not in a diff, and is all new code: locally
 	// that is most of what a change is before it becomes a commit.
-	untracked, err := exec.Command("git", "ls-files", "--others", "--exclude-standard", "--", "*.go").Output()
+	untracked, err := output("listing", exec.Command("git", "ls-files", "--others", "--exclude-standard", "--", "*.go"))
 	if err != nil {
 		return nil, fmt.Errorf("reading what is not committed yet: %w", err)
 	}
@@ -718,7 +718,11 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		}
 		cmd := exec.Command("go", args...) //nolint:gosec // go test over this repository's packages
 		cmd.Dir = set.dir
-		out, err := cmd.CombinedOutput()
+		what := "alone: build and run the package's tests"
+		if set.dir == "" {
+			what = "alone: build and run the importers' tests"
+		}
+		out, err := combined(what, cmd)
 		said.Write(out)
 		if err == nil {
 			continue
@@ -739,7 +743,7 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 func hasTests(dir string) bool {
 	list := exec.Command("go", "list", "-f", "{{if or .TestGoFiles .XTestGoFiles}}tests{{end}}", ".")
 	list.Dir = dir
-	out, err := list.Output()
+	out, err := output("listing", list)
 	return err != nil || strings.TrimSpace(string(out)) == "tests"
 }
 
@@ -747,7 +751,7 @@ func hasTests(dir string) bool {
 // whose code or tests import it directly: where Run looks for a test when the package's own let
 // an edit through.
 func Importers() (map[string][]string, error) {
-	module, err := exec.Command("go", "list", "-m", "-f", "{{.Path}} {{.Dir}}").Output()
+	module, err := output("listing", exec.Command("go", "list", "-m", "-f", "{{.Path}} {{.Dir}}"))
 	if err != nil {
 		return nil, fmt.Errorf("mutate: reading the module: %w", err)
 	}
@@ -763,7 +767,7 @@ func Importers() (map[string][]string, error) {
 	list.Dir = root
 	var stderr strings.Builder
 	list.Stderr = &stderr
-	out, err := list.Output()
+	out, err := output("listing", list)
 	prefix := path + "/"
 	if err != nil {
 		return nil, fmt.Errorf("mutate: listing the packages: %w: %s", err, strings.TrimSpace(stderr.String()))
