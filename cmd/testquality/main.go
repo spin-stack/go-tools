@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/go/packages"
 
+	"github.com/spin-stack/go-tools/internal/allow"
 	"github.com/spin-stack/go-tools/internal/testquality"
 )
 
@@ -30,9 +30,9 @@ func main() {
 		patterns = []string{"./..."}
 	}
 
-	allowed, err := readAllow(*allowPath)
+	allowed, err := allow.Read(*allowPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading %s: %v\n", *allowPath, err)
+		fmt.Fprintf(os.Stderr, "testquality: %v\n", err)
 		os.Exit(2)
 	}
 
@@ -53,13 +53,7 @@ func main() {
 	}
 
 	// Stale exemptions fail too, or the list stops shrinking.
-	var stale []string
-	for key := range allowed {
-		if !used[key] {
-			stale = append(stale, key)
-		}
-	}
-	sort.Strings(stale)
+	stale := allow.Stale(allowed, used)
 	sort.Strings(unexplained)
 
 	for _, u := range unexplained {
@@ -149,34 +143,4 @@ func relative(path string) string {
 		return path
 	}
 	return rel
-}
-
-// readAllow parses `<package>:<TestName> # reason`; the reason is required.
-func readAllow(path string) (map[string]bool, error) {
-	if path == "" {
-		return map[string]bool{}, nil
-	}
-	f, err := os.Open(path) //nolint:gosec // a path this repository's own task passes
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]bool{}, nil
-		}
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	allowed := map[string]bool{}
-	scanner := bufio.NewScanner(f)
-	for line := 1; scanner.Scan(); line++ {
-		text := strings.TrimSpace(scanner.Text())
-		if text == "" || strings.HasPrefix(text, "#") {
-			continue
-		}
-		entry, reason, ok := strings.Cut(text, "#")
-		if !ok || strings.TrimSpace(reason) == "" {
-			return nil, fmt.Errorf("line %d has no reason after '#': %q", line, text)
-		}
-		allowed[strings.TrimSpace(entry)] = true
-	}
-	return allowed, scanner.Err()
 }
