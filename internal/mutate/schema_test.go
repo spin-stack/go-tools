@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/spin-stack/go-tools/mutate"
+	"github.com/spin-stack/go-tools/internal/mutate"
 )
 
 // schemaModule is a module of its own with an edit of every kind a schema builds, each held by
@@ -283,26 +283,26 @@ func TestAnEditIsAskedInItsPackagesDirectory(t *testing.T) {
 }
 
 // An importer is named from the module's root and built from there, wherever this runs - the
-// tests here run in mutate/ - and runs in its own directory. One with no tests has no binary.
+// tests here run in internal/mutate/ - and runs in its own directory. One with no tests has no binary.
 func TestAnImportersTestsAreBuiltFromTheModulesRoot(t *testing.T) {
 	work := t.TempDir()
 	overlay := filepath.Join(work, "overlay.json")
 	require.NoError(t, os.WriteFile(overlay, []byte(`{"Replace":{}}`), 0o600))
-	root, err := filepath.Abs("..")
+	root, err := filepath.Abs(filepath.Join("..", ".."))
 	require.NoError(t, err)
 
-	bin, dir, err := mutate.ImporterBinary("./mutate", overlay, filepath.Join(work, "mutate.test"))
+	bin, dir, err := mutate.ImporterBinary("./internal/mutate", overlay, filepath.Join(work, "mutate.test"))
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(work, "mutate.test"), bin)
 	assert.FileExists(t, bin)
-	assert.Equal(t, filepath.Join(root, "mutate"), dir)
+	assert.Equal(t, filepath.Join(root, "internal", "mutate"), dir)
 
 	bin, dir, err = mutate.ImporterBinary("./cmd/mutate", overlay, filepath.Join(work, "cmd.test"))
 	require.NoError(t, err)
 	assert.Empty(t, bin, "a package with no tests was given a binary")
 	assert.Empty(t, dir)
 
-	_, _, err = mutate.ImporterBinary("./mutate/nothing-here", overlay, filepath.Join(work, "none.test"))
+	_, _, err = mutate.ImporterBinary("./internal/mutate/nothing-here", overlay, filepath.Join(work, "none.test"))
 	assert.Error(t, err, "a package that is not there was built")
 }
 

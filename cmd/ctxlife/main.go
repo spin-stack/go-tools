@@ -8,7 +8,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/spin-stack/go-tools/ctxlife"
+	"github.com/spin-stack/go-tools/internal/ctxlife"
 )
 
 func main() {

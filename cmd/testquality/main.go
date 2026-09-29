@@ -17,7 +17,7 @@ import (
 	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/go/packages"
 
-	"github.com/spin-stack/go-tools/testquality"
+	"github.com/spin-stack/go-tools/internal/testquality"
 )
 
 func main() {

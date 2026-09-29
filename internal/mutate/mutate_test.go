@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/spin-stack/go-tools/mutate"
+	"github.com/spin-stack/go-tools/internal/mutate"
 )
 
 // fixture is the sample as a file this tool can read, in a directory of its own.
@@ -359,17 +359,17 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 // suite that refuses nothing.
 func TestAPackageWithNoTestsIsSaidSoAndNotCountedAsASurvivor(t *testing.T) {
 	// Not this package: running its own tests from inside them is a test that runs forever.
-	outcome, _ := mutate.Run(mutate.Mutation{File: filepath.Join("..", "cmd", "mutate", "main.go")}, mutate.Asked{Timeout: "1m"})
+	outcome, _ := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "mutate", "main.go")}, mutate.Asked{Timeout: "1m"})
 	assert.Equal(t, mutate.Untested, outcome, "a package with no test files was asked anyway")
 
 	// And one that has tests is run: unmutated, they pass, which is what a survivor looks like.
-	outcome, _ = mutate.Run(mutate.Mutation{File: filepath.Join("..", "internal", "fetch", "fetch.go")}, mutate.Asked{Timeout: "2m"})
+	outcome, _ = mutate.Run(mutate.Mutation{File: filepath.Join("..", "fetch", "fetch.go")}, mutate.Asked{Timeout: "2m"})
 	assert.Equal(t, mutate.Survived, outcome, "a package whose tests all pass was not run, or was misread")
 
 	// A package with no tests of its own whose importer has some is asked through the importer,
 	// not reported as untested: that is where its behaviour is held.
-	outcome, out := mutate.Run(mutate.Mutation{File: filepath.Join("..", "cmd", "mutate", "main.go")},
-		mutate.Asked{Timeout: "2m", Importers: []string{"../internal/fetch"}})
+	outcome, out := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "mutate", "main.go")},
+		mutate.Asked{Timeout: "2m", Importers: []string{"../fetch"}})
 	assert.Equal(t, mutate.Survived, outcome, "the importer's tests were not run: %s", out)
 	assert.Contains(t, out, "internal/fetch", "the run does not say which package answered")
 }
@@ -554,7 +554,7 @@ func TestAnEditIsPutToTheTestsThatReachIt(t *testing.T) {
 }
 
 // Who imports a package is asked of the whole module, from wherever this runs: the tests here run
-// in mutate/, where `./...` alone would be this directory's packages and nothing else.
+// in internal/mutate/, where `./...` alone would be this directory's packages and nothing else.
 func TestImportersAreTheWholeModulesWhereverThisRuns(t *testing.T) {
 	importers, err := mutate.Importers()
 	require.NoError(t, err)

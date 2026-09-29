@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/spin-stack/go-tools/mutate"
+	"github.com/spin-stack/go-tools/internal/mutate"
 )
 
 func main() {

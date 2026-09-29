@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/spin-stack/go-tools/refs"
+	"github.com/spin-stack/go-tools/internal/refs"
 )
 
 // tree writes a repository for one case to read. Built here rather than committed, because
