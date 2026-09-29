@@ -117,7 +117,7 @@ func (p pkgRun) run(ms []Mutation, covers *coverages) {
 	_, _ = fmt.Fprintf(p.out, "  %s: %d edit(s) in one binary, %d built alone\n", p.dir, len(s.Built), len(s.Alone))
 	// The package as it is says which tests reach a line: the schema moves none.
 	var c *Coverage
-	if len(s.Built) > 0 && s.Binary != "" {
+	if len(s.Built) > 0 && s.Binary != "" { // mutate-exempt: with no edit built, only one built alone reads it, and measures it itself
 		c = covers.of(p.dir)
 	}
 	var wg sync.WaitGroup
