@@ -167,3 +167,26 @@ func TestABumpKeepsHowTheValueIsWritten(t *testing.T) {
 		})
 	}
 }
+
+// An entry is refused when a field is not in its kind's form, each for its own reason: a download
+// has an https source with {version} in it, and a module a package path, not a URL.
+func TestAnEntryOutOfItsKindsFormIsRefused(t *testing.T) {
+	for _, tc := range []struct{ name, entry, want string }{
+		{"a download over http", "kind: download\n  source: http://x/{version}.tgz\n  pin: " + strings.Repeat("a", 64),
+			"a download whose source is not an https URL"},
+		{"a download with no version in its source", "kind: download\n  source: https://x/latest.tgz\n  pin: " + strings.Repeat("a", 64),
+			"a download whose source is not an https URL"},
+		{"a module named by a URL", "kind: module\n  source: https://x/y", "a module with no package path"},
+		{"a module with no source", "kind: module", "a module with no package path"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte("- name: a\n  " + tc.entry + "\n  version: v1\n  track: tags x\n"))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	if _, err := Parse([]byte("- name: a\n  kind: module\n  source: example.com/x\n  version: v1\n  track: tags x\n")); err != nil {
+		t.Errorf("a module by its package path: %v", err)
+	}
+}
