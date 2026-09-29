@@ -35,22 +35,15 @@ func main() {
 		os.Exit(2)
 	}
 
-	var unexplained []string
-	used := map[string]bool{}
-	for _, f := range findings {
-		if allowed[f.Key()] {
-			used[f.Key()] = true
-			continue
-		}
-		unexplained = append(unexplained, fmt.Sprintf("%s:%d: %s", relative(f.Pos.Filename), f.Pos.Line, f.Message))
+	unexplained, stale := allow.Split(allowed, findings, testquality.Finding.Key)
+	lines := make([]string, 0, len(unexplained))
+	for _, f := range unexplained {
+		lines = append(lines, fmt.Sprintf("%s:%d: %s", relative(f.Pos.Filename), f.Pos.Line, f.Message))
 	}
+	sort.Strings(lines)
 
-	// Stale exemptions fail too, or the list stops shrinking.
-	stale := allow.Stale(allowed, used)
-	sort.Strings(unexplained)
-
-	for _, u := range unexplained {
-		fmt.Fprintln(os.Stderr, u)
+	for _, l := range lines {
+		fmt.Fprintln(os.Stderr, l)
 	}
 	for _, s := range stale {
 		fmt.Fprintf(os.Stderr, "%s is in %s and is no longer a finding: remove the line\n", s, *allowPath)

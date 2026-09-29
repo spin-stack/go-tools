@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/spin-stack/go-tools/internal/allow"
 	"github.com/spin-stack/go-tools/internal/refs"
 )
 
@@ -40,9 +41,9 @@ func taskExeFromEnv() string {
 }
 
 func run(root, allowPath string, pathspecs []string, taskExe string) error {
-	allow, err := refs.ReadAllow(allowPath)
+	allowed, err := allow.Read(allowPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("refs: %w", err)
 	}
 	// A document either has something holding it to the tree or it is deleted, and this is
 	// what holds the ones named.
@@ -72,10 +73,10 @@ func run(root, allowPath string, pathspecs []string, taskExe string) error {
 	if err != nil {
 		return err
 	}
-	unexplained, stale := allow.Split(found)
+	unexplained, stale := allow.Split(allowed, found, refs.Finding.Key)
 
 	fmt.Printf("scanned: %d files    references that do not resolve: %d    explained (%s): %d\n",
-		len(files), len(found), allowPath, allow.Len())
+		len(files), len(found), allowPath, len(allowed))
 
 	if len(stale) > 0 {
 		fmt.Fprint(os.Stderr, "\nstale entries in the allowlist - nothing matches these any more, so the sentence\n"+

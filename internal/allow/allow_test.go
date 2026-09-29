@@ -50,9 +50,15 @@ func TestAnExceptionNeedsItsReasonAndItsFile(t *testing.T) {
 	}
 }
 
-func TestStaleIsWhatNothingMatched(t *testing.T) {
-	got := allow.Stale(map[string]bool{"b": true, "a": true, "c": true}, map[string]bool{"c": true})
-	if !slices.Equal(got, []string{"a", "b"}) {
-		t.Errorf("stale = %q", got)
+// Both halves of the ratchet: a finding nothing explains keeps its place, and an entry that
+// explains nothing is named, however many findings it would have explained.
+func TestSplitIsWhatNothingExplainsAndWhatExplainsNothing(t *testing.T) {
+	allowed := map[string]bool{"b": true, "a": true, "c": true}
+	unexplained, stale := allow.Split(allowed, []string{"z", "c", "y", "c"}, strings.ToLower)
+	if !slices.Equal(unexplained, []string{"z", "y"}) {
+		t.Errorf("unexplained = %q", unexplained)
+	}
+	if !slices.Equal(stale, []string{"a", "b"}) {
+		t.Errorf("stale = %q", stale)
 	}
 }
