@@ -375,6 +375,19 @@ func reportCosts(took time.Duration) {
 	}
 	fmt.Printf("mutate: %s, %s of CPU\n", took.Round(time.Second), cpu.Round(time.Second))
 	_ = tw.Flush()
+
+	// The tests the edits were put to, where most of a run's time goes: one that takes seconds
+	// and reaches much of a change is asked once for each edit in it.
+	tests := mutate.TestCosts()
+	if len(tests) == 0 {
+		return
+	}
+	fmt.Println("mutate: the tests asked the longest in all")
+	tw = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	for _, c := range tests[:min(len(tests), 10)] {
+		_, _ = fmt.Fprintf(tw, "  %s\t%s\t%d×\t%s\n", c.Package, c.Test, c.N, c.Took.Round(100*time.Millisecond))
+	}
+	_ = tw.Flush()
 }
 
 // reportStale lists every reason over nothing this tool breaks, in the tracked Go that is not a

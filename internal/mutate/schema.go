@@ -372,7 +372,7 @@ func Ask(bin, dir string, id int, timeout string, only []string) (Outcome, strin
 	if len(only) > 0 {
 		timeout = targetedTimeout
 	}
-	args := []string{"-test.count=1", "-test.failfast", "-test.timeout", timeout}
+	args := []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout", timeout}
 	if len(only) > 0 {
 		args = append(args, "-test.run", "^("+strings.Join(only, "|")+")$")
 	}
@@ -380,6 +380,7 @@ func Ask(bin, dir string, id int, timeout string, only []string) (Outcome, strin
 	cmd.Dir = dir
 	cmd.Env = testEnv(switchEnv + "=" + strconv.Itoa(id))
 	out, err := combined("schema: run one edit", cmd)
+	countTests(dir, out)
 	if err != nil {
 		return Killed, string(out)
 	}
