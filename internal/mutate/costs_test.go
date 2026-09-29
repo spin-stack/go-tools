@@ -3,6 +3,7 @@ package mutate
 import (
 	"os/exec"
 	"testing"
+	"time"
 )
 
 // Every process is counted under what it was for, one each time, with the CPU it and its children
@@ -12,10 +13,13 @@ func TestAProcessIsCountedUnderWhatItWasFor(t *testing.T) {
 	for _, c := range Costs() {
 		before[c.What] = c
 	}
+	var used time.Duration
 	for range 2 {
-		if _, err := output("test: go version", exec.Command("go", "version")); err != nil {
+		cmd := exec.Command("go", "version")
+		if _, err := output("test: go version", cmd); err != nil {
 			t.Fatal(err)
 		}
+		used += cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()
 	}
 	if _, err := combined("test: nothing", exec.Command("there-is-no-such-command")); err == nil {
 		t.Fatal("a command that is not there ran")
@@ -28,8 +32,12 @@ func TestAProcessIsCountedUnderWhatItWasFor(t *testing.T) {
 	if got := ran.N - before["test: go version"].N; got != 2 {
 		t.Errorf("go version counted %d times, want 2", got)
 	}
-	if ran.CPU <= before["test: go version"].CPU || ran.Wall <= before["test: go version"].Wall {
-		t.Errorf("go version took no CPU or no time: %+v", ran)
+	// Its user and its system time both: a go build's compilers spend both.
+	if got := ran.CPU - before["test: go version"].CPU; got != used {
+		t.Errorf("go version counted %s of CPU, its processes used %s", got, used)
+	}
+	if ran.Wall <= before["test: go version"].Wall {
+		t.Errorf("go version took no time: %+v", ran)
 	}
 	if missing := after["test: nothing"]; missing.N-before["test: nothing"].N != 1 || missing.CPU != before["test: nothing"].CPU {
 		t.Errorf("a command that never started: %+v", missing)
