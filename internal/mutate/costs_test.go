@@ -13,13 +13,19 @@ func TestAProcessIsCountedUnderWhatItWasFor(t *testing.T) {
 	for _, c := range Costs() {
 		before[c.What] = c
 	}
-	var used time.Duration
+	var used, system time.Duration
 	for range 2 {
-		cmd := exec.Command("go", "version")
-		if _, err := output("test: go version", cmd); err != nil {
+		// Copying from the kernel to the kernel is system time a tick can see; go version's was
+		// none on a CI runner, where user minus system is user plus system.
+		cmd := exec.Command("dd", "if=/dev/zero", "of=/dev/null", "bs=1M", "count=2000")
+		if _, err := output("test: dd", cmd); err != nil {
 			t.Fatal(err)
 		}
 		used += cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()
+		system += cmd.ProcessState.SystemTime()
+	}
+	if system == 0 {
+		t.Fatal("dd spent no system time, so nothing here tells it from user time")
 	}
 	if _, err := combined("test: nothing", exec.Command("there-is-no-such-command")); err == nil {
 		t.Fatal("a command that is not there ran")
@@ -28,16 +34,16 @@ func TestAProcessIsCountedUnderWhatItWasFor(t *testing.T) {
 	for _, c := range Costs() {
 		after[c.What] = c
 	}
-	ran := after["test: go version"]
-	if got := ran.N - before["test: go version"].N; got != 2 {
-		t.Errorf("go version counted %d times, want 2", got)
+	ran := after["test: dd"]
+	if got := ran.N - before["test: dd"].N; got != 2 {
+		t.Errorf("dd counted %d times, want 2", got)
 	}
 	// Its user and its system time both: a go build's compilers spend both.
-	if got := ran.CPU - before["test: go version"].CPU; got != used {
-		t.Errorf("go version counted %s of CPU, its processes used %s", got, used)
+	if got := ran.CPU - before["test: dd"].CPU; got != used {
+		t.Errorf("dd counted %s of CPU, its processes used %s", got, used)
 	}
-	if ran.Wall <= before["test: go version"].Wall {
-		t.Errorf("go version took no time: %+v", ran)
+	if ran.Wall <= before["test: dd"].Wall {
+		t.Errorf("dd took no time: %+v", ran)
 	}
 	if missing := after["test: nothing"]; missing.N-before["test: nothing"].N != 1 || missing.CPU != before["test: nothing"].CPU {
 		t.Errorf("a command that never started: %+v", missing)
