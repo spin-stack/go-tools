@@ -368,10 +368,20 @@ func TestAPackageWithNoTestsIsSaidSoAndNotCountedAsASurvivor(t *testing.T) {
 
 	// A package with no tests of its own whose importer has some is asked through the importer,
 	// not reported as untested: that is where its behaviour is held.
+	importersRan := func() int {
+		for _, c := range mutate.Costs() {
+			if c.What == "alone: build and run the importers' tests" {
+				return c.N
+			}
+		}
+		return 0
+	}
+	before := importersRan()
 	outcome, out := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "mutate", "main.go")},
 		mutate.Asked{Timeout: "2m", Importers: []string{"../fetch"}})
 	assert.Equal(t, mutate.Survived, outcome, "the importer's tests were not run: %s", out)
 	assert.Contains(t, out, "internal/fetch", "the run does not say which package answered")
+	assert.Equal(t, before+1, importersRan(), "the importers' run is not counted as theirs")
 }
 
 // A test that fails is an edit refused - the answer this gate exists for, and one no other test
