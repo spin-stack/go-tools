@@ -13,7 +13,8 @@ the pins they carry.
 upstream tarball, a repository's commit, the day a package archive is read as of - written once.
 The package `versions` reads it (`Load`, or `Parse` for a program that embeds the file), and
 `versions/upstream` says where each entry stands against its upstream and bumps one, rewriting
-its two lines and nothing else. The split is so that a program that ships its pins links only
+its two lines and nothing else; `upstream.Pinned` is an entry's download, taken only when it is
+the bytes the entry pins. The split is so that a program that ships its pins links only
 the reading half: reading one runs nothing and reaches nothing. `cmd/versions` is the command a Taskfile runs;
 `versions.Gate`, run from a test, is what fails when a pin is written anywhere else.
 

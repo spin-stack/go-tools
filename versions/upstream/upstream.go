@@ -1,5 +1,5 @@
 // Package upstream is where each entry of a versions.yaml stands against what it pins: the newest
-// its track finds, the pin of a version, and a bump. It is the half of versions that reaches the
+// its track finds, the pin of a version, a bump, and a download taken only as the bytes it pins. It is the half of versions that reaches the
 // network and runs git and docker, so that a program which embeds its versions.yaml links only
 // the half that reads it.
 package upstream
@@ -146,6 +146,20 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 	}
 	e.Version, e.Pin = version, pin
 	return e, out, nil
+}
+
+// Pinned is e's download, refused past limit bytes, and unless its SHA-256 is e's pin: the check
+// beside the Resolve that wrote the pin.
+func Pinned(ctx context.Context, e versions.Entry, limit int64) ([]byte, error) {
+	raw, err := fetch.Bytes(ctx, e.URL(), limit)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(raw)
+	if got := hex.EncodeToString(sum[:]); got != e.Pin {
+		return nil, fmt.Errorf("%s is not what versions.yaml pins: its SHA-256 is %s", e.Name, got)
+	}
+	return raw, nil
 }
 
 func run(ctx context.Context, name string, args ...string) (string, error) {
