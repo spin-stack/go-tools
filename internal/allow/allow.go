@@ -43,15 +43,27 @@ func Read(path string) (map[string]bool, error) {
 	return allowed, nil
 }
 
-// Stale is the keys of allowed that matched does not hold, sorted: an entry that excuses nothing
-// is a sentence rewritten or a test fixed, and a list that keeps it stops being a ratchet.
-func Stale(allowed, matched map[string]bool) []string {
-	var stale []string
-	for key := range allowed {
-		if !matched[key] {
-			stale = append(stale, key)
+// Split turns findings into the two halves the ratchet reports: what nothing in allowed explains,
+// in the order found, and the keys of allowed that explain nothing, sorted.
+//
+// The second half is the direction people forget. An entry that matches nothing means the
+// sentence was rewritten or the test fixed, and a list that keeps it goes on excusing something
+// nobody does - which is how an allowlist stops being a ratchet and becomes a place to put things.
+func Split[T any](allowed map[string]bool, found []T, key func(T) string) (unexplained []T, stale []string) {
+	matched := map[string]bool{}
+	for _, f := range found {
+		k := key(f)
+		if allowed[k] {
+			matched[k] = true
+			continue
+		}
+		unexplained = append(unexplained, f)
+	}
+	for k := range allowed {
+		if !matched[k] {
+			stale = append(stale, k)
 		}
 	}
 	sort.Strings(stale)
-	return stale
+	return unexplained, stale
 }

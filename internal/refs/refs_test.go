@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spin-stack/go-tools/internal/allow"
 	"github.com/spin-stack/go-tools/internal/refs"
 )
 
@@ -212,15 +213,12 @@ func TestTheAllowlistTurnsBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	allow, err := refs.ReadAllow(allowPath)
+	allowed, err := allow.Read(allowPath)
 	if err != nil {
 		t.Fatalf("read allow: %v", err)
 	}
-	if allow.Len() != 2 {
-		t.Fatalf("the list holds %d entries, wanted 2", allow.Len())
-	}
 
-	unexplained, stale := allow.Split(check(t, root, onlyRoot("build")))
+	unexplained, stale := allow.Split(allowed, check(t, root, onlyRoot("build")), refs.Finding.Key)
 	wants(t, unexplained, "internal/audit")
 	if len(stale) != 1 || stale[0] != "CLAUDE.md\tinternal/ancient" {
 		t.Fatalf("stale entries are %q, wanted the one nothing matches", stale)

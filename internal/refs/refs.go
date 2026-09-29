@@ -35,7 +35,9 @@ type Finding struct {
 	Ref string
 }
 
-// Key is the allowlist's spelling of a finding.
+// Key is the allowlist's spelling of a finding: `<file><TAB><reference>`. An allowlist names the
+// references made on purpose to something that is not here - naming a thing to say it is gone, or
+// naming something in another repository.
 func (f Finding) Key() string { return f.File + "\t" + f.Ref }
 
 // TaskLister answers what `task` names resolve in a directory. It returns no error and no
