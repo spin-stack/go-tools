@@ -678,9 +678,8 @@ type Asked struct {
 // gate report tests that exist as missing. Only a survivor pays for the second run.
 func Run(m Mutation, a Asked) (Outcome, string) {
 	dir := filepath.Dir(m.File)
-	// The pattern is a constant, so the only thing Glob has to say is what it matched.
-	tests, _ := filepath.Glob(filepath.Join(dir, "*_test.go"))
-	if len(tests) == 0 && len(a.Importers) == 0 {
+	tests := hasTests(dir)
+	if !tests && len(a.Importers) == 0 {
 		return Untested, ""
 	}
 	// The package's own tests are run in its directory; its importers, named from the module's
@@ -691,7 +690,7 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		only []string
 	}
 	var runs []testRun
-	if len(tests) > 0 && (a.Reaching == nil || len(a.Reaching) > 0) {
+	if tests && (a.Reaching == nil || len(a.Reaching) > 0) {
 		runs = append(runs, testRun{dir: dir, pkgs: []string{"."}, only: a.Reaching})
 	}
 	if len(a.Importers) > 0 {
@@ -732,6 +731,16 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		return Killed, said.String()
 	}
 	return Survived, said.String()
+}
+
+// hasTests is whether the package in dir has a test go would build: one whose tests are all of
+// another build (integration, e2e) has none, and running it would answer a pass nothing gave. A
+// listing that fails is taken as tests, so go test is the one to say what is wrong.
+func hasTests(dir string) bool {
+	list := exec.Command("go", "list", "-f", "{{if or .TestGoFiles .XTestGoFiles}}tests{{end}}", ".")
+	list.Dir = dir
+	out, err := list.Output()
+	return err != nil || strings.TrimSpace(string(out)) == "tests"
 }
 
 // Importers is, for each package directory this repository has, the directories of the packages

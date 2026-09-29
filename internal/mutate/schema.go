@@ -246,7 +246,7 @@ func Schemata(dir string, ms []Mutation, work string) (*Schema, error) {
 			s.Built = append(s.Built, m)
 		}
 	}
-	tests, _ := filepath.Glob(filepath.Join(dir, "*_test.go")) // a constant pattern: only a match to say
+	tests := hasTests(dir)
 	for len(s.Built) > 0 {
 		overlay, err := writeSchema(dir, s.Built, work)
 		if err != nil {
@@ -254,7 +254,7 @@ func Schemata(dir string, ms []Mutation, work string) (*Schema, error) {
 		}
 		bin := ""
 		build := exec.Command("go", "build", "-gcflags=-e", "-overlay", overlay, "-o", os.DevNull, ".")
-		if len(tests) > 0 {
+		if tests {
 			bin = filepath.Join(work, "pkg.test")
 			build = exec.Command("go", "test", "-c", "-vet=off", "-gcflags=-e", "-overlay", overlay, "-o", bin, ".")
 		}
@@ -262,9 +262,6 @@ func Schemata(dir string, ms []Mutation, work string) (*Schema, error) {
 		out, err := build.CombinedOutput()
 		if err == nil {
 			s.Overlay, s.Binary = overlay, bin
-			if _, err := os.Stat(bin); bin != "" && err != nil {
-				s.Binary = "" // the package's tests are all of another build
-			}
 			return s, nil
 		}
 		refused := refusedBy(string(out), s.Built)
