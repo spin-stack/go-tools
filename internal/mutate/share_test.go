@@ -41,6 +41,13 @@ func TestEachJobIsHeldToItsShareOfTheCores(t *testing.T) {
 	if want := max(runtime.NumCPU()/2, 1); testProcs != want {
 		t.Errorf("two jobs are held to %d core(s) each, want %d", testProcs, want)
 	}
+	// One job, or a -j of nothing, is the whole machine.
+	for _, jobs := range []int{1, 0} {
+		share(t, jobs)
+		if testProcs != runtime.NumCPU() {
+			t.Errorf("-j %d holds its job to %d core(s), want all %d", jobs, testProcs, runtime.NumCPU())
+		}
+	}
 	share(t, 1<<20)
 	env := testEnv("A=b")
 	if !slices.Contains(env, "GOMAXPROCS=1") || env[len(env)-1] != "A=b" {
