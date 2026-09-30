@@ -27,6 +27,9 @@ func main() {
 	// Half the machine: each is a build and a test binary, and a database package's tests hold
 	// connections of their own.
 	jobs := flag.Int("j", max(runtime.NumCPU()/2, 1), "how many mutations run at once")
+	// A test binary's memory is bounded by nothing else: -timeout is time, and an edit that makes
+	// a loop append for ever has the machine long before it runs out.
+	mem := flag.Float64("mem", 0, "how many GiB one test process and what it starts may hold, 0 for its share of the memory free when the run starts, negative for no bound (Linux)")
 	staleOnly := flag.Bool("stale-exempts", false, "report every mutate-exempt reason in the tree that covers no edit this tool makes, and fail on one")
 	flag.Parse()
 
@@ -80,7 +83,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	mutate.Share(*jobs)
+	mutate.Share(*jobs, int64(*mem*(1<<30)))
 	started := time.Now()
 	t, err := mutate.RunAll(chosen, importers, *timeout, *jobs, os.Stdout)
 	if err != nil {

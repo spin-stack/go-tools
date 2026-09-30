@@ -13,9 +13,15 @@ import (
 var testProcs int
 
 // Share divides the machine among jobs test processes run at once, each held to its share of the
-// cores. Call it once, before anything is asked.
-func Share(jobs int) {
+// cores and to memory bytes, with every process it starts; 0 is its share of what the machine has
+// free now, which jobs at their bound at once cannot pass, and a negative is no bound. Call it
+// once, before anything is asked.
+func Share(jobs int, memory int64) {
 	testProcs = max(runtime.NumCPU()/max(jobs, 1), 1)
+	if memory == 0 {
+		memory = available() / int64(max(jobs, 1))
+	}
+	memLimit = max(memory, 0)
 }
 
 // testEnv is the environment a test process runs in: this one's, its share of the machine, and

@@ -379,8 +379,11 @@ func Ask(bin, dir string, id int, timeout string, only []string) (Outcome, strin
 	cmd := exec.Command(bin, args...) //nolint:gosec // a test binary this run built
 	cmd.Dir = dir
 	cmd.Env = testEnv(switchEnv + "=" + strconv.Itoa(id))
-	out, err := combined("schema: run one edit", cmd)
+	out, exceeded, err := bounded("schema: run one edit", cmd)
 	countTests(dir, out)
+	if exceeded {
+		return Exceeded, string(out)
+	}
 	if err != nil {
 		return Killed, string(out)
 	}

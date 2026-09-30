@@ -30,8 +30,8 @@ func oneProc(t *testing.T) string {
 // share is Share for one test, the machine's again after it.
 func share(t *testing.T, jobs int) {
 	t.Helper()
-	Share(jobs)
-	t.Cleanup(func() { testProcs = 0 })
+	Share(jobs, -1)
+	t.Cleanup(func() { testProcs, memLimit = 0, 0 })
 }
 
 // The machine is divided among the jobs that run at once, and a process never gets less than a
