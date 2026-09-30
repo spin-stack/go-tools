@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -45,28 +44,12 @@ func gib(n int64) string {
 	return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
 }
 
-// watched are the processes running under memLimit, by pid, and whether each has been stopped
-// for passing it. One scan of /proc measures all of them: a scan is milliseconds, and one per
-// process would be a fifth of a core at -j 10.
-var watched = struct {
-	mu      sync.Mutex
-	by      map[int]*watch
-	polling sync.Once
-}{by: map[int]*watch{}}
-
-type watch struct {
-	proc *os.Process
-	// limit is memLimit when it started, which the poll reads rather than memLimit: its goroutine
-	// outlives what set it.
-	limit    int64
-	exceeded bool
-}
-
 // bounded is combined, with cmd and every process it starts stopped once they hold more than
 // memLimit between them; exceeded says they were. A go test is the go command, its compiler and
 // the test binary, and the binary is the one that grows.
 func bounded(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error) {
-	if memLimit == 0 {
+	limit := memLimit
+	if limit == 0 {
 		out, err := combined(what, cmd)
 		return out, false, err
 	}
@@ -77,57 +60,73 @@ func bounded(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error) 
 		account(what, cmd, time.Since(started))
 		return nil, false, err
 	}
-	w := &watch{proc: cmd.Process, limit: memLimit}
-	watched.mu.Lock()
-	watched.by[cmd.Process.Pid] = w
-	watched.mu.Unlock()
-	watched.polling.Do(func() { go poll() })
+	// Its own scan of /proc each tick, a couple of milliseconds: at -j 10 a fifth of one core,
+	// beside the ten test processes it measures.
+	done, stopped := make(chan struct{}), make(chan bool)
+	go func() { stopped <- watch(cmd.Process, limit, done) }()
 	err = cmd.Wait()
-	watched.mu.Lock()
-	delete(watched.by, cmd.Process.Pid)
-	exceeded = w.exceeded
-	watched.mu.Unlock()
+	close(done)
+	exceeded = <-stopped
 	account(what, cmd, time.Since(started))
 	return buf.Bytes(), exceeded, err
 }
 
-// poll measures the watched processes every memPoll, for as long as the run lasts.
-func poll() {
-	for range time.Tick(memPoll) {
-		watched.mu.Lock()
-		stopOver()
-		watched.mu.Unlock()
+// watch measures proc's tree every memPoll until done, and stops it once it holds more than
+// limit, which it answers.
+func watch(proc *os.Process, limit int64, done <-chan struct{}) bool {
+	tick := time.NewTicker(memPoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-done:
+			return false
+		case <-tick.C:
+			if stopOver(proc, limit) {
+				return true
+			}
+		}
 	}
 }
 
-// stopOver kills every watched process whose tree holds more than its limit, and all of its
-// tree. The caller holds watched.mu.
-func stopOver() {
-	procs := processes()
+// stopOver kills proc and every process under it when together they hold more than limit, and
+// says whether it did.
+func stopOver(proc *os.Process, limit int64) bool {
+	tree, rss := treeOf(processes(), proc.Pid)
+	if rss <= limit {
+		return false
+	}
+	// The root through the handle Start gave, which never signals a pid reused after it was
+	// waited for. Its tree by pid, which a pidfd makes safe on Linux, where alone /proc names a
+	// child: go test's binary does not die with the go command, and would go on growing.
+	_ = proc.Kill()
+	for _, child := range tree[1:] {
+		p, _ := os.FindProcess(child)
+		_ = p.Kill()
+	}
+	return true
+}
+
+// treeOf is root and every process under it in procs, root first, and what they hold between
+// them.
+func treeOf(procs map[int]process, root int) ([]int, int64) {
 	children := map[int][]int{}
 	for pid, p := range procs {
 		children[p.ppid] = append(children[p.ppid], pid)
 	}
-	for pid, w := range watched.by {
-		tree := []int{pid}
-		var rss int64
-		for i := 0; i < len(tree); i++ {
-			rss += procs[tree[i]].rss
-			tree = append(tree, children[tree[i]]...)
-		}
-		if rss <= w.limit {
-			continue
-		}
-		w.exceeded = true
-		// The root through the handle Start gave, which never signals a pid reused after it was
-		// waited for. Its tree by pid, which a pidfd makes safe on Linux, where alone /proc names a
-		// child: go test's binary does not die with the go command, and would go on growing.
-		_ = w.proc.Kill()
-		for _, child := range tree[1:] {
-			p, _ := os.FindProcess(child)
-			_ = p.Kill()
+	// Seen, since /proc is read a process at a time: a pid reused while it is read can close a
+	// loop of parents, which would be walked for ever.
+	tree, seen := []int{root}, map[int]bool{root: true}
+	var rss int64
+	for i := 0; i < len(tree); i++ {
+		rss += procs[tree[i]].rss
+		for _, child := range children[tree[i]] {
+			if !seen[child] {
+				seen[child] = true
+				tree = append(tree, child)
+			}
 		}
 	}
+	return tree, rss
 }
 
 type process struct {

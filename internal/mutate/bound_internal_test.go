@@ -1,6 +1,7 @@
 package mutate
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -61,5 +62,31 @@ func TestEachJobIsHeldToItsShareOfTheMemory(t *testing.T) {
 	Share(3, -1)
 	if memLimit != 0 {
 		t.Errorf("a job given no bound is held to %s", gib(memLimit))
+	}
+}
+
+// A tree is its root and everything under it, and holds what they all hold: go test's binary is
+// the go command's child. A loop of parents, which a pid reused while /proc is read can make, is
+// walked once.
+func TestATreeIsEverythingUnderItsRoot(t *testing.T) {
+	procs := map[int]process{
+		10: {ppid: 1, rss: 100},
+		11: {ppid: 10, rss: 20},
+		12: {ppid: 11, rss: 3},
+		20: {ppid: 1, rss: 1000},
+	}
+	tree, rss := treeOf(procs, 10)
+	slices.Sort(tree)
+	if !slices.Equal(tree, []int{10, 11, 12}) || rss != 123 {
+		t.Errorf("the tree under 10 is %v, holding %d", tree, rss)
+	}
+	procs[10] = process{ppid: 12, rss: 100}
+	tree, rss = treeOf(procs, 10)
+	slices.Sort(tree)
+	if !slices.Equal(tree, []int{10, 11, 12}) || rss != 123 {
+		t.Errorf("a loop of parents walked as %v, holding %d", tree, rss)
+	}
+	if tree, rss := treeOf(procs, 99); len(tree) != 1 || rss != 0 {
+		t.Errorf("a process gone since it was listed walked as %v, holding %d", tree, rss)
 	}
 }
