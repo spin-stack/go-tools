@@ -114,7 +114,10 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 			// A failure here is the package's own tests' to report, not this gate's; what this
 			// gate does with it is ask the test about no edit, since it fails whatever the edit -
 			// and say so, since an edit only it reaches then reads as one nothing holds.
-			said, runErr := combined("cover: run one test", run)
+			said, exceeded, runErr := bounded("cover: run one test", run)
+			if exceeded {
+				runErr = fmt.Errorf("held over the %s a test process may, and stopped", gib(memLimit))
+			}
 			failed := runErr != nil
 			if failed {
 				// mutate-exempt: how much of the failure is shown, not whether it is.

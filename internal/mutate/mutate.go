@@ -647,6 +647,9 @@ const (
 	Unbuildable
 	// Untested: the package has no tests at all, so there was nobody to ask.
 	Untested
+	// Exceeded: the tests held more memory than a test process may, and were stopped. Refused, as
+	// a test that runs out its time is: an edit that makes a loop allocate for ever.
+	Exceeded
 )
 
 // buildFailed is go test's word that a package it was to test did not build.
@@ -720,9 +723,12 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 		cmd := exec.Command("go", args...) //nolint:gosec // go test over this repository's packages
 		cmd.Dir = set.dir
 		cmd.Env = testEnv()
-		out, err := combined(set.what, cmd)
+		out, exceeded, err := bounded(set.what, cmd)
 		countTests("", out)
 		said.Write(out)
+		if exceeded {
+			return Exceeded, said.String()
+		}
 		if err == nil {
 			continue
 		}

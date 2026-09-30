@@ -79,6 +79,10 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 		case Killed:
 			t.Killed++
 			_, _ = fmt.Fprintf(w, "  refused   %s\n", m)
+		case Exceeded:
+			// Named with its bound: the edit is refused, and the loop it made is worth knowing of.
+			t.Killed++
+			_, _ = fmt.Fprintf(w, "  refused   %s (its tests held over %s, and were stopped)\n", m, gib(memLimit))
 		case Unbuildable:
 			t.Unbuildable++
 			_, _ = fmt.Fprintf(w, "  no edit   %s (does not build)\n", m)
@@ -161,14 +165,19 @@ func (p pkgRun) built(m Mutation, s *Schema, c *Coverage) Outcome {
 		if c != nil {
 			reaching = c.Reaching(m.File, m.Line)
 		}
-		if (reaching == nil || len(reaching) > 0) && ask(s.Binary, p.dir, reaching) == Killed {
-			return Killed
+		if reaching == nil || len(reaching) > 0 {
+			if outcome := ask(s.Binary, p.dir, reaching); outcome != Survived {
+				return outcome
+			}
 		}
 	}
 	for _, importer := range p.importers {
 		bin, dir := p.builds.importer(p.dir, importer, s.Overlay)
-		if bin != "" && ask(bin, dir, nil) == Killed {
-			return Killed
+		if bin == "" {
+			continue
+		}
+		if outcome := ask(bin, dir, nil); outcome != Survived {
+			return outcome
 		}
 	}
 	return Survived
