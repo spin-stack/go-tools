@@ -5,8 +5,8 @@
 - name: golangci-lint
   kind: image
   source: golangci/golangci-lint
-  version: v2.13.2
-  pin: sha256:ba07dffad130794ae79ebaa0056809d18c0168f3f846480ffd3eb6c04578b83d
+  version: v2.14.0
+  pin: sha256:ad862ba6b3798cbe0fd9fd7408d498fd74fbd2623a92406b2fd3898faf0bf98f
   track: github-release https://github.com/golangci/golangci-lint
   note: >-
     task lint, with spin's .golangci.yml: spin's version (its versions.yaml's golangci-lint), so
