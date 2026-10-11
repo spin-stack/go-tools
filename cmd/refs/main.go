@@ -117,14 +117,18 @@ func taskLister(root, taskExe string) refs.TaskLister {
 		case err != nil:
 			return nil, fmt.Errorf("refs: looking for %s: %w", filepath.Join(dir, "Taskfile.yml"), err)
 		}
-		cmd := exec.Command(taskExe, "-d", dir, "--list-all", "--json") //nolint:gosec // the binary is the gate's own argument
+		// --no-status: working out each task's up_to_date writes its sources' checksum (go-task
+		// 3.54), so a listing left every task that had not run since its sources changed
+		// reporting itself as up to date. spin's e2e lane served a control plane built before the
+		// dashboard change it was gating, because `task refs` had run first in lint.
+		cmd := exec.Command(taskExe, "-d", dir, "--list-all", "--json", "--no-status") //nolint:gosec // the binary is the gate's own argument
 		cmd.Dir = root
 		cmd.Env = append(os.Environ(), "NO_COLOR=1")
 		out, err := cmd.Output()
 		if err != nil {
 			var exit *exec.ExitError
 			if errors.As(err, &exit) {
-				return nil, fmt.Errorf("refs: %s -d %s --list-all --json: %w\n%s", taskExe, dir, err, exit.Stderr)
+				return nil, fmt.Errorf("refs: %s -d %s --list-all --json --no-status: %w\n%s", taskExe, dir, err, exit.Stderr)
 			}
 			return nil, fmt.Errorf("refs: running %s: %w", taskExe, err)
 		}
