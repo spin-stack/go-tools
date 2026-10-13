@@ -96,6 +96,23 @@ func TestARunsPredicateIsTheGolden(t *testing.T) {
 	assert.Equal(t, p, again)
 }
 
+// Built by a reusable workflow, the builder is that workflow at the run's ref, and the dispatched
+// one stays the build's workflow; a builder that is not a workflow file of the repository is no
+// builder.
+func TestABuilderIsTheReusableWorkflowAtTheRunsRef(t *testing.T) {
+	p, err := provenance.Build(getenv(run), "v20261013.1", nil, nil)
+	require.NoError(t, err)
+	built, err := p.BuiltBy(".github/workflows/build-release.yml")
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/spin-stack/spin/.github/workflows/build-release.yml@refs/heads/main", built.RunDetails.Builder.ID)
+	assert.Equal(t, ".github/workflows/release.yml", built.BuildDefinition.ExternalParameters.Workflow.Path)
+	assert.Equal(t, "https://github.com/spin-stack/spin/.github/workflows/release.yml@refs/heads/main", p.RunDetails.Builder.ID)
+	for _, path := range []string{"hack/build.yml", "build-release.yml", ".github/workflows/build-release.yml@refs/heads/x"} {
+		_, err := p.BuiltBy(path)
+		assert.Error(t, err, path)
+	}
+}
+
 // An environment that is not a workflow run's, or a workflow ref that is not the repository's,
 // is refused: provenance with no builder in it names nobody.
 func TestAnEnvironmentThatIsNotARunIsRefused(t *testing.T) {

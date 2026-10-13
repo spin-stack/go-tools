@@ -3,7 +3,7 @@
 // cosign attest-blob --type slsaprovenance1 --predicate to sign over the files a release
 // publishes. Outside a workflow it refuses.
 //
-//	go tool provenance -version v20261013.1 -out _output/provenance.json
+//	go tool provenance -version v20261013.1 -out _output/provenance.json [-builder .github/workflows/build-release.yml]
 package main
 
 import (
@@ -27,6 +27,7 @@ func run(env func(string) string, args []string, stderr io.Writer) int {
 	version := fs.String("version", "", "the release the run builds")
 	out := fs.String("out", "", "where to write the predicate")
 	pins := fs.String("versions", versions.File, "the repository's versions.yaml")
+	builder := fs.String("builder", "", "the reusable workflow the run signs in (.github/workflows/<file>); the dispatched one when empty")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -40,6 +41,9 @@ func run(env func(string) string, args []string, stderr io.Writer) int {
 		return 2
 	}
 	p, err := provenance.Build(env, *version, v, nil)
+	if err == nil && *builder != "" {
+		p, err = p.BuiltBy(*builder)
+	}
 	if err != nil {
 		say(stderr, err)
 		return 2
