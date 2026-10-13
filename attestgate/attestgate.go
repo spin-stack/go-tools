@@ -99,10 +99,10 @@ func (g Gate) attests(s step) bool {
 // shell reads it: `docker buildx build \` with `--push` three lines down is one command.
 func (s step) command() string { return strings.ReplaceAll(s.Run, "\\\n", " ") }
 
-// conditional is whether a step might not run, or might fail and be passed: an attestation that
-// may not happen is not one.
-func (s step) conditional() bool {
-	return s.If != "" || (s.ContinueOnError != nil && s.ContinueOnError != false)
+// continues is whether a step's failure is passed: an attestation that may fail with the run going
+// on is not one.
+func (s step) continues() bool {
+	return s.ContinueOnError != nil && s.ContinueOnError != false
 }
 
 // idToken is whether permissions grant an OIDC token, which keyless signing is.
@@ -203,12 +203,20 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 		attested := false
 		for _, s := range j.Steps {
 			where := file + "/" + jn + "/" + s.key()
+			// A step that attests what it uploads itself - a task that does both - attests under
+			// its own if:, which is the upload's too: if it does not run, nothing leaves. It
+			// attests nothing for a later step, which may run when it did not.
+			self := false
 			if g.attests(s) {
-				if s.conditional() {
+				switch {
+				case s.continues() || (s.If != "" && !g.uploads(s)):
 					problems = append(problems, fmt.Sprintf("%s: an attestation that may not happen (if: or continue-on-error:)", where))
 					continue
+				case s.If != "":
+					self = true
+				default:
+					attested = true
 				}
-				attested = true
 			}
 			if !g.uploads(s) {
 				continue
@@ -218,7 +226,7 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 				continue
 			}
 			switch {
-			case !attested:
+			case !attested && !self:
 				problems = append(problems, fmt.Sprintf("%s: publishes with no provenance attested before it in its job", where))
 			case !token:
 				problems = append(problems, fmt.Sprintf("%s: attests with no id-token: write, so it cannot sign", where))
