@@ -26,6 +26,9 @@ type Gate struct {
 	// UploadTasks and AttestTasks are task names a step runs (`task <name>`) that publish, or
 	// that attest what is published.
 	UploadTasks, AttestTasks []string
+	// SelfAttesting are task names that attest only what they upload themselves - a task that
+	// packs, attests and pushes - so a step running one is attested and attests no later step.
+	SelfAttesting []string
 	// NotPublished are the steps that look like an upload and ship nothing anyone installs - a
 	// CI artifact, a measurement - each "<workflow file>/<job>/<step name or id>" with its
 	// reason. One that matches no upload step fails, so the list cannot outlive what it excused.
@@ -98,6 +101,22 @@ func (g Gate) attests(s step) bool {
 // command is the step's script with each backslash-continued line joined to the next, as the
 // shell reads it: `docker buildx build \` with `--push` three lines down is one command.
 func (s step) command() string { return strings.ReplaceAll(s.Run, "\\\n", " ") }
+
+// attestation is what a step attests: what the steps after it in its job upload (later), or only
+// what it uploads itself (self) - a task that attests what it pushes, or a step whose if: is its
+// upload's too - and whether it is an attestation that may not happen (unsure).
+func (g Gate) attestation(s step) (later, self, unsure bool) {
+	broad, own := g.attests(s), runsTask(s.command(), g.SelfAttesting)
+	switch {
+	case !broad && !own:
+		return false, false, false
+	case s.continues() || (s.If != "" && !g.uploads(s)):
+		return false, false, true
+	case broad && s.If == "":
+		return true, false, false
+	}
+	return false, true, false
+}
 
 // continues is whether a step's failure is passed: an attestation that may fail with the run going
 // on is not one.
@@ -206,18 +225,12 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 			// A step that attests what it uploads itself - a task that does both - attests under
 			// its own if:, which is the upload's too: if it does not run, nothing leaves. It
 			// attests nothing for a later step, which may run when it did not.
-			self := false
-			if g.attests(s) {
-				switch {
-				case s.continues() || (s.If != "" && !g.uploads(s)):
-					problems = append(problems, fmt.Sprintf("%s: an attestation that may not happen (if: or continue-on-error:)", where))
-					continue
-				case s.If != "":
-					self = true
-				default:
-					attested = true
-				}
+			later, self, unsure := g.attestation(s)
+			if unsure {
+				problems = append(problems, fmt.Sprintf("%s: an attestation that may not happen (if: or continue-on-error:)", where))
+				continue
 			}
+			attested = attested || later
 			if !g.uploads(s) {
 				continue
 			}
