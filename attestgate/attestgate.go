@@ -29,6 +29,9 @@ type Gate struct {
 	// SelfAttesting are task names that attest only what they upload themselves - a task that
 	// packs, attests and pushes - so a step running one is attested and attests no later step.
 	SelfAttesting []string
+	// RequireSBOM is an upload needing an SBOM attested before it too (cosign attest-blob --type
+	// cyclonedx), as it needs its provenance: off until a repository writes its SBOMs.
+	RequireSBOM bool
 	// NotPublished are the steps that look like an upload and ship nothing anyone installs - a
 	// CI artifact, a measurement - each "<workflow file>/<job>/<step name or id>" with its
 	// reason. One that matches no upload step fails, so the list cannot outlive what it excused.
@@ -65,6 +68,7 @@ var (
 	uploadActions  = []string{"softprops/action-gh-release@", "actions/upload-artifact@"}
 	uploadCommands = regexp.MustCompile(`\boras\s+push\b|\bgh\s+release\s+(upload|create)\b|\bdocker\s+push\b|\bbuildx\b[^\n]*--push\b|\baws\s+s3\s+(cp|sync)\b`)
 	attestCommand  = regexp.MustCompile(`\bcosign\s+attest-blob\b[^\n]*--type[ =]slsaprovenance1\b`)
+	sbomCommand    = regexp.MustCompile(`\bcosign\s+attest-blob\b[^\n]*--type[ =]cyclonedx\b`)
 	mainRef        = regexp.MustCompile(`github\.ref\s*==\s*'refs/heads/main'`)
 )
 
@@ -94,8 +98,17 @@ func (g Gate) uploads(s step) bool {
 	return uploadCommands.MatchString(s.command()) || runsTask(s.command(), g.UploadTasks)
 }
 
-func (g Gate) attests(s step) bool {
-	return attestCommand.MatchString(s.command()) || runsTask(s.command(), g.AttestTasks)
+// covers is which attestations a step makes: provenance, an SBOM. A task's are both: what it
+// attests is its package's tests to hold.
+type covers struct{ provenance, sbom bool }
+
+func (c covers) any() bool { return c.provenance || c.sbom }
+
+func (c covers) or(d covers) covers { return covers{c.provenance || d.provenance, c.sbom || d.sbom} }
+
+func (g Gate) attests(s step) covers {
+	task := runsTask(s.command(), g.AttestTasks)
+	return covers{provenance: attestCommand.MatchString(s.command()) || task, sbom: sbomCommand.MatchString(s.command()) || task}
 }
 
 // command is the step's script with each backslash-continued line joined to the next, as the
@@ -105,17 +118,19 @@ func (s step) command() string { return strings.ReplaceAll(s.Run, "\\\n", " ") }
 // attestation is what a step attests: what the steps after it in its job upload (later), or only
 // what it uploads itself (self) - a task that attests what it pushes, or a step whose if: is its
 // upload's too - and whether it is an attestation that may not happen (unsure).
-func (g Gate) attestation(s step) (later, self, unsure bool) {
+func (g Gate) attestation(s step) (later, self covers, unsure bool) {
 	broad, own := g.attests(s), runsTask(s.command(), g.SelfAttesting)
 	switch {
-	case !broad && !own:
-		return false, false, false
+	case !broad.any() && !own:
+		return covers{}, covers{}, false
 	case s.continues() || (s.If != "" && !g.uploads(s)):
-		return false, false, true
-	case broad && s.If == "":
-		return true, false, false
+		return covers{}, covers{}, true
+	case own:
+		return covers{}, covers{true, true}, false
+	case s.If == "":
+		return broad, covers{}, false
 	}
-	return false, true, false
+	return covers{}, broad, false
 }
 
 // continues is whether a step's failure is passed: an attestation that may fail with the run going
@@ -219,7 +234,7 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 		if j.Permissions.Kind != 0 {
 			token = idToken(j.Permissions)
 		}
-		attested := false
+		attested := covers{}
 		for _, s := range j.Steps {
 			where := file + "/" + jn + "/" + s.key()
 			// A step that attests what it uploads itself - a task that does both - attests under
@@ -230,7 +245,7 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 				problems = append(problems, fmt.Sprintf("%s: an attestation that may not happen (if: or continue-on-error:)", where))
 				continue
 			}
-			attested = attested || later
+			attested = attested.or(later)
 			if !g.uploads(s) {
 				continue
 			}
@@ -238,9 +253,12 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 				excused[where] = true
 				continue
 			}
+			has := attested.or(self)
 			switch {
-			case !attested && !self:
+			case !has.provenance:
 				problems = append(problems, fmt.Sprintf("%s: publishes with no provenance attested before it in its job", where))
+			case g.RequireSBOM && !has.sbom:
+				problems = append(problems, fmt.Sprintf("%s: publishes with no SBOM attested before it in its job", where))
 			case !token:
 				problems = append(problems, fmt.Sprintf("%s: attests with no id-token: write, so it cannot sign", where))
 			}

@@ -4,8 +4,8 @@
 
 The Go the spin-stack repositories build with, and hold their code to: tools a repository runs
 from its go.mod (`go tool <name>`), each a command under `cmd/`. Only `versions`,
-`versions/upstream`, `trustroot`, `provenance` and `attestgate` are packages another repository
-imports; the rest is
+`versions/upstream`, `trustroot`, `provenance`, `attestgate` and `sbom` are packages another
+repository imports; the rest is
 `internal/`. Nothing here is linked into what any of them ships but versions' reading half, which
 spin's binaries use to read the pins they carry, and the trusted root, which what verifies a
 release's signatures checks them against.
@@ -105,6 +105,19 @@ nothing fails; `MainOnly` holds release workflows to no push trigger and every j
 `refs/heads/main`. The YAML cannot say which files a glob covered, so the step right before an
 upload runs `go tool attestgate files -require provenance [-except checksums.txt] <dir>`, which
 fails on a file there with no `<file>.provenance.sigstore.json` beside it.
+
+## sbom
+
+`go tool sbom <kind> -name <subject> -version <v> -out <file> ...` writes a CycloneDX 1.6 SBOM
+from what a build read: `go` the build info of Go binaries, `apko` an apko.lock.json, `dpkg` a
+`<package> <version> <arch>` listing, `apk` an apk database (`-only` what is shipped; the rest is
+formulation), `pnpm` a lock's runtime dependencies, `pins` versions.yaml entries, `file` one file
+by its hash. `merge -subject <file>` nests BOMs under the file they describe; `check` fails on a
+component with no version, Go's `(devel)`, or neither a package URL nor a hash. The same inputs
+are the same bytes: components sorted, the serial number the subject's, the time
+SOURCE_DATE_EPOCH's. Package `sbom` is the same, for a build that writes its own. With
+`attestgate.Gate.RequireSBOM`, an upload also needs a `cosign attest-blob --type cyclonedx` before
+it.
 
 ## trustroot
 
