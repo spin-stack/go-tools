@@ -39,6 +39,19 @@ type Gate struct {
 	// MainOnly are the workflow files that cut a release: none has a push trigger, and every job
 	// in one runs only on refs/heads/main.
 	MainOnly []string
+	// Builder is the reusable workflow every publishing step is in, by its file name: on:
+	// workflow_call and nothing else, so it runs only as a job of a workflow that calls it with
+	// uses:, and only a MainOnly one may. The certificate a step in it signs with names the
+	// builder, not the caller, so a verifier pinning it pins the code that built and attested; a
+	// caller that published by itself would sign as itself and be outside the pin. Empty: no
+	// builder, and a release workflow publishes itself.
+	Builder string
+}
+
+// callsBuilder is whether a job's uses: is the builder, as a workflow of the same repository
+// names it.
+func (g Gate) callsBuilder(j job) bool {
+	return g.Builder != "" && j.Uses == "./.github/workflows/"+g.Builder
 }
 
 type workflow struct {
@@ -204,6 +217,9 @@ func (g Gate) Check() error {
 			problems = append(problems, fmt.Sprintf("%s: MainOnly names a workflow there is not", f))
 		}
 	}
+	if g.Builder != "" && !files[g.Builder] {
+		problems = append(problems, fmt.Sprintf("%s: Builder names a workflow there is not", g.Builder))
+	}
 	for _, k := range slices.Sorted(maps.Keys(g.NotPublished)) {
 		if strings.TrimSpace(g.NotPublished[k]) == "" {
 			problems = append(problems, fmt.Sprintf("%s: NotPublished with no reason", k))
@@ -218,22 +234,44 @@ func (g Gate) Check() error {
 	return nil
 }
 
+// checkJob is what is wrong with job j at where, as a whole: a release job that may run off main,
+// and a call to the builder from where it may not be called or with no token to sign.
+func (g Gate) checkJob(where string, j job, mainOnly, token bool) []string {
+	var problems []string
+	if mainOnly && !mainRef.MatchString(j.If) {
+		problems = append(problems, where+": a release job with no if: github.ref == 'refs/heads/main'")
+	}
+	if !g.callsBuilder(j) {
+		return problems
+	}
+	if !mainOnly {
+		problems = append(problems, where+": calls the builder from a workflow that is not MainOnly")
+	}
+	// A called workflow has at most its caller's permissions, whatever it declares.
+	if !token {
+		problems = append(problems, where+": calls the builder with no id-token: write, so it cannot sign")
+	}
+	return problems
+}
+
 func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 	var problems []string
 	mainOnly := slices.Contains(g.MainOnly, file)
 	if mainOnly && slices.Contains(triggers(w.On), "push") {
 		problems = append(problems, fmt.Sprintf("%s: a release workflow with a push trigger: it runs on whatever was pushed", file))
 	}
+	builder := g.Builder != "" && file == g.Builder
+	if on := triggers(w.On); builder && (len(on) != 1 || on[0] != "workflow_call") {
+		problems = append(problems, fmt.Sprintf("%s: the builder is on: %v, not workflow_call alone: it runs without a release workflow calling it", file, on))
+	}
 	for _, jn := range slices.Sorted(maps.Keys(w.Jobs)) {
 		j := w.Jobs[jn]
-		if mainOnly && !mainRef.MatchString(j.If) {
-			problems = append(problems, fmt.Sprintf("%s/%s: a release job with no if: github.ref == 'refs/heads/main'", file, jn))
-		}
 		// A job's permissions replace the workflow's whole, they do not add to them.
 		token := idToken(w.Permissions)
 		if j.Permissions.Kind != 0 {
 			token = idToken(j.Permissions)
 		}
+		problems = append(problems, g.checkJob(file+"/"+jn, j, mainOnly, token)...)
 		attested := covers{}
 		for _, s := range j.Steps {
 			where := file + "/" + jn + "/" + s.key()
@@ -255,6 +293,8 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 			}
 			has := attested.or(self)
 			switch {
+			case g.Builder != "" && !builder:
+				problems = append(problems, fmt.Sprintf("%s: publishes outside the builder %s: a release workflow calls it with uses:", where, g.Builder))
 			case !has.provenance:
 				problems = append(problems, fmt.Sprintf("%s: publishes with no provenance attested before it in its job", where))
 			case g.RequireSBOM && !has.sbom:
