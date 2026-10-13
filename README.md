@@ -105,11 +105,12 @@ named in `UploadTasks`) without a step before it in its job that attests (`cosig
 --type slsaprovenance1`, or a task in `AttestTasks`) unconditionally and with `id-token: write`.
 `NotPublished` excuses a step by `<file>/<job>/<step>`, with its reason, and an excuse that matches
 nothing fails; `MainOnly` holds release workflows to no push trigger and every job on
-`refs/heads/main`. `Builder` names a reusable workflow (`on: workflow_call` alone) that every
-upload must be in, called only from a `MainOnly` workflow whose job grants `id-token: write`: the
+`refs/heads/main`. `Builders` name the reusable workflows (`on: workflow_call` alone) every upload
+must be in, each called only from a job on `refs/heads/main` that grants `id-token: write`: the
 certificate then names the builder, which a verifier pins - with the source repository too, since
 any repository can call a public reusable workflow and be issued the builder's SAN: `Repository`
-holds every builder job to `if: github.repository == '<owner/name>'`. The YAML cannot say which files a glob covered, so the step right before an
+holds every builder job to `if: github.repository == '<owner/name>'`. The YAML cannot say which
+files a glob covered, so the step right before an
 upload runs `go tool attestgate files -require provenance [-except checksums.txt] <dir>`, which
 fails on a file there with no `<file>.provenance.sigstore.json` beside it.
 

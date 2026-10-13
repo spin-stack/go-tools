@@ -39,34 +39,38 @@ type Gate struct {
 	// MainOnly are the workflow files that cut a release: none has a push trigger, and every job
 	// in one runs only on refs/heads/main.
 	MainOnly []string
-	// Builder is the reusable workflow every publishing step is in, by its file name: on:
-	// workflow_call and nothing else, so it runs only as a job of a workflow that calls it with
-	// uses:, and only a MainOnly one may. The certificate a step in it signs with names the
-	// builder, not the caller, so a verifier pinning it pins the code that built and attested; a
-	// caller that published by itself would sign as itself and be outside the pin. Empty: no
-	// builder, and a release workflow publishes itself.
-	Builder string
-	// Repository is the repository the builder is, owner/name, which every job of the builder runs
+	// Builders are the reusable workflows every publishing step is in, by their file names: each
+	// on: workflow_call and nothing else, so it runs only as a job of a workflow that calls it with
+	// uses:, and only from a job that runs on refs/heads/main. The certificate a step in one signs
+	// with names that builder, not the caller, so a verifier pinning it pins the code that built and
+	// attested; a caller that published by itself would sign as itself and be outside the pin. None:
+	// a release workflow publishes itself.
+	Builders []string
+	// Repository is the repository the builders are, owner/name, which every job of a builder runs
 	// only in (if: github.repository == '<Repository>'): any repository can call a public reusable
 	// workflow, and its run's certificate names the builder at the ref it called, over what that
-	// repository checked out. Required with Builder.
+	// repository checked out. Required with Builders.
 	Repository string
 }
 
-// checkBuilder is what is wrong with the Builder named, given the workflow files there are.
-func (g Gate) checkBuilder(files map[string]bool) []string {
-	if g.Builder == "" {
+// checkBuilders is what is wrong with the Builders named, given the workflow files there are.
+func (g Gate) checkBuilders(files map[string]bool) []string {
+	if len(g.Builders) == 0 {
 		return nil
 	}
 	var problems []string
-	if !files[g.Builder] {
-		problems = append(problems, g.Builder+": Builder names a workflow there is not")
+	for _, b := range g.Builders {
+		if !files[b] {
+			problems = append(problems, b+": Builders names a workflow there is not")
+		}
 	}
 	if !strings.Contains(g.Repository, "/") {
-		problems = append(problems, g.Builder+": a Builder with no Repository (owner/name) to run only in")
+		problems = append(problems, "Builders with no Repository (owner/name) to run only in")
 	}
 	return problems
 }
+
+func (g Gate) isBuilder(file string) bool { return slices.Contains(g.Builders, file) }
 
 // ownRepository is whether a job's if: holds it to the builder's repository.
 func (g Gate) ownRepository(cond string) bool {
@@ -74,10 +78,10 @@ func (g Gate) ownRepository(cond string) bool {
 		regexp.MustCompile(`github\.repository\s*==\s*'`+regexp.QuoteMeta(g.Repository)+`'`).MatchString(cond)
 }
 
-// callsBuilder is whether a job's uses: is the builder, as a workflow of the same repository
-// names it.
+// callsBuilder is whether a job's uses: is a builder, as a workflow of the same repository names it.
 func (g Gate) callsBuilder(j job) bool {
-	return g.Builder != "" && j.Uses == "./.github/workflows/"+g.Builder
+	file, ok := strings.CutPrefix(j.Uses, "./.github/workflows/")
+	return ok && g.isBuilder(file)
 }
 
 type workflow struct {
@@ -243,7 +247,7 @@ func (g Gate) Check() error {
 			problems = append(problems, fmt.Sprintf("%s: MainOnly names a workflow there is not", f))
 		}
 	}
-	problems = append(problems, g.checkBuilder(files)...)
+	problems = append(problems, g.checkBuilders(files)...)
 	for _, k := range slices.Sorted(maps.Keys(g.NotPublished)) {
 		if strings.TrimSpace(g.NotPublished[k]) == "" {
 			problems = append(problems, fmt.Sprintf("%s: NotPublished with no reason", k))
@@ -259,8 +263,8 @@ func (g Gate) Check() error {
 }
 
 // checkJob is what is wrong with job j at where, as a whole: a release job that may run off main,
-// a builder job that may run in another repository, and a call to the builder from where it may
-// not be called or with no token to sign.
+// a builder job that may run in another repository, and a call to a builder from a job that may
+// run off main or with no token to sign.
 func (g Gate) checkJob(where string, j job, mainOnly, builder, token bool) []string {
 	var problems []string
 	if mainOnly && !mainRef.MatchString(j.If) {
@@ -272,8 +276,8 @@ func (g Gate) checkJob(where string, j job, mainOnly, builder, token bool) []str
 	if !g.callsBuilder(j) {
 		return problems
 	}
-	if !mainOnly {
-		problems = append(problems, where+": calls the builder from a workflow that is not MainOnly")
+	if !mainRef.MatchString(j.If) {
+		problems = append(problems, where+": calls a builder with no if: github.ref == 'refs/heads/main'")
 	}
 	// A called workflow has at most its caller's permissions, whatever it declares.
 	if !token {
@@ -288,7 +292,7 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 	if mainOnly && slices.Contains(triggers(w.On), "push") {
 		problems = append(problems, fmt.Sprintf("%s: a release workflow with a push trigger: it runs on whatever was pushed", file))
 	}
-	builder := g.Builder != "" && file == g.Builder
+	builder := g.isBuilder(file)
 	if on := triggers(w.On); builder && (len(on) != 1 || on[0] != "workflow_call") {
 		problems = append(problems, fmt.Sprintf("%s: the builder is on: %v, not workflow_call alone: it runs without a release workflow calling it", file, on))
 	}
@@ -321,8 +325,8 @@ func (g Gate) check(file string, w workflow, excused map[string]bool) []string {
 			}
 			has := attested.or(self)
 			switch {
-			case g.Builder != "" && !builder:
-				problems = append(problems, fmt.Sprintf("%s: publishes outside the builder %s: a release workflow calls it with uses:", where, g.Builder))
+			case len(g.Builders) > 0 && !builder:
+				problems = append(problems, fmt.Sprintf("%s: publishes outside the builders %v: a workflow calls one with uses:", where, g.Builders))
 			case !has.provenance:
 				problems = append(problems, fmt.Sprintf("%s: publishes with no provenance attested before it in its job", where))
 			case g.RequireSBOM && !has.sbom:

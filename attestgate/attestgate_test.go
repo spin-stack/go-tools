@@ -173,9 +173,9 @@ func TestAnUploadNeedsAnAttestationBeforeIt(t *testing.T) {
 	}
 }
 
-// With a builder, what is published is published from it alone: a reusable workflow that runs only
-// when called, called only by a release workflow from main that gives it a token to sign with, and
-// held inside to the rules every publishing job is held to.
+// With builders, what is published is published from them alone: reusable workflows that run only
+// when called, in their own repository, called only by a job on main that gives them a token to
+// sign with, and held inside to the rules every publishing job is held to.
 func TestABuilderIsWhereEveryUploadIs(t *testing.T) {
 	const main = "github.ref == 'refs/heads/main'"
 	caller := func(on, perms, jobIf string) string {
@@ -192,7 +192,11 @@ func TestABuilderIsWhereEveryUploadIs(t *testing.T) {
 	good := caller("workflow_dispatch", "id-token: write", main)
 	const own = "github.repository == 'spin-stack/x'"
 	builder := workflow("workflow_call", "id-token: write", own, "", build, attest, release)
-	gate := attestgate.Gate{MainOnly: []string{"release.yml"}, Builder: "build-release.yml", Repository: "spin-stack/x"}
+	gate := attestgate.Gate{MainOnly: []string{"release.yml"}, Builders: []string{"build-release.yml"}, Repository: "spin-stack/x"}
+	// CI on a push to main, calling a second builder for what it saves.
+	ci := "name: ci\non: [push, pull_request]\npermissions:\n  id-token: write\njobs:\n  save:\n    if: " + main +
+		"\n    uses: ./.github/workflows/build-packs.yml\n"
+	two := attestgate.Gate{MainOnly: []string{"release.yml"}, Builders: []string{"build-release.yml", "build-packs.yml"}, Repository: "spin-stack/x"}
 	for name, tc := range map[string]struct {
 		files    map[string]string
 		gate     attestgate.Gate
@@ -201,13 +205,22 @@ func TestABuilderIsWhereEveryUploadIs(t *testing.T) {
 		"called from main":  {files: map[string]string{"release.yml": good, "build-release.yml": builder}, gate: gate},
 		"no builder at all": {files: map[string]string{"release.yml": workflow("workflow_dispatch", "id-token: write", main, "", attest, release)}, gate: attestgate.Gate{MainOnly: []string{"release.yml"}}},
 		"an upload in the caller": {files: map[string]string{"release.yml": workflow("workflow_dispatch", "id-token: write", main, "", attest, release), "build-release.yml": builder},
-			gate: gate, problems: []string{"release.yml/release/Release: publishes outside the builder build-release.yml"}},
+			gate: gate, problems: []string{"release.yml/release/Release: publishes outside the builders [build-release.yml]"}},
 		"an upload in another workflow": {files: map[string]string{"release.yml": good, "build-release.yml": builder,
 			"nightly.yml": workflow("schedule", "id-token: write", "", "", attest, orasPush)},
-			gate: gate, problems: []string{"nightly.yml/release/Push: publishes outside the builder"}},
+			gate: gate, problems: []string{"nightly.yml/release/Push: publishes outside the builders"}},
 		"an excused upload elsewhere": {files: map[string]string{"release.yml": good, "build-release.yml": builder,
 			"ci.yml": workflow("push", "", "", "", "      - name: Logs\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n")},
-			gate: attestgate.Gate{MainOnly: []string{"release.yml"}, Builder: "build-release.yml", Repository: "spin-stack/x", NotPublished: map[string]string{"ci.yml/release/Logs": "the run's logs"}}},
+			gate: attestgate.Gate{MainOnly: []string{"release.yml"}, Builders: []string{"build-release.yml"}, Repository: "spin-stack/x", NotPublished: map[string]string{"ci.yml/release/Logs": "the run's logs"}}},
+		"two builders, one called from CI on main": {files: map[string]string{"release.yml": good, "build-release.yml": builder, "ci.yml": ci,
+			"build-packs.yml": workflow("workflow_call", "id-token: write", own, "", build, attest, orasPush)}, gate: two},
+		"a builder called from CI off main": {files: map[string]string{"release.yml": good, "build-release.yml": builder,
+			"ci.yml":          strings.Replace(ci, "    if: "+main+"\n", "", 1),
+			"build-packs.yml": workflow("workflow_call", "id-token: write", own, "", build, attest, orasPush)},
+			gate: two, problems: []string{"ci.yml/save: calls a builder with no if: github.ref == 'refs/heads/main'"}},
+		"a reusable workflow that is not a builder publishes": {files: map[string]string{"release.yml": good, "build-release.yml": builder, "ci.yml": ci,
+			"build-packs.yml": workflow("workflow_call", "id-token: write", own, "", build, attest, orasPush)},
+			gate: gate, problems: []string{"build-packs.yml/release/Push: publishes outside the builders"}},
 		"a builder that runs by itself": {files: map[string]string{"release.yml": good,
 			"build-release.yml": workflow("[workflow_call, workflow_dispatch]", "id-token: write", own, "", attest, release)},
 			gate: gate, problems: []string{"build-release.yml: the builder is on: [workflow_call workflow_dispatch]"}},
@@ -215,11 +228,9 @@ func TestABuilderIsWhereEveryUploadIs(t *testing.T) {
 			"build-release.yml": workflow("push", "id-token: write", own, "", attest, release)},
 			gate: gate, problems: []string{"build-release.yml: the builder is on: [push]"}},
 		"a builder there is not": {files: map[string]string{"release.yml": good}, gate: gate,
-			problems: []string{"build-release.yml: Builder names a workflow there is not"}},
-		"a caller that is not main only": {files: map[string]string{"release.yml": good, "build-release.yml": builder},
-			gate: attestgate.Gate{Builder: "build-release.yml", Repository: "spin-stack/x"}, problems: []string{"release.yml/release: calls the builder from a workflow that is not MainOnly"}},
+			problems: []string{"build-release.yml: Builders names a workflow there is not"}},
 		"a caller from any ref": {files: map[string]string{"release.yml": caller("workflow_dispatch", "id-token: write", ""), "build-release.yml": builder},
-			gate: gate, problems: []string{"release.yml/release: a release job with no if"}},
+			gate: gate, problems: []string{"release.yml/release: a release job with no if", "release.yml/release: calls a builder with no if: github.ref"}},
 		"a caller with no token to give": {files: map[string]string{"release.yml": caller("workflow_dispatch", "contents: write", main), "build-release.yml": builder},
 			gate: gate, problems: []string{"release.yml/release: calls the builder with no id-token: write"}},
 		"another workflow's uses is not the builder": {files: map[string]string{"release.yml": good, "build-release.yml": builder,
@@ -234,8 +245,8 @@ func TestABuilderIsWhereEveryUploadIs(t *testing.T) {
 			"build-release.yml": workflow("workflow_call", "id-token: write", "github.repository == 'spin-stack/y'", "", build, attest, release)},
 			gate: gate, problems: []string{"build-release.yml/release: a builder job with no if: github.repository == 'spin-stack/x'"}},
 		"a builder with no repository": {files: map[string]string{"release.yml": good, "build-release.yml": builder},
-			gate:     attestgate.Gate{MainOnly: []string{"release.yml"}, Builder: "build-release.yml"},
-			problems: []string{"build-release.yml/release: a builder job with no if: github.repository == ''", "build-release.yml: a Builder with no Repository"}},
+			gate:     attestgate.Gate{MainOnly: []string{"release.yml"}, Builders: []string{"build-release.yml"}},
+			problems: []string{"build-release.yml/release: a builder job with no if: github.repository == ''", "Builders with no Repository"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
