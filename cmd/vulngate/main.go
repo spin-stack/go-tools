@@ -19,19 +19,26 @@ import (
 )
 
 func main() {
-	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(context.Background(), govulncheck, os.Args[1:], os.Stdout, os.Stderr)) // mutate-exempt: the process's own arguments, past its name; run is what the tests drive
 }
 
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	var out bytes.Buffer
+// scanner is govulncheck asked for json: govulncheck in a build, a script in a test.
+type scanner func(ctx context.Context, args []string, stdout, stderr io.Writer) error
+
+func govulncheck(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	cmd := scan.Command(ctx, append([]string{"-format", "json"}, args...)...)
-	cmd.Stdout, cmd.Stderr = &out, stderr
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Start(); err != nil {
-		say(stderr, "vulngate:", err)
-		return 2
+		return err
 	}
+	return cmd.Wait()
+}
+
+// run answers the exit status: 0 clean, 1 something fails, 2 no scan to judge.
+func run(ctx context.Context, scan scanner, args []string, stdout, stderr io.Writer) int {
+	var out bytes.Buffer
 	// In json mode govulncheck exits 0 whatever it found; an error here is one it could not scan.
-	if err := cmd.Wait(); err != nil {
+	if err := scan(ctx, args, &out, stderr); err != nil {
 		say(stderr, "vulngate: govulncheck:", err)
 		return 2
 	}
