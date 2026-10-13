@@ -4,9 +4,8 @@
 
 The Go the spin-stack repositories build with, and hold their code to: tools a repository runs
 from its go.mod (`go tool <name>`), each a command under `cmd/`. Only `versions`,
-`versions/upstream`, `trustroot`, `provenance`, `attestgate`, `sbom` and `fulciotest` (a test
-Sigstore whose certificates carry Fulcio's source-repository and build extensions, which a verifier
-of a reusable builder pins) are packages another repository imports; the rest is
+`versions/upstream`, `trustroot`, `provenance`, `attestgate` and `sbom` are packages another
+repository imports; the rest is
 `internal/`. Nothing here is linked into what any of them ships but versions' reading half, which
 spin's binaries use to read the pins they carry, and the trusted root, which what verifies a
 release's signatures checks them against.
@@ -95,9 +94,7 @@ an hour.
 provenance predicate of that run - the workflow at its ref as the builder, the repository at its
 commit and every versions.yaml pin as the inputs, and no clock - for `cosign attest-blob --type
 slsaprovenance1 --predicate <file>` to sign over the files. Package `provenance` is the same, for
-a build that adds inputs of its own (`Build`'s extra). In a reusable workflow, `-builder
-.github/workflows/<file>` (`Predicate.BuiltBy`) makes that workflow the builder, as the run's
-certificate names it; GitHub's environment names only the caller there.
+a build that adds inputs of its own (`Build`'s extra).
 
 `attestgate.Gate`, run from a test like the versions gate, fails on a workflow step that
 publishes (a release action, `oras push`, `gh release upload`, `docker push`, `aws s3 cp`, a task
@@ -105,12 +102,7 @@ named in `UploadTasks`) without a step before it in its job that attests (`cosig
 --type slsaprovenance1`, or a task in `AttestTasks`) unconditionally and with `id-token: write`.
 `NotPublished` excuses a step by `<file>/<job>/<step>`, with its reason, and an excuse that matches
 nothing fails; `MainOnly` holds release workflows to no push trigger and every job on
-`refs/heads/main`. `Builders` name the reusable workflows (`on: workflow_call` alone) every upload
-must be in, each called only from a job on `refs/heads/main` that grants `id-token: write`: the
-certificate then names the builder, which a verifier pins - with the source repository too, since
-any repository can call a public reusable workflow and be issued the builder's SAN: `Repository`
-holds every builder job to `if: github.repository == '<owner/name>'`. The YAML cannot say which
-files a glob covered, so the step right before an
+`refs/heads/main`. The YAML cannot say which files a glob covered, so the step right before an
 upload runs `go tool attestgate files -require provenance [-except checksums.txt] <dir>`, which
 fails on a file there with no `<file>.provenance.sigstore.json` beside it.
 

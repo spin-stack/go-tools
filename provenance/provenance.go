@@ -137,19 +137,6 @@ func Build(env func(string) string, version string, pins *versions.Versions, ext
 	}, nil
 }
 
-// BuiltBy is p built by the reusable workflow at path (.github/workflows/<file>) of the same
-// repository, at the same ref: what the run's certificate names when the steps that sign are that
-// workflow's. GitHub sets GITHUB_WORKFLOW_REF to the caller in a called workflow too, so the run
-// cannot say this itself; the caller stays the build's workflow, which is what was dispatched.
-func (p Predicate) BuiltBy(path string) (Predicate, error) {
-	if !strings.HasPrefix(path, ".github/workflows/") || strings.Contains(path, "@") {
-		return Predicate{}, fmt.Errorf("provenance: builder %q is not a workflow file of the repository", path)
-	}
-	w := p.BuildDefinition.ExternalParameters.Workflow
-	p.RunDetails.Builder.ID = w.Repository + "/" + path + "@" + w.Ref
-	return p, nil
-}
-
 // Pinned is a versions.yaml entry as an input: its name, where it is, and the digest that holds
 // it - none for a module, which the checksum database holds by its version, or a date.
 func Pinned(e versions.Entry) ResourceDescriptor {
