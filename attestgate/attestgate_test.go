@@ -64,7 +64,7 @@ func TestAnUploadNeedsAnAttestationBeforeIt(t *testing.T) {
 		"the job's permissions replace the workflow's": {workflow: workflow("workflow_dispatch", "id-token: write", "", "contents: write", attest, release),
 			problems: []string{"release.yml/release/Release: attests with no id-token"}},
 		"the job's own id-token": {workflow: workflow("workflow_dispatch", "", "", "id-token: write", attest, release)},
-		"id-token among others": {workflow: workflow("workflow_dispatch", "contents: write\n  packages: write\n  id-token: write", "", "", attest, release)},
+		"id-token among others":  {workflow: workflow("workflow_dispatch", "contents: write\n  packages: write\n  id-token: write", "", "", attest, release)},
 		"write-all":              {workflow: strings.Replace(workflow("workflow_dispatch", "", "", "", attest, release), "jobs:", "permissions: write-all\njobs:", 1)},
 		"an attestation that may not run": {workflow: workflow("workflow_dispatch", "id-token: write", "", "",
 			strings.Replace(attest, "        run:", "        if: false\n        run:", 1), release),
