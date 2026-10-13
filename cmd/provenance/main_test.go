@@ -40,6 +40,7 @@ func TestItWritesTheRunsPredicateOrNothing(t *testing.T) {
 		args    func(dir string) []string
 		pins    string
 		written bool
+		builder string
 	}{
 		"in a run": {env: run1, pins: pins, written: true,
 			args: func(dir string) []string { return []string{"-version", "v1", "-out", filepath.Join(dir, "p.json")} }},
@@ -49,6 +50,14 @@ func TestItWritesTheRunsPredicateOrNothing(t *testing.T) {
 			args: func(dir string) []string { return []string{"-version", "v1", "-out", filepath.Join(dir, "p.json")} }},
 		"no versions.yaml": {env: run1,
 			args: func(dir string) []string { return []string{"-version", "v1", "-out", filepath.Join(dir, "p.json")} }},
+		"built by a reusable workflow": {env: run1, pins: pins, written: true, builder: "https://github.com/spin-stack/machine/.github/workflows/build-release.yml@refs/heads/main",
+			args: func(dir string) []string {
+				return []string{"-version", "v1", "-builder", ".github/workflows/build-release.yml", "-out", filepath.Join(dir, "p.json")}
+			}},
+		"a builder that is no workflow": {env: run1, pins: pins,
+			args: func(dir string) []string {
+				return []string{"-version", "v1", "-builder", "build-release.yml", "-out", filepath.Join(dir, "p.json")}
+			}},
 		"an unknown flag": {env: run1, pins: pins,
 			args: func(string) []string { return []string{"-subject", "x"} }},
 		"an -out it cannot write": {env: run1, pins: pins,
@@ -76,6 +85,11 @@ func TestItWritesTheRunsPredicateOrNothing(t *testing.T) {
 			require.NoError(t, json.Unmarshal(got, &p))
 			assert.Equal(t, "v1", p.BuildDefinition.ExternalParameters.Version)
 			assert.Equal(t, "debian-snapshot", p.BuildDefinition.ResolvedDependencies[1].Name)
+			builder := tc.builder
+			if builder == "" {
+				builder = "https://github.com/spin-stack/machine/.github/workflows/release.yml@refs/heads/main"
+			}
+			assert.Equal(t, builder, p.RunDetails.Builder.ID)
 		})
 	}
 }

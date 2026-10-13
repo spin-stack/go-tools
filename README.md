@@ -94,7 +94,9 @@ an hour.
 provenance predicate of that run - the workflow at its ref as the builder, the repository at its
 commit and every versions.yaml pin as the inputs, and no clock - for `cosign attest-blob --type
 slsaprovenance1 --predicate <file>` to sign over the files. Package `provenance` is the same, for
-a build that adds inputs of its own (`Build`'s extra).
+a build that adds inputs of its own (`Build`'s extra). In a reusable workflow, `-builder
+.github/workflows/<file>` (`Predicate.BuiltBy`) makes that workflow the builder, as the run's
+certificate names it; GitHub's environment names only the caller there.
 
 `attestgate.Gate`, run from a test like the versions gate, fails on a workflow step that
 publishes (a release action, `oras push`, `gh release upload`, `docker push`, `aws s3 cp`, a task
