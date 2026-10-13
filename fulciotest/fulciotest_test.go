@@ -58,7 +58,12 @@ func TestACertificateCarriesWhatFulcioWrites(t *testing.T) {
 	verifier, err := verify.NewVerifier(s, verify.WithTransparencyLog(1), verify.WithObserverTimestamps(1))
 	require.NoError(t, err)
 	check := func(e verify.SignedEntity) error {
-		_, err := verifier.Verify(e, verify.NewPolicy(verify.WithArtifactDigest("sha256", sum[:]), verify.WithCertificateIdentity(pinned)))
+		result, err := verifier.Verify(e, verify.NewPolicy(verify.WithArtifactDigest("sha256", sum[:]), verify.WithCertificateIdentity(pinned)))
+		if err == nil {
+			// What cosign's --certificate-github-workflow-repository reads, beside what the policy did.
+			require.Equal(t, own.GithubWorkflowRepository, result.Signature.Certificate.GithubWorkflowRepository)
+			require.Equal(t, own.BuildSignerURI, result.Signature.Certificate.BuildSignerURI)
+		}
 		return err
 	}
 

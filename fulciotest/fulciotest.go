@@ -65,7 +65,7 @@ func New() (*Sigstore, error) {
 	now := time.Now()
 	return &Sigstore{VirtualSigstore: v, key: key, fulcio: &root.FulcioCertificateAuthority{
 		Root: rootCert, Intermediates: []*x509.Certificate{inter}, URI: "https://fulciotest.invalid",
-		ValidityPeriodStart: now.Add(-5 * time.Hour), ValidityPeriodEnd: now.Add(time.Hour),
+		ValidityPeriodStart: now.Add(-5 * time.Hour), ValidityPeriodEnd: now.Add(time.Hour), // mutate-exempt: how far back the start is, a test signs within it; only the end is a test's (signed past it)
 	}}, nil
 }
 
@@ -101,7 +101,7 @@ func render(e certificate.Extensions) ([]pkix.Extension, error) {
 		}
 		der, err := asn1.MarshalWithParams(f.val, "utf8")
 		if err != nil {
-			return nil, err // mutate-exempt: a Go string always marshals as a UTF8String
+			return nil, err
 		}
 		out = append(out, pkix.Extension{Id: f.id, Value: der})
 	}
@@ -124,7 +124,7 @@ func (s *Sigstore) leaf(san string, ext certificate.Extensions, at time.Time) (*
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: crypto/rand does not fail
+		return nil, nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(at.UnixNano()), URIs: []*url.URL{u},
@@ -138,7 +138,7 @@ func (s *Sigstore) leaf(san string, ext certificate.Extensions, at time.Time) (*
 	}
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: what CreateCertificate made parses
+		return nil, nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	return cert, key, nil
 }
@@ -152,11 +152,11 @@ func (s *Sigstore) AttestAtTime(san string, ext certificate.Extensions, body []b
 	}
 	signer, err := signature.LoadECDSASignerVerifier(key, crypto.SHA256)
 	if err != nil {
-		return nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: a P-256 key always loads
+		return nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	envSigner, err := dsse.NewEnvelopeSigner(&sigdsse.SignerAdapter{SignatureSigner: signer, Pub: key.Public()})
 	if err != nil {
-		return nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: one signer is always enough
+		return nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	env, err := envSigner.SignPayload(context.Background(), "application/vnd.in-toto+json", body)
 	if err != nil {
@@ -164,7 +164,7 @@ func (s *Sigstore) AttestAtTime(san string, ext certificate.Extensions, body []b
 	}
 	sig, err := base64.StdEncoding.DecodeString(env.Signatures[0].Sig)
 	if err != nil {
-		return nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: dsse writes standard base64
+		return nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	entry, err := s.GenerateTlogEntry(cert, env, sig, at.Unix(), proof)
 	if err != nil {
@@ -183,7 +183,7 @@ func (s *Sigstore) SignAtTime(san string, ext certificate.Extensions, artifact [
 	digest := sha256.Sum256(artifact)
 	sig, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
 	if err != nil {
-		return nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: crypto/rand does not fail
+		return nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	entry, err := s.hashedRekord(cert, digest[:], sig, at.Unix())
 	if err != nil {
@@ -202,7 +202,7 @@ func (s *Sigstore) hashedRekord(cert *x509.Certificate, digest, sig []byte, at i
 	ctx := context.Background()
 	pem, err := cryptoutils.MarshalCertificateToPEM(cert)
 	if err != nil {
-		return nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: a parsed certificate always encodes
+		return nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	proposed, err := types.NewProposedEntry(ctx, hashedrekord.KIND, hashedrekord.New().DefaultVersion(), types.ArtifactProperties{
 		PublicKeyBytes: [][]byte{pem}, PKIFormat: string(pki.X509), ArtifactHash: hex.EncodeToString(digest), SignatureBytes: sig,
@@ -220,16 +220,16 @@ func (s *Sigstore) hashedRekord(cert *x509.Certificate, digest, sig []byte, at i
 	}
 	logID, err := s.RekorLogID()
 	if err != nil {
-		return nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: the VirtualSigstore's key always has an ID
+		return nil, fmt.Errorf("fulciotest: %w", err)
 	}
-	const index = 1000
+	const index = 1000 // mutate-exempt: the entry's index in a log with no proof; the promise signs whichever it is
 	set, err := s.RekorSignPayload(tlog.RekorPayload{LogID: logID, IntegratedTime: at, LogIndex: index, Body: base64.StdEncoding.EncodeToString(body)})
 	if err != nil {
 		return nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	raw, err := hex.DecodeString(logID)
 	if err != nil {
-		return nil, fmt.Errorf("fulciotest: %w", err) // mutate-exempt: a log ID is hex
+		return nil, fmt.Errorf("fulciotest: %w", err)
 	}
 	return tlog.NewEntry(body, at, index, raw, set, nil) //nolint:staticcheck // the constructor the VirtualSigstore uses for the same entry
 }
