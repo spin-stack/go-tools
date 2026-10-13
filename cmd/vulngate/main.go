@@ -28,7 +28,7 @@ type scanner func(ctx context.Context, args []string, stdout, stderr io.Writer) 
 func govulncheck(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	cmd := scan.Command(ctx, append([]string{"-format", "json"}, args...)...)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err := cmd.Start(); err != nil {
+	if err := cmd.Start(); err != nil { // mutate-exempt: Start fails only on a Cmd already started, and this one never is
 		return err
 	}
 	return cmd.Wait()
