@@ -197,6 +197,28 @@ func TestAGoBinaryIsItsBuildInfo(t *testing.T) {
 	require.Error(t, err)
 }
 
+// A patched component carries each patch, its name and text, in its pedigree, in the order given;
+// with none it is as it was, and a patch that is not there is an error.
+func TestAPatchedComponentCarriesItsPatches(t *testing.T) {
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "0001-a.patch"), filepath.Join(dir, "0002-b.patch")
+	require.NoError(t, os.WriteFile(a, []byte("--- a\n+++ a\n"), 0o600))
+	require.NoError(t, os.WriteFile(b, []byte("--- b\n"), 0o600))
+	qemu := component("qemu", "11.1.2", "pkg:generic/qemu@11.1.2")
+	got, err := sbom.Patched(qemu, a, b)
+	require.NoError(t, err)
+	patches := *got.Pedigree.Patches
+	require.Len(t, patches, 2)
+	assert.Equal(t, "0001-a.patch", patches[0].Diff.URL)
+	assert.Equal(t, "--- a\n+++ a\n", patches[0].Diff.Text.Content)
+	assert.Equal(t, cdx.PatchTypeUnofficial, patches[1].Type)
+	same, err := sbom.Patched(qemu)
+	require.NoError(t, err)
+	assert.Nil(t, same.Pedigree)
+	_, err = sbom.Patched(qemu, filepath.Join(dir, "none.patch"))
+	require.Error(t, err)
+}
+
 // A file is a component by its SHA-256.
 func TestAFileIsItsHash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bios.bin")

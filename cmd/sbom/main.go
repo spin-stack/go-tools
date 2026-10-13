@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +54,15 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	only := fs.String("only", "", "the packages shipped, comma-separated (apk)")
 	pins := fs.String("versions", versions.File, "the versions.yaml the pins are in (pins)")
 	subjectFile := fs.String("subject", "", "the file the merged BOM describes, by its hash (merge)")
+	patches := map[string]string{}
+	fs.Func("patches", "<name>=<dir>: the entry was built with dir's *.patch applied, in name order (pins)", func(v string) error {
+		n, dir, ok := strings.Cut(v, "=")
+		if !ok || n == "" || dir == "" {
+			return fmt.Errorf("%q is not <name>=<dir>", v)
+		}
+		patches[n] = dir
+		return nil
+	})
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -72,7 +83,7 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		say(stderr, "sbom: no kind", kind)
 		return 2
 	}
-	b, err := build(request{subject: subject, epoch: epoch, files: fs.Args(), distro: *distro, only: *only, pins: *pins, using: *subjectFile})
+	b, err := build(request{subject: subject, epoch: epoch, files: fs.Args(), distro: *distro, only: *only, pins: *pins, using: *subjectFile, patches: patches})
 	if err != nil {
 		say(stderr, err)
 		return 2
@@ -90,6 +101,7 @@ type request struct {
 	epoch                     time.Time
 	files                     []string
 	distro, only, pins, using string
+	patches                   map[string]string
 }
 
 // one is the request's one file, read.
@@ -164,7 +176,24 @@ var kinds = map[string]func(r request) (*cdx.BOM, error){
 			return nil, err
 		}
 		cs, err := sbom.Pins(v, r.files...)
-		return r.of(cs, nil, err)
+		if err != nil {
+			return nil, err
+		}
+		for i, c := range cs {
+			dir, ok := r.patches[c.Name]
+			if !ok {
+				continue
+			}
+			found, err := filepath.Glob(filepath.Join(dir, "*.patch"))
+			if err != nil || len(found) == 0 {
+				return nil, fmt.Errorf("sbom: %s has no *.patch in %s", c.Name, dir)
+			}
+			slices.Sort(found)
+			if cs[i], err = sbom.Patched(c, found...); err != nil {
+				return nil, err
+			}
+		}
+		return r.of(cs, nil, nil)
 	},
 	"file": func(r request) (*cdx.BOM, error) {
 		if len(r.files) != 1 {
