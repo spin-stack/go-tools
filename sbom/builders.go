@@ -257,6 +257,26 @@ func purlName(name string) string {
 	return name
 }
 
+// Patched is c built with the patches at paths applied to its source, in that order: each, its
+// text and its name, in c's pedigree, so what was compiled is the upstream and these changes to
+// it, and a scanner can tell a patched component from the upstream one.
+func Patched(c cdx.Component, paths ...string) (cdx.Component, error) {
+	if len(paths) == 0 {
+		return c, nil
+	}
+	var patches []cdx.Patch
+	for _, p := range paths {
+		raw, err := os.ReadFile(p) //nolint:gosec // a patch the build applied
+		if err != nil {
+			return cdx.Component{}, fmt.Errorf("sbom: %w", err)
+		}
+		patches = append(patches, cdx.Patch{Type: cdx.PatchTypeUnofficial,
+			Diff: &cdx.Diff{URL: filepath.Base(p), Text: &cdx.AttachedText{ContentType: "text/x-diff", Content: string(raw)}}})
+	}
+	c.Pedigree = &cdx.Pedigree{Patches: &patches}
+	return c, nil
+}
+
 // Pins are the versions.yaml entries named, each as what it is: a download by its URL and
 // SHA-256, a repository by its commit, an image by its digest, a module by its version.
 func Pins(v *versions.Versions, names ...string) ([]cdx.Component, error) {

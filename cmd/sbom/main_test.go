@@ -29,6 +29,10 @@ func TestEachKindWritesACheckedBOM(t *testing.T) {
 	pnpm := write("pnpm-lock.yaml", "importers:\n  .:\n    dependencies:\n      react:\n        version: 19.2.0\npackages:\n  react@19.2.0:\n    resolution: {integrity: sha512-AAAA}\nsnapshots:\n  react@19.2.0: {}\n")
 	pins := write("versions.yaml", "- name: snapshot\n  kind: date\n  version: 20261001T000000Z\n  track: today\n")
 	blob := write("bios.bin", "seabios")
+	patchDir := filepath.Join(dir, "patches")
+	require.NoError(t, os.MkdirAll(patchDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(patchDir, "b.patch"), []byte("--- b\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(patchDir, "a.patch"), []byte("--- a\n"), 0o600))
 	for name, tc := range map[string]struct {
 		args   []string
 		status int
@@ -39,6 +43,11 @@ func TestEachKindWritesACheckedBOM(t *testing.T) {
 		"apk":                 {args: []string{"apk", "-distro", "alpine", "-only", "musl", db}},
 		"pnpm":                {args: []string{"pnpm", pnpm}},
 		"pins":                {args: []string{"pins", "-versions", pins, "snapshot"}},
+		"pins, patched":       {args: []string{"pins", "-versions", pins, "-patches", "snapshot=" + patchDir, "snapshot"}},
+		"patches of no dir":   {args: []string{"pins", "-versions", pins, "-patches", "snapshot=" + filepath.Join(dir, "none"), "snapshot"}, status: 2},
+		"patches not n=dir":   {args: []string{"pins", "-versions", pins, "-patches", "snapshot", "snapshot"}, status: 2},
+		"patches of no name":  {args: []string{"pins", "-versions", pins, "-patches", "=" + patchDir, "snapshot"}, status: 2},
+		"patches in no dir":   {args: []string{"pins", "-versions", pins, "-patches", "snapshot=", "snapshot"}, status: 2},
 		"file":                {args: []string{"file", blob}},
 		"dpkg with no distro": {args: []string{"dpkg", pkgs}, status: 2},
 		"apk with no only":    {args: []string{"apk", "-distro", "alpine", db}, status: 2},
@@ -70,6 +79,14 @@ func TestEachKindWritesACheckedBOM(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, sbom.Check(b))
 			assert.Equal(t, "spin", b.Metadata.Component.Name)
+			if name == "pins, patched" {
+				// The directory's patches, in name order, as the build applies them.
+				var urls []string
+				for _, p := range *(*b.Components)[0].Pedigree.Patches {
+					urls = append(urls, p.Diff.URL)
+				}
+				assert.Equal(t, []string{"a.patch", "b.patch"}, urls)
+			}
 			assert.Equal(t, 0, run([]string{"check", out}, nil, &stdout, &stderr))
 		})
 	}
@@ -82,20 +99,23 @@ func TestARunMissingWhatItNeedsWritesNothing(t *testing.T) {
 	blob := filepath.Join(dir, "f")
 	require.NoError(t, os.WriteFile(blob, []byte("x"), 0o600))
 	out := filepath.Join(dir, "x.cdx.json")
+	const required = "-name, -version and -out are required"
 	for name, tc := range map[string]struct {
 		args  []string
 		epoch string
+		says  string
 	}{
-		"nothing":          {},
-		"no name":          {args: []string{"file", "-version", "v1", "-out", out, blob}},
-		"no version":       {args: []string{"file", "-name", "f", "-out", out, blob}},
-		"no out":           {args: []string{"file", "-name", "f", "-version", "v1", blob}},
-		"a bad epoch":      {args: []string{"file", "-name", "f", "-version", "v1", "-out", out, blob}, epoch: "soon"},
-		"an out not there": {args: []string{"file", "-name", "f", "-version", "v1", "-out", filepath.Join(dir, "no", "x.json"), blob}},
+		"nothing":          {says: "say go"},
+		"no name":          {args: []string{"file", "-version", "v1", "-out", out, blob}, says: required},
+		"no version":       {args: []string{"file", "-name", "f", "-out", out, blob}, says: required},
+		"no out":           {args: []string{"file", "-name", "f", "-version", "v1", blob}, says: required},
+		"a bad epoch":      {args: []string{"file", "-name", "f", "-version", "v1", "-out", out, blob}, epoch: "soon", says: "SOURCE_DATE_EPOCH"},
+		"an out not there": {args: []string{"file", "-name", "f", "-version", "v1", "-out", filepath.Join(dir, "no", "x.json"), blob}, says: "no such file"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			assert.Equal(t, 2, run(tc.args, func(string) string { return tc.epoch }, &stdout, &stderr))
+			assert.Contains(t, stderr.String(), tc.says)
 			_, err := os.Stat(out)
 			assert.True(t, os.IsNotExist(err))
 		})

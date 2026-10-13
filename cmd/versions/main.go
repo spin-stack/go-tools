@@ -45,6 +45,7 @@ Usage:
   versions env     <name>...          the same as KEY=value lines, for a shell to read
   versions version <name>             one entry's version
   versions ref     <name>             an image's reference, by its digest
+  versions url     <name>             a download's URL, at its version
   versions check                      what is behind its upstream; exits 1 when anything is
   versions bump    <name> [version]   pin an entry at a version, the newest by default
 
@@ -92,8 +93,8 @@ func run(ctx context.Context, argv []string) error {
 		}
 		fmt.Println(strings.Join(pins, sep))
 		return nil
-	case "version", "ref":
-		return one(v, cmd, names)
+	case "version", "ref", "url":
+		return one(os.Stdout, v, cmd, names)
 	case "check":
 		if len(names) != 0 {
 			return errors.New("check: takes no names; it checks every entry")
@@ -107,8 +108,8 @@ func run(ctx context.Context, argv []string) error {
 	}
 }
 
-// one says one entry's version, or an image's reference.
-func one(v *versions.Versions, cmd string, names []string) error {
+// one says one entry's version, an image's reference, or a download's URL.
+func one(w io.Writer, v *versions.Versions, cmd string, names []string) error {
 	if len(names) != 1 {
 		return fmt.Errorf("%s: name one entry", cmd)
 	}
@@ -116,15 +117,19 @@ func one(v *versions.Versions, cmd string, names []string) error {
 	if err != nil {
 		return err
 	}
-	if cmd == "version" {
-		fmt.Println(e.Version)
-		return nil
+	var out string
+	switch {
+	case cmd == "version":
+		out = e.Version
+	case cmd == "url" && e.Kind == versions.Download:
+		out = e.URL()
+	case cmd == "ref" && e.Kind == versions.Image:
+		out = e.Ref()
+	default:
+		return fmt.Errorf("%s: %s is a %s", cmd, e.Name, e.Kind)
 	}
-	if e.Kind != versions.Image {
-		return fmt.Errorf("%s is a %s, not an image", e.Name, e.Kind)
-	}
-	fmt.Println(e.Ref())
-	return nil
+	_, err = fmt.Fprintln(w, out)
+	return err
 }
 
 // bump pins an entry at a version, the newest by default, and writes the file.
