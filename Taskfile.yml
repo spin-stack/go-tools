@@ -56,6 +56,8 @@ tasks:
       # A vulnerability the code calls and that has a fix fails, the standard library's too: the
       # answer is the upgrade. It asks vuln.go.dev, so lint needs the network.
       - go run ./cmd/vulngate ./...
+      # The trusted root every repository verifies with is renewed here, the day Sigstore moves.
+      - go run ./cmd/trustroot -check
       - task: lint:workflows
 
   lint:workflows:

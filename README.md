@@ -3,10 +3,11 @@
 [![CI](https://github.com/spin-stack/go-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/spin-stack/go-tools/actions/workflows/ci.yml)
 
 The Go the spin-stack repositories build with, and hold their code to: tools a repository runs
-from its go.mod (`go tool <name>`), each a command under `cmd/`. Only `versions` and
-`versions/upstream` are packages another repository imports; the rest is `internal/`. Nothing here is
-linked into what any of them ships but versions' reading half, which spin's binaries use to read
-the pins they carry.
+from its go.mod (`go tool <name>`), each a command under `cmd/`. Only `versions`,
+`versions/upstream` and `trustroot` are packages another repository imports; the rest is
+`internal/`. Nothing here is linked into what any of them ships but versions' reading half, which
+spin's binaries use to read the pins they carry, and the trusted root, which what verifies a
+release's signatures checks them against.
 
 ## versions
 
@@ -85,6 +86,15 @@ included; `Gate.Reads` says otherwise.
 
 `GITHUB_TOKEN`, when set, is sent to api.github.com, which answers sixty unauthenticated requests
 an hour.
+
+## trustroot
+
+`trustroot.Load()` is Sigstore's trusted root - the Fulcio authorities, Rekor logs, CT logs and
+timestamp authorities a bundle is checked against - embedded as TUF served it, so a signature is
+verified with nothing reached over the network. Every repository takes the same root by its
+go-tools version: renewing it is `go run ./cmd/trustroot -write` here, a commit, and a go-tools
+bump there. `go tool trustroot -check` fails when TUF serves anything else, byte for byte; it
+needs the network, and this repository's `task lint` runs it.
 
 ## mutate
 
