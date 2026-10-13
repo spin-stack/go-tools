@@ -102,9 +102,9 @@ packages that import it. What the tests need besides the code is the environment
 under its hack/testpg, which starts one PostgreSQL for every test process.
 
 
-## ctxlife, testquality, refs
+## ctxlife, testquality, refs, vulngate
 
-Three gates a repository runs over itself from `task lint`, each failing with what to do:
+Four gates a repository runs over itself from `task lint`, each failing with what to do:
 
 - `go tool ctxlife [dir...]` fails on a goroutine that uses the context its starter was given and
   is not waited for: it stops working the moment the call that started it returns. A detached
@@ -115,3 +115,7 @@ Three gates a repository runs over itself from `task lint`, each failing with wh
 - `go tool refs [-files 'AGENTS.md ...'] [-allow file]` fails on a repository path or a `task
   <name>` that the prose an agent loads (AGENTS.md and CLAUDE.md, by default) names and the tree
   does not have; `-allow` lists the ones named on purpose, `<file><TAB><reference>  # why`.
+- `go tool vulngate [govulncheck flags] ./...` runs govulncheck and fails on a vulnerability the
+  code calls and that has a fix, the standard library's included: the answer is the upgrade, and
+  for the standard library that is go.mod's `toolchain` line. One only imported, or with no fix,
+  is listed and passes. It asks vuln.go.dev for the database, so it needs the network.

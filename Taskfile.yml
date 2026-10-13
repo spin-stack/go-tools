@@ -39,18 +39,23 @@ tasks:
     cmds:
       # As this user, on this host's module and build caches: the container fetches nothing a
       # build here has not, and leaves nothing root's behind. Its own cache is under _output.
+      # GOTOOLCHAIN=local: the linter reads the code with the Go its image carries; go.mod's
+      # toolchain line is what builds and tests run under, and fetching it in here has no sumdb.
       - mkdir -p {{.OUT}}/golangci-lint
       - >-
         docker run --rm -u {{.OWNER}} -v {{.ROOT_DIR}}:/work -w /work
         -v "$(go env GOMODCACHE)":/go/pkg/mod -v "$(go env GOCACHE)":/cache/go-build
         -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/cache/go-build -e GOLANGCI_LINT_CACHE=/work/_output/golangci-lint
-        -e HOME=/tmp
+        -e HOME=/tmp -e GOTOOLCHAIN=local
         $({{.VERSIONS}} ref golangci-lint) golangci-lint run ./...
       # What this repository gives the others, held to itself first.
       - go run ./cmd/ctxlife
       - go run ./cmd/testquality ./...
       - go run ./cmd/refs
       - go run ./cmd/mutate -stale-exempts
+      # A vulnerability the code calls and that has a fix fails, the standard library's too: the
+      # answer is the upgrade. It asks vuln.go.dev, so lint needs the network.
+      - go run ./cmd/vulngate ./...
       - task: lint:workflows
 
   lint:workflows:
