@@ -1,0 +1,90 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/spin-stack/go-tools/provenance/github-workflow/v1",
+    "externalParameters": {
+      "workflow": {
+        "repository": "https://github.com/spin-stack/spin",
+        "path": ".github/workflows/release.yml",
+        "ref": "refs/heads/main"
+      },
+      "version": "v20261013.1"
+    },
+    "internalParameters": {
+      "eventName": "workflow_dispatch",
+      "runnerEnvironment": "github-hosted"
+    },
+    "resolvedDependencies": [
+      {
+        "uri": "git+https://github.com/spin-stack/spin@refs/heads/main",
+        "digest": {
+          "gitCommit": "0123456789abcdef0123456789abcdef01234567"
+        }
+      },
+      {
+        "name": "actionlint",
+        "uri": "pkg:golang/github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
+        "annotations": {
+          "version": "v1.7.12"
+        }
+      },
+      {
+        "name": "alloy",
+        "uri": "git+https://github.com/grafana/alloy@v1.15.0",
+        "digest": {
+          "gitCommit": "3333333333333333333333333333333333333333"
+        },
+        "annotations": {
+          "archiveSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "version": "v1.15.0"
+        }
+      },
+      {
+        "name": "base.qcow2",
+        "digest": {
+          "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      },
+      {
+        "name": "debian",
+        "uri": "docker://debian:trixie",
+        "digest": {
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "annotations": {
+          "version": "trixie"
+        }
+      },
+      {
+        "name": "debian-snapshot",
+        "annotations": {
+          "version": "20261001T000000Z"
+        }
+      },
+      {
+        "name": "qemu",
+        "uri": "https://download.qemu.org/qemu-11.0.0.tar.xz",
+        "digest": {
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "annotations": {
+          "version": "11.0.0"
+        }
+      },
+      {
+        "name": "uefivars",
+        "uri": "pkg:pypi/uefivars@1.2.0",
+        "annotations": {
+          "version": "1.2.0"
+        }
+      }
+    ]
+  },
+  "runDetails": {
+    "builder": {
+      "id": "https://github.com/spin-stack/spin/.github/workflows/release.yml@refs/heads/main"
+    },
+    "metadata": {
+      "invocationId": "https://github.com/spin-stack/spin/actions/runs/38396720671/attempts/1"
+    }
+  }
+}
