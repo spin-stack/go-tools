@@ -157,7 +157,9 @@ Four gates a repository runs over itself from `task lint`, each failing with wha
 - `go tool refs [-files 'AGENTS.md ...'] [-allow file]` fails on a repository path or a `task
   <name>` that the prose an agent loads (AGENTS.md and CLAUDE.md, by default) names and the tree
   does not have; `-allow` lists the ones named on purpose, `<file><TAB><reference>  # why`.
-- `go tool vulngate [govulncheck flags] ./...` runs govulncheck and fails on a vulnerability the
-  code calls and that has a fix, the standard library's included: the answer is the upgrade, and
-  for the standard library that is go.mod's `toolchain` line. One only imported, or with no fix,
-  is listed and passes. It asks vuln.go.dev for the database, so it needs the network.
+- `go tool vulngate [govulncheck flags, each -flag=value] ./...` runs govulncheck and fails on a
+  vulnerability the code calls and that has a fix, the standard library's included: the answer is
+  the upgrade, and for the standard library that is go.mod's `toolchain` line. One only imported,
+  or with no fix, is listed and passes. It asks vuln.go.dev for the database, so it needs the
+  network. Each main package the patterns name is scanned in a process of its own, then what no
+  main imports: one call graph of everything was 11.5 GB on spin, the largest program alone 4.1.
