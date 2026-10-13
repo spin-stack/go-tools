@@ -83,25 +83,27 @@ func Read(r io.Reader) ([]Finding, error) {
 // shown is how many of a vulnerability's symbols its line names: the rest are counted.
 const shown = 3
 
-// Judge says, one line per vulnerability sorted by its id, what fails the build and what is only
-// listed. govulncheck reports one vulnerability at module, package and symbol level, a symbol per
-// call site: a line names the module and version, the symbols the code reaches (or the packages
-// it imports) and the fix. A vulnerability that fails is not listed again.
+// Judge says, one line per vulnerability in a module sorted by the two, what fails the build and
+// what is only listed. govulncheck reports one vulnerability at module, package and symbol level,
+// a symbol per call site, and one advisory can name more than one module (the standard library's
+// http2 and golang.org/x/net's): a line names the module and version, the symbols the code
+// reaches (or the packages it imports) and that module's fix. One that fails is not listed again.
 func Judge(findings []Finding) (failing, listed []string) {
 	type vuln struct {
-		module, version, fix string
-		symbols              []string
-		fails                bool
+		id, module, version, fix string
+		symbols                  []string
+		fails                    bool
 	}
 	byID := map[string]*vuln{}
 	for _, f := range findings {
 		if len(f.Trace) == 0 || f.Trace[0].Package == "" {
 			continue // module level: the package and symbol findings say more
 		}
-		v, ok := byID[f.OSV]
+		key := f.OSV + " " + f.Trace[0].Module
+		v, ok := byID[key]
 		if !ok {
-			v = &vuln{module: f.Trace[0].Module, version: f.Trace[0].Version, fix: f.fix()}
-			byID[f.OSV] = v
+			v = &vuln{id: f.OSV, module: f.Trace[0].Module, version: f.Trace[0].Version, fix: f.fix()}
+			byID[key] = v
 		}
 		if f.Fails() && !v.fails {
 			v.fails, v.symbols = true, nil
@@ -110,15 +112,15 @@ func Judge(findings []Finding) (failing, listed []string) {
 			v.symbols = append(v.symbols, f.symbol())
 		}
 	}
-	for _, id := range slices.Sorted(maps.Keys(byID)) {
-		v := byID[id]
+	for _, key := range slices.Sorted(maps.Keys(byID)) {
+		v := byID[key]
 		slices.Sort(v.symbols)
 		symbols := slices.Compact(v.symbols)
 		named := strings.Join(symbols[:min(len(symbols), shown)], ", ")
 		if more := len(symbols) - shown; more > 0 {
 			named += fmt.Sprintf(" and %d more", more)
 		}
-		line := fmt.Sprintf("%s: %s %s, %s (%s)", id, v.module, v.version, named, v.fix)
+		line := fmt.Sprintf("%s: %s %s, %s (%s)", v.id, v.module, v.version, named, v.fix)
 		if v.fails {
 			failing = append(failing, line)
 		} else {

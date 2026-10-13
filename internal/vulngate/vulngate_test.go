@@ -45,6 +45,12 @@ func TestAFixedVulnerabilityTheCodeCallsFails(t *testing.T) {
 			strings.ReplaceAll(called, "Parse", "A"), strings.ReplaceAll(called, "Parse", "B"),
 			strings.ReplaceAll(called, "Parse", "C"), strings.ReplaceAll(called, "Parse", "D"),
 		}, failing: []string{"GO-2026-0001: golang.org/x/net v0.29.0, golang.org/x/net/html.A, golang.org/x/net/html.B, golang.org/x/net/html.C and 1 more (fixed in v0.30.0)"}},
+		"one advisory in two modules, a line each": {stream: []string{
+			strings.ReplaceAll(stdlib, "GO-2026-0003", "GO-2026-0001"), called,
+		}, failing: []string{
+			"GO-2026-0001: golang.org/x/net v0.29.0, golang.org/x/net/html.Parse (fixed in v0.30.0)",
+			"GO-2026-0001: stdlib go1.27.2, net/http.*Server.Serve (fixed in go1.27.3)",
+		}},
 		"called, with no fix": {stream: []string{config, unfixed},
 			listed: []string{"GO-2026-0002: example.com/lib v1.0.0, example.com/lib.Do (no fix)"}},
 		"the standard library's": {stream: []string{config, stdlib},
