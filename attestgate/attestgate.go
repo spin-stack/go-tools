@@ -88,12 +88,16 @@ func (g Gate) uploads(s step) bool {
 			return true
 		}
 	}
-	return uploadCommands.MatchString(s.Run) || runsTask(s.Run, g.UploadTasks)
+	return uploadCommands.MatchString(s.command()) || runsTask(s.command(), g.UploadTasks)
 }
 
 func (g Gate) attests(s step) bool {
-	return attestCommand.MatchString(s.Run) || runsTask(s.Run, g.AttestTasks)
+	return attestCommand.MatchString(s.command()) || runsTask(s.command(), g.AttestTasks)
 }
+
+// command is the step's script with each backslash-continued line joined to the next, as the
+// shell reads it: `docker buildx build \` with `--push` three lines down is one command.
+func (s step) command() string { return strings.ReplaceAll(s.Run, "\\\n", " ") }
 
 // conditional is whether a step might not run, or might fail and be passed: an attestation that
 // may not happen is not one.
