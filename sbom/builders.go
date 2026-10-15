@@ -58,7 +58,7 @@ func Go(version, path string) (cdx.Component, error) {
 	if err != nil {
 		return cdx.Component{}, err
 	}
-	deps := Modules(info)
+	deps := Modules(info, version)
 	return cdx.Component{
 		Type: cdx.ComponentTypeApplication, Name: filepath.Base(path), Version: version,
 		PackageURL: "pkg:golang/" + info.Main.Path + "@" + version, Hashes: sha(sum), Components: &deps,
@@ -68,14 +68,22 @@ func Go(version, path string) (cdx.Component, error) {
 // Modules is what a Go build info says the binary is made of: the standard library of its
 // toolchain, and each module - the replacement where there is one, since that is what was
 // compiled - with the go.sum hash it was checked against.
-func Modules(info *debug.BuildInfo) []cdx.Component {
+//
+// A module of the binary's own tree - replaced by a directory of it (Alloy's `=> ../syntax`), or a
+// workspace's (Grafana's apps) - is stamped (devel), which no scanner matches: it was compiled
+// from the tree at the binary's version, so it is that, under the path it is published by.
+func Modules(info *debug.BuildInfo, version string) []cdx.Component {
 	deps := []cdx.Component{{
 		Type: cdx.ComponentTypeLibrary, Name: "stdlib", Version: strings.TrimPrefix(info.GoVersion, "go"),
 		PackageURL: "pkg:golang/stdlib@" + strings.TrimPrefix(info.GoVersion, "go"),
 	}}
 	for _, d := range info.Deps {
+		published := d.Path
 		if d.Replace != nil {
 			d = d.Replace
+		}
+		if d.Version == "(devel)" {
+			d = &debug.Module{Path: published, Version: version}
 		}
 		c := cdx.Component{Type: cdx.ComponentTypeLibrary, Name: d.Path, Version: d.Version, PackageURL: "pkg:golang/" + d.Path + "@" + d.Version}
 		if d.Sum != "" {

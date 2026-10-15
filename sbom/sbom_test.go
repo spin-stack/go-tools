@@ -260,14 +260,17 @@ func TestDpkgListingIsTheDistributions(t *testing.T) {
 }
 
 // A module replaced is the replacement, which is what was compiled, with the go.sum hash it was
-// checked against; the standard library is the toolchain's.
+// checked against; the standard library is the toolchain's; and a module of the binary's own tree,
+// which Go stamps (devel), is the binary's version under the path it is published by.
 func TestModulesAreWhatWasCompiled(t *testing.T) {
 	info := &debug.BuildInfo{GoVersion: "go1.27.2", Deps: []*debug.Module{
 		{Path: "golang.org/x/net", Version: "v0.60.0", Sum: "h1:abc="},
 		{Path: "github.com/a/b", Version: "v1.0.0", Replace: &debug.Module{Path: "github.com/fork/b", Version: "v1.0.1", Sum: "h1:def="}},
+		{Path: "github.com/grafana/alloy/syntax", Version: "v0.1.0", Replace: &debug.Module{Path: "../syntax", Version: "(devel)"}},
+		{Path: "github.com/grafana/grafana/apps/playlist", Version: "(devel)"},
 	}}
 	got := map[string]string{}
-	for _, c := range sbom.Modules(info) {
+	for _, c := range sbom.Modules(info, "v13.2.4") {
 		sum := ""
 		if c.Properties != nil {
 			sum = (*c.Properties)[0].Value
@@ -276,6 +279,7 @@ func TestModulesAreWhatWasCompiled(t *testing.T) {
 	}
 	assert.Equal(t, map[string]string{
 		"pkg:golang/stdlib@1.27.2": "", "pkg:golang/golang.org/x/net@v0.60.0": "h1:abc=", "pkg:golang/github.com/fork/b@v1.0.1": "h1:def=",
+		"pkg:golang/github.com/grafana/alloy/syntax@v13.2.4": "", "pkg:golang/github.com/grafana/grafana/apps/playlist@v13.2.4": "",
 	}, got)
 }
 
