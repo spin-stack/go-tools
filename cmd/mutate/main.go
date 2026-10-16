@@ -31,6 +31,9 @@ func main() {
 	// a loop append for ever has the machine long before it runs out.
 	mem := flag.Float64("mem", 0, "how many GiB one test process and what it starts may hold, 0 for its share of the memory free when the run starts, negative for no bound (Linux)")
 	staleOnly := flag.Bool("stale-exempts", false, "report every mutate-exempt reason in the tree that covers no edit this tool makes, and fail on one")
+	// Off unless named: a run from scratch is the one that can be trusted with a file a test
+	// reads from outside its package (mutate.Cache says why).
+	cacheDir := flag.String("cache", "", "a directory keeping the edits refused, so a run over the same code asks only about the rest; empty for none")
 	flag.Parse()
 
 	if *staleOnly {
@@ -83,12 +86,25 @@ func main() {
 		os.Exit(2)
 	}
 
+	cache, chosen, known, err := fromCache(*cacheDir, chosen, importers)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(2)
+	}
+
 	mutate.Share(*jobs, int64(*mem*(1<<30)))
 	started := time.Now()
 	t, err := mutate.RunAll(chosen, importers, *timeout, *jobs, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(2)
+	}
+	if cache != nil {
+		if err := cache.Keep(t.Refused); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(2)
+		}
+		t.Killed += len(known)
 	}
 	reportCosts(time.Since(started))
 	survived := t.Survived
@@ -117,6 +133,24 @@ func main() {
 		"run can reach (root, KVM, a cloud account), `mutate-lane: <TestName>` in its doc comment, naming " +
 		"the lane's test that holds it.")
 	os.Exit(1)
+}
+
+// fromCache splits chosen into the edits to ask about and those the cache in dir says a run over
+// the same code refused; with no dir, there is no cache and every edit is asked.
+func fromCache(dir string, chosen []mutate.Mutation, importers map[string][]string) (*mutate.Cache, []mutate.Mutation, []mutate.Mutation, error) {
+	if dir == "" {
+		return nil, chosen, nil, nil
+	}
+	cache, err := mutate.OpenCache(dir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fresh, known, err := cache.Known(chosen, importers)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fmt.Printf("mutate: %d refused by a run over the same code already (%s); asking about %d\n", len(known), dir, len(fresh))
+	return cache, fresh, known, nil
 }
 
 // reportCosts says where the run's time went, by what each process was for: the processes of
