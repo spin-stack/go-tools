@@ -91,6 +91,9 @@ func TestAnEditThatAllocatesForEverIsStoppedAndRefused(t *testing.T) {
 	if tally.Killed != 1 || !strings.Contains(said.String(), "refused   "+plan[0].String()+" (its tests held over 0.2 GiB, and were stopped)") {
 		t.Errorf("the edit in the package's binary was not refused at its bound: %s", said.String())
 	}
+	if len(tally.Refused) != 1 {
+		t.Errorf("an edit refused at its bound is not among the refusals a cache keeps: %v", tally.Refused)
+	}
 
 	overlay, err := Overlay(plan[0], t.TempDir())
 	if err != nil {
