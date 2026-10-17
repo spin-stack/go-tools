@@ -3,13 +3,19 @@ package upstream
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	ggcrregistry "github.com/google/go-containerregistry/pkg/registry"
+	"github.com/google/go-containerregistry/pkg/v1/random"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/spin-stack/go-tools/versions"
 )
@@ -81,32 +87,46 @@ func TestADownloadsPinIsTheSumAtTheVersionAsked(t *testing.T) {
 	}
 }
 
-// docker is a stand-in for the docker CLI that prints the digest in digestFile, or fails when
-// there is none.
-func docker(t *testing.T) (digestFile string) {
+// registry is a registry in this process, whose host a localhost reference names over plain HTTP.
+func registry(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	digestFile = filepath.Join(dir, "digest")
-	script := "#!/bin/sh\nexec cat " + digestFile + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil { //nolint:gosec // an executable is the point
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return digestFile
+	srv := httptest.NewServer(ggcrregistry.New(ggcrregistry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(srv.Close)
+	return strings.TrimPrefix(srv.URL, "http://")
 }
 
-// An image's pin is the digest its tag names now, as docker reads it.
-func TestAnImagesPinIsItsDigest(t *testing.T) {
-	digestFile := docker(t)
-	e := versions.Entry{Name: "go", Kind: versions.Image, Source: "golang"}
-	if got, err := resolve(t.Context(), e, "1.27"); err == nil {
-		t.Errorf("docker failed and the pin is %q", got)
-	}
-	if err := os.WriteFile(digestFile, []byte("sha256:abc\n"), 0o600); err != nil {
+// push tags a multi-platform image as ref, and returns its index's digest.
+func push(t *testing.T, ref string) string {
+	t.Helper()
+	idx, err := random.Index(64, 1, 2)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := resolve(t.Context(), e, "1.27"); err != nil || got != "sha256:abc" {
-		t.Errorf("pin %q, %v", got, err)
+	r, err := name.ParseReference(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.WriteIndex(r, idx, remote.WithContext(t.Context())); err != nil {
+		t.Fatal(err)
+	}
+	d, err := idx.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d.String()
+}
+
+// An image's pin is the digest of what its tag names now: the index, which every platform's
+// manifest is reached from, and nothing but the digest.
+func TestAnImagesPinIsItsDigest(t *testing.T) {
+	e := versions.Entry{Name: "go", Kind: versions.Image, Source: registry(t) + "/golang"}
+	if got, err := resolve(t.Context(), e, "1.27"); err == nil {
+		t.Errorf("the tag is not there and the pin is %q", got)
+	}
+	want := push(t, e.Source+":1.27")
+	push(t, e.Source+":1.28")
+	if got, err := resolve(t.Context(), e, "1.27"); err != nil || got != want {
+		t.Errorf("pin %q, %v; want %s", got, err, want)
 	}
 }
 
@@ -154,17 +174,15 @@ func TestCheckSaysWhereEachEntryStands(t *testing.T) {
 	sum := sha256.Sum256([]byte("v1.2.0's file"))
 	missing := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(missing.Close)
-	digestFile := docker(t)
-	if err := os.WriteFile(digestFile, []byte("sha256:new\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	golang := registry(t) + "/golang"
+	now := push(t, golang+":1.27")
 
 	git := versions.Entry{Name: "g", Kind: versions.Git, Source: r.dir, Version: "master", Track: "branch"}
 	moved, gone := git, git
 	moved.Name, moved.Pin = "moved", r.second
 	gone.Name, gone.Source = "gone", filepath.Join(r.dir, "nothing")
 	git.Pin = r.head
-	image := versions.Entry{Name: "i", Kind: versions.Image, Source: "golang", Version: "1.27", Pin: "sha256:old", Track: "digest"}
+	image := versions.Entry{Name: "i", Kind: versions.Image, Source: golang, Version: "1.27", Pin: "sha256:old", Track: "digest"}
 	// Behind by its version, and its file at that version is the same bytes: still behind, since
 	// only a file tracked by a commit is excused.
 	download := versions.Entry{Name: "d", Kind: versions.Download, Source: srv.URL + "/{version}", Version: "v1.0.0",
@@ -191,7 +209,7 @@ func TestCheckSaysWhereEachEntryStands(t *testing.T) {
 		{"master", false, ""},
 		{"master", true, "master is now " + r.head},
 		{"master", false, "ls-remote"},
-		{"1.27", true, "1.27 is now sha256:new"},
+		{"1.27", true, "1.27 is now " + now},
 		{"v1.2.0", true, ""},
 		{"v1.2.0", false, ""},
 		{r.head, false, ""},
