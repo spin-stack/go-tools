@@ -154,9 +154,10 @@ Four gates a repository runs over itself from `task lint`, each failing with wha
 - `go tool testquality [-allow file] ./...` fails on a test that cannot fail - nothing in it
   reaches `t.Error`, `t.Fatal`, `t.Skip`, an assertion package, or a helper handed the test - and
   on one skipped unconditionally. The allowlist is a ratchet: an entry nothing matches fails too.
-- `go tool refs [-files 'AGENTS.md ...'] [-allow file]` fails on a repository path or a `task
-  <name>` that the prose an agent loads (AGENTS.md and CLAUDE.md, by default) names and the tree
-  does not have; `-allow` lists the ones named on purpose, `<file><TAB><reference>  # why`.
+- `go tool refs [-files 'AGENTS.md ...'] [-allow file] [-decisions docs/decisions]` fails on a
+  repository path, a `task <name>`, an `ADR-NNNN` or a `pkg.Symbol` of a missing `internal/pkg`
+  that the prose an agent loads (AGENTS.md and CLAUDE.md, by default) names and the tree does
+  not have; `-allow` lists the ones named on purpose, `<file><TAB><reference>  # why`.
 - `go tool vulngate [govulncheck flags, each -flag=value] ./...` runs govulncheck and fails on a
   vulnerability the code calls and that has a fix, the standard library's included: the answer is
   the upgrade, and for the standard library that is go.mod's `toolchain` line. One only imported,
