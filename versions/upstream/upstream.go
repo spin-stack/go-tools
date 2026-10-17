@@ -1,6 +1,6 @@
 // Package upstream is where each entry of a versions.yaml stands against what it pins: the newest
 // its track finds, the pin of a version, a bump, and a download taken only as the bytes it pins. It is the half of versions that reaches the
-// network and runs git and docker, so that a program which embeds its versions.yaml links only
+// network and runs git, so that a program which embeds its versions.yaml links only
 // the half that reads it.
 package upstream
 
@@ -20,6 +20,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/crane"
 
 	"github.com/spin-stack/go-tools/internal/fetch"
 	"github.com/spin-stack/go-tools/versions"
@@ -88,11 +91,13 @@ func resolve(ctx context.Context, e versions.Entry, version string) (string, err
 	e.Version = version
 	switch e.Kind {
 	case versions.Image:
-		out, err := run(ctx, "docker", "buildx", "imagetools", "inspect", e.Source+":"+version, "--format", "{{.Manifest.Digest}}")
+		// Asked of the registry, not of docker: the buildx a CI builder installs printed its whole
+		// listing for `imagetools inspect --format`, and that was written as the pin.
+		pin, err := crane.Digest(e.Source+":"+version, crane.WithContext(ctx), crane.WithAuthFromKeychain(authn.DefaultKeychain))
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("versions: %s:%s: %w", e.Source, version, err)
 		}
-		return strings.TrimSpace(out), nil
+		return pin, nil
 	case versions.Git:
 		out, err := run(ctx, "git", "ls-remote", e.Source,
 			"refs/tags/"+version, "refs/tags/"+version+"^{}", "refs/heads/"+version)
