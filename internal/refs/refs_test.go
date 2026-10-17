@@ -252,3 +252,44 @@ func TestABuildOutputIsNotInTheTreeWhetherOrNotItWasBuilt(t *testing.T) {
 	}
 	wants(t, check(t, root, onlyRoot("build")), "cmd/cli/web")
 }
+
+// An ADR id resolves to a decision record, and a symbol is a finding only of a package whose
+// path is itself missing: matching every `x.Y` would report json.Unmarshal.
+func TestADecisionAndASymbolOfAMissingPackage(t *testing.T) {
+	for _, tc := range []struct {
+		name, prose string
+		want        []string
+	}{
+		{"a recorded decision", "As ADR-0001 says.\n", nil},
+		{"a decision never recorded", "As ADR-0001 and ADR-0002 say.\n", []string{"ADR-0002"}},
+		{"a symbol of a missing package", "`internal/wal` is gone, and so is wal.StrictOrder.\n",
+			[]string{"internal/wal", "wal.StrictOrder"}},
+		{"a symbol whose package is in the tree", "`internal/db/queries` and queries.Fleet, json.Unmarshal.\n", nil},
+		{"a symbol with no missing path beside it", "wal.StrictOrder alone.\n", nil},
+		{"another package's symbol beside a missing one", "`internal/wal` is gone, json.Unmarshal is not.\n",
+			[]string{"internal/wal"}},
+		{"a nested package is its path alone", "`internal/db/sweep.Run`.\n", []string{"internal/db/sweep"}},
+		{"a lowercase name is not a symbol", "`internal/wal` and wal.strict.\n", []string{"internal/wal"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := tree(t, tc.prose)
+			if err := os.MkdirAll(filepath.Join(root, "docs/decisions"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "docs/decisions/ADR-0001-one.md"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			found, err := refs.Check(refs.Options{
+				Root:      root,
+				Files:     []string{"CLAUDE.md"},
+				TopDirs:   []string{"internal", "docs", "cmd"},
+				Tasks:     onlyRoot("build"),
+				Decisions: "docs/decisions",
+			})
+			if err != nil {
+				t.Fatalf("check: %v", err)
+			}
+			wants(t, found, tc.want...)
+		})
+	}
+}

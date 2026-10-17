@@ -1,5 +1,6 @@
 // Package refs decides whether the prose this repository loads into every session still
-// points at things that exist: a repository path, and a `task <name>`.
+// points at things that exist: a repository path, a `task <name>`, a decision record's ADR id,
+// and a `pkg.Symbol` of a package that is gone.
 //
 // It was 141 lines of shell, and the shell is why it is here. That script parsed `task
 // --list-all --json` with a sed expression; when the expression matched nothing it reported
@@ -31,7 +32,7 @@ import (
 type Finding struct {
 	// File is the prose that makes the reference, relative to the repository root.
 	File string
-	// Ref is the reference as written: a path, or "task <name>".
+	// Ref is the reference as written: a path, "task <name>", an ADR id, or pkg.Symbol.
 	Ref string
 }
 
@@ -63,6 +64,9 @@ type Options struct {
 	TopDirs []string
 	// Tasks lists the task names of a directory, relative to Root.
 	Tasks TaskLister
+	// Decisions is the directory, relative to Root, where `ADR-NNNN` resolves to a file whose
+	// name starts with it.
+	Decisions string
 }
 
 // extensions closes the last segment of a path reference. A segment carries no dot otherwise,
@@ -95,18 +99,30 @@ func Check(o Options) ([]Finding, error) {
 	}
 
 	var found []Finding
-	for _, file := range o.Files {
+	texts := make([]string, len(o.Files))
+	gone := map[string]bool{}
+	for i, file := range o.Files {
 		body, err := os.ReadFile(filepath.Join(o.Root, file))
 		if err != nil {
 			return nil, fmt.Errorf("refs: reading %s: %w", file, err)
 		}
 		text := string(body)
+		texts[i] = text
 
 		for _, ref := range pathRE.matches(text) {
 			if resolves(o.Root, ref) {
 				continue
 			}
 			found = append(found, Finding{File: file, Ref: ref})
+			if pkg, ok := strings.CutPrefix(ref, "internal/"); ok && goPackage.MatchString(pkg) {
+				gone[pkg] = true
+			}
+		}
+
+		for _, id := range adrRE.matches(text) {
+			if !globResolves(o.Root, path.Join(o.Decisions, id)+"*") {
+				found = append(found, Finding{File: file, Ref: id})
+			}
 		}
 
 		// A component's file legitimately says "generate is a root task", so its own
@@ -120,6 +136,17 @@ func Check(o Options) ([]Finding, error) {
 				continue
 			}
 			found = append(found, Finding{File: file, Ref: "task " + name})
+		}
+	}
+
+	// A symbol of a package that is gone, wherever its path was found missing. Scoped to those
+	// packages because every `x.Y` would drown in json.Unmarshal and t.Fatalf.
+	if len(gone) > 0 {
+		symbolRE := symbolPattern(gone)
+		for i, file := range o.Files {
+			for _, ref := range symbolRE.matches(texts[i]) {
+				found = append(found, Finding{File: file, Ref: ref})
+			}
 		}
 	}
 
@@ -179,6 +206,19 @@ func pathPattern(tops []string) (matcher, error) {
 // taskRE reads a task name the way these files write a command: inside backticks. A flag is
 // not a name, so `task --list` yields nothing.
 var taskRE = matcher{re: regexp.MustCompile("`task ([a-z][A-Za-z0-9:_-]*)"), group: 1}
+
+var adrRE = matcher{re: regexp.MustCompile(`\b(ADR-[0-9]{4})\b`), group: 1}
+
+// goPackage is the one segment after internal/ that names a package a symbol can be cited from.
+var goPackage = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+func symbolPattern(pkgs map[string]bool) matcher {
+	names := make([]string, 0, len(pkgs))
+	for p := range pkgs {
+		names = append(names, p)
+	}
+	return matcher{re: regexp.MustCompile(`\b((?:` + strings.Join(names, "|") + `)\.[A-Z][A-Za-z0-9_]*)`), group: 1}
+}
 
 // resolves is whether the reference names something in the tree. A path git ignores is not in
 // it even when it is on disk: it is what a build or a run left behind - the dashboard's copy in

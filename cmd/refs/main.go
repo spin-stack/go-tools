@@ -1,7 +1,8 @@
-// Command refs holds a repository's prose to its tree: every repository path and every `task
-// <name>` the files -files names point at must resolve, or be in the allowlist (-allow) with a
-// reason. The files are the AGENTS.md and CLAUDE.md an agent loads into every session, by
-// default; spin adds its documents.
+// Command refs holds a repository's prose to its tree: every repository path, `task <name>`,
+// ADR id (under -decisions) and symbol of a missing internal package the files -files names
+// point at must resolve, or be in the allowlist (-allow) with a reason. The files are the
+// AGENTS.md and CLAUDE.md an agent loads into every session, by default; spin adds its
+// documents and storage's code.
 package main
 
 import (
@@ -25,9 +26,10 @@ func main() {
 	pathspecs := flag.String("files", "AGENTS.md CLAUDE.md */AGENTS.md */CLAUDE.md",
 		"the prose to read, as git pathspecs separated by spaces: a tracked file one names is read")
 	taskExe := flag.String("task", taskExeFromEnv(), "the task binary to ask for names")
+	decisions := flag.String("decisions", "docs/decisions", "the directory an ADR-NNNN resolves in")
 	flag.Parse()
 
-	if err := run(".", *allowPath, strings.Fields(*pathspecs), *taskExe); err != nil {
+	if err := run(".", *allowPath, strings.Fields(*pathspecs), *taskExe, *decisions); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -40,7 +42,7 @@ func taskExeFromEnv() string {
 	return "task"
 }
 
-func run(root, allowPath string, pathspecs []string, taskExe string) error {
+func run(root, allowPath string, pathspecs []string, taskExe, decisions string) error {
 	allowed, err := allow.Read(allowPath)
 	if err != nil {
 		return fmt.Errorf("refs: %w", err)
@@ -65,10 +67,11 @@ func run(root, allowPath string, pathspecs []string, taskExe string) error {
 	}
 
 	found, err := refs.Check(refs.Options{
-		Root:    root,
-		Files:   files,
-		TopDirs: tops,
-		Tasks:   taskLister(root, taskExe),
+		Root:      root,
+		Files:     files,
+		TopDirs:   tops,
+		Tasks:     taskLister(root, taskExe),
+		Decisions: decisions,
 	})
 	if err != nil {
 		return err
@@ -99,7 +102,7 @@ func run(root, allowPath string, pathspecs []string, taskExe string) error {
 	if len(stale) > 0 || len(unexplained) > 0 {
 		return errors.New("refs: the prose and the tree disagree")
 	}
-	fmt.Println("OK: every path and task this repository's prose names resolves or is explained.")
+	fmt.Println("OK: every reference this repository's prose makes resolves or is explained.")
 	return nil
 }
 
