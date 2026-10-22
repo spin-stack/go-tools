@@ -39,6 +39,28 @@ func memAvailable(meminfo []byte) int64 {
 	return 0
 }
 
+// Confine holds every test process to its bound in a cgroup of its own when this run was
+// delegated one, and says which; empty when the bound is measured from /proc. Call it once,
+// after Share and before anything is asked.
+//
+// mutate-lane: TestATestProcessIsHeldByItsCgroup
+func Confine() (string, error) {
+	dir, err := delegated()
+	testCgroup = dir
+	return dir, err
+}
+
+// bound is what a test process is held to, as a report names it.
+func bound() string {
+	switch {
+	case testCgroup == "":
+		return gib(memLimit)
+	case memLimit == 0:
+		return fmt.Sprintf("%d tasks", pidsMax)
+	}
+	return fmt.Sprintf("%s or %d tasks", gib(memLimit), pidsMax)
+}
+
 // gib is n bytes as people read it.
 func gib(n int64) string {
 	return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
@@ -48,6 +70,9 @@ func gib(n int64) string {
 // memLimit between them; exceeded says they were. A go test is the go command, its compiler and
 // the test binary, and the binary is the one that grows.
 func bounded(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error) {
+	if testCgroup != "" {
+		return confined(what, cmd)
+	}
 	limit := memLimit
 	if limit == 0 {
 		out, err := combined(what, cmd)

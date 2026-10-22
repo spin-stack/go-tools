@@ -84,7 +84,7 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 			// Named with its bound: the edit is refused, and the loop it made is worth knowing of.
 			t.Killed++
 			t.Refused = append(t.Refused, m)
-			_, _ = fmt.Fprintf(w, "  refused   %s (its tests held over %s, and were stopped)\n", m, gib(memLimit))
+			_, _ = fmt.Fprintf(w, "  refused   %s (its tests held over %s, and were stopped)\n", m, bound())
 		case Unbuildable:
 			t.Unbuildable++
 			_, _ = fmt.Fprintf(w, "  no edit   %s (does not build)\n", m)

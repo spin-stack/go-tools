@@ -1,6 +1,7 @@
 package mutate
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -88,5 +89,23 @@ func TestATreeIsEverythingUnderItsRoot(t *testing.T) {
 	}
 	if tree, rss := treeOf(procs, 99); len(tree) != 1 || rss != 0 {
 		t.Errorf("a process gone since it was listed walked as %v, holding %d", tree, rss)
+	}
+}
+
+// A bound is named as it is held: memory alone when it is measured from /proc, and the tasks too
+// in a cgroup, which may bound them alone.
+func TestABoundIsNamedAsItIsHeld(t *testing.T) {
+	t.Cleanup(func() { testCgroup, memLimit = "", 0 })
+	memLimit = 3 << 30
+	if got := bound(); got != "3.0 GiB" {
+		t.Errorf("measured from /proc, the bound is named %q", got)
+	}
+	testCgroup = "/sys/fs/cgroup/run.scope"
+	if got, want := bound(), fmt.Sprintf("3.0 GiB or %d tasks", pidsMax); got != want {
+		t.Errorf("in a cgroup, the bound is named %q, want %q", got, want)
+	}
+	memLimit = 0
+	if got, want := bound(), fmt.Sprintf("%d tasks", pidsMax); got != want {
+		t.Errorf("in a cgroup with no memory bound, the bound is named %q, want %q", got, want)
 	}
 }
