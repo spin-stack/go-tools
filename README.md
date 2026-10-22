@@ -143,6 +143,12 @@ tests whose coverage reaches a line are run for it; a package with no tests is a
 packages that import it. What the tests need besides the code is the environment's: spin runs it
 under its hack/testpg, which starts one PostgreSQL for every test process.
 
+Each test process is held to its share of the memory free when the run starts (`-mem`). Run in a
+cgroup systemd delegated it - `systemd-run --user --scope -p Delegate=yes go tool mutate` - it
+starts each one in a child cgroup the kernel holds to that memory with no swap and to 1024 tasks,
+and kills what the process leaves running; anywhere else it measures each process's tree from
+/proc, which a test that starts itself without end escapes.
+
 
 ## ctxlife, testquality, refs, vulngate
 

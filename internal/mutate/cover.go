@@ -116,7 +116,7 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 			// and say so, since an edit only it reaches then reads as one nothing holds.
 			said, exceeded, runErr := bounded("cover: run one test", run)
 			if exceeded {
-				runErr = fmt.Errorf("held over the %s a test process may, and stopped", gib(memLimit))
+				runErr = fmt.Errorf("held over the %s a test process may, and stopped", bound())
 			}
 			failed := runErr != nil
 			if failed {

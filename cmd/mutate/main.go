@@ -3,7 +3,9 @@
 // A repository runs it as a Go tool (`tool github.com/spin-stack/go-tools/cmd/mutate` in its
 // go.mod, `go tool mutate`), from anywhere in its module. What its tests need besides the code -
 // a database they share, say - is the environment's: spin runs it under hack/testpg, which starts
-// one PostgreSQL for every test process and says where in a variable.
+// one PostgreSQL for every test process and says where in a variable. Run in a cgroup systemd
+// delegated it (`systemd-run --user --scope -p Delegate=yes`), it starts each test process in a
+// child the kernel holds to its memory and its tasks.
 package main
 
 import (
@@ -93,6 +95,7 @@ func main() {
 	}
 
 	mutate.Share(*jobs, int64(*mem*(1<<30)))
+	confine()
 	started := time.Now()
 	t, err := mutate.RunAll(chosen, importers, *timeout, *jobs, os.Stdout)
 	if err != nil {
@@ -133,6 +136,22 @@ func main() {
 		"run can reach (root, KVM, a cloud account), `mutate-lane: <TestName>` in its doc comment, naming " +
 		"the lane's test that holds it.")
 	os.Exit(1)
+}
+
+// confine holds each test process in a cgroup of its own where this run was delegated one, and
+// says which it does either way: a run that should have been given a cgroup and was not reads the
+// same as one that was, until a test forks without end.
+func confine() {
+	dir, err := mutate.Confine()
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(2)
+	case dir != "":
+		fmt.Printf("mutate: each test process in a cgroup of its own under %s\n", dir)
+	default:
+		fmt.Printf("mutate: test memory measured from /proc; run under `systemd-run --user --scope -p Delegate=yes` to have the kernel hold it, and the processes a test starts\n")
+	}
 }
 
 // fromCache splits chosen into the edits to ask about and those the cache in dir says a run over
