@@ -47,6 +47,11 @@ if it were wrong.
 		href="vulngate/"
 		description="govulncheck as a gate: fails only on a vulnerability the code calls and that has a fix, the standard library included."
 	/>
+	<LinkCard
+		title="taskgate"
+		href="taskgate/"
+		description="Fails on a workflow step that is not one task. What CI does is written once, in the Taskfile, and a developer runs exactly the same thing."
+	/>
 </CardGrid>
 
 ## What a build takes in, and what it ships
@@ -60,7 +65,7 @@ if it were wrong.
 	<LinkCard
 		title="sfw"
 		href="sfw/"
-		description="Every npm, pnpm and yarn install through Socket Firewall Free, which refuses confirmed malware before it lands. A gate fails on an install that isn't, and on a workflow that runs a package manager instead of a task."
+		description="pnpm as the one package manager, and every install through Socket Firewall Free, which refuses confirmed malware before it lands. A gate fails on npm, yarn, or an install that skips the firewall."
 	/>
 	<LinkCard
 		title="Provenance and SBOMs"

@@ -1,6 +1,6 @@
 ---
 title: sfw
-description: Every npm, pnpm and yarn install through Socket Firewall Free, at a pinned binary, and a gate that fails on one that is not - or on a workflow that runs a package manager itself.
+description: pnpm as the one package manager, every install through Socket Firewall Free at a pinned binary, and a gate that fails on npm, yarn, or an install that skips the firewall.
 ---
 
 An `npm install` runs code from strangers: a package's install scripts run the moment it lands,
@@ -9,7 +9,8 @@ before any review or test. A compromised release of a popular package is in thou
 stands between the package manager and the registry and refuses a package Socket has confirmed
 as malware before it is downloaded. It needs no account.
 
-`go tool sfw` makes that the only way a spin-stack repository installs packages:
+`go tool sfw` makes that the only way a spin-stack repository installs packages, and pnpm the
+only package manager it installs them with:
 
 ```sh
 go tool sfw pnpm install --frozen-lockfile   # the install, through the firewall
@@ -31,34 +32,29 @@ it the one that was reviewed. A repository gets a newer firewall by moving to a 
 
 ## The gate
 
-`go tool sfw check`, from `task lint`, reads the files git lists and fails on two things:
+`go tool sfw check`, from `task lint`, reads the files git lists and fails on:
 
-| where | fails on | the fix |
+| what | where | the fix |
 |---|---|---|
-| Taskfiles, shell scripts, Dockerfiles | a command that fetches packages without the firewall: `npm install`, `npm ci`, `pnpm install`, `pnpm add`, `pnpm dlx`, `yarn`, `npx`, ... | `go tool sfw <the command>` |
-| workflows and composite actions | any package manager command, the firewall's included | a task that runs it, and `task <name>` in the workflow |
+| `npm`, `npx`, `yarn`, `bun`, `bunx`, through the firewall or not | Taskfiles, workflows, shell scripts, Dockerfiles | pnpm: `pnpm dlx` for `npx`, through `go tool sfw` when it fetches |
+| a pnpm command that fetches without the firewall: `install`, `add`, `update`, `dlx`, `import`, ... and `pnpx` | the same | `go tool sfw <the command>` |
+| `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `bun.lock` | anywhere | `pnpm import`, then delete it |
+| a `package.json` without `"packageManager": "pnpm@<version>"` | anywhere | name pnpm and its version |
 
-Commands that only run what is already installed - `pnpm build`, `pnpm run test`, `pnpm exec` -
-are left alone outside workflows. Text that only names a command, like a task's `desc` or a
-comment, is not a command.
+One package manager means one lockfile and one set of install rules, `pnpm-workspace.yaml`'s:
+which dependencies may run scripts, and how old a release must be before it is taken. Commands that
+only run what is installed - `pnpm build`, `pnpm run test`, `pnpm exec` - are left alone. Text
+that only names a command, like a task's `desc` or a comment, is not a command, and nothing under
+`testdata/` is read.
 
-The workflow rule is the other half: CI runs `task site`, not `pnpm install && pnpm build`, so
-what CI does is what a developer's `task site` does, and the install in it goes through the
-firewall in both places.
+Workflows are held by [taskgate](../taskgate/): every step runs a task, so the install in CI is
+the same `task` a developer runs, and goes through the firewall in both places.
 
 ```yaml title="Taskfile.yml"
 site:
   cmds:
     - go tool sfw pnpm --dir site install --frozen-lockfile
     - pnpm --dir site build
-```
-
-```yaml title=".github/workflows/pages.yml"
-- uses: pnpm/action-setup@<commit> # v6.1.0
-- uses: actions/setup-node@<commit> # v7.1.0
-  with:
-    node-version: '22'
-- run: task site
 ```
 
 ## What it does not cover

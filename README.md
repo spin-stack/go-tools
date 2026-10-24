@@ -15,7 +15,8 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`refs`](https://spin-stack.github.io/go-tools/refs/) | paths, tasks and packages that AGENTS.md or CLAUDE.md names and the tree no longer has |
 | [`vulngate`](https://spin-stack.github.io/go-tools/vulngate/) | vulnerabilities the code calls and that have a fix |
 | [`versions`](https://spin-stack.github.io/go-tools/versions/) | pins written outside `versions.yaml`, and pins behind their upstream |
-| [`sfw`](https://spin-stack.github.io/go-tools/sfw/) | an npm, pnpm or yarn install that does not go through Socket Firewall, and a workflow that runs a package manager instead of a task |
+| [`sfw`](https://spin-stack.github.io/go-tools/sfw/) | npm, npx or yarn, and a pnpm install that does not go through Socket Firewall |
+| [`taskgate`](https://spin-stack.github.io/go-tools/taskgate/) | a workflow step that is not one `task`, so CI and a developer run the same thing |
 | [`provenance`, `sbom`, `attestgate`, `trustroot`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM |
 
 ```sh
