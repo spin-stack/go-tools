@@ -1,0 +1,36 @@
+/* Written by `task palette` from palette.toml (spin-stack/brand). Edit palette.toml, not this file. */
+:root {
+	--sl-color-accent-low: #163D51;
+	--sl-color-accent: #27BFE8;
+	--sl-color-accent-high: #87D6EF;
+	--sl-color-white: #F5F8FB;
+	--sl-color-gray-1: #EEF2F9;
+	--sl-color-gray-2: #E6EDF6;
+	--sl-color-gray-3: #9AA9C2;
+	--sl-color-gray-4: #6A7EA0;
+	--sl-color-gray-5: #33435F;
+	--sl-color-gray-6: #172035;
+	--sl-color-black: #111827;
+	--sl-color-banner-bg: #1B435C;
+	--sl-color-banner-text: #E6EDF6;
+}
+:root[data-theme='light'] {
+	--sl-color-accent-low: #C9DFEB;
+	--sl-color-accent: #0A6FA3;
+	--sl-color-accent-high: #0D3B5A;
+	--sl-color-white: #0A0E17;
+	--sl-color-gray-1: #0E131F;
+	--sl-color-gray-2: #111827;
+	--sl-color-gray-3: #4A5871;
+	--sl-color-gray-4: #6E7D96;
+	--sl-color-gray-5: #B9C6D8;
+	--sl-color-gray-6: #DEE6F1;
+	--sl-color-black: #FFFFFF;
+	--sl-color-banner-bg: #BDD7E6;
+	--sl-color-banner-text: #111827;
+	--sl-color-gray-7: #F0F4F9;
+}
+:root {
+	--sl-font: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--sl-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}

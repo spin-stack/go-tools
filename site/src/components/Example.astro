@@ -1,0 +1,12 @@
+---
+// One file of mutate's example (src/lib/example.ts), shown as it is in testdata. Anything else
+// given is the code block's own: a title, lines marked or inserted.
+import type { ComponentProps } from 'astro/types';
+import { Code } from '@astrojs/starlight/components';
+import { example } from '../lib/example';
+
+type Props = { path: string } & Omit<ComponentProps<typeof Code>, 'code'>;
+const { path, lang = path.endsWith('.go') ? 'go' : 'text', ...rest } = Astro.props;
+---
+
+<Code code={example(path)} lang={lang} {...rest} />

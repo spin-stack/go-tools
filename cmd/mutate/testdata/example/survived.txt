@@ -1,0 +1,8 @@
+mutate: 2 mutation(s) planned across 1 file(s); running 2
+  SURVIVED  limiter.go:22 (Allow): the field is not written
+  refused   limiter.go:19 (Allow): < becomes >=
+mutate: 1 refused, 1 survived, 0 did not build, 0 in packages with no tests
+
+Each line above marked SURVIVED is code whose behaviour no test holds, in its package or in the ones importing it:
+  limiter.go:22 (Allow): the field is not written
+Answer it with a test that refuses the edit, or with `mutate-exempt: <reason>` on the line when the edit changes nothing a caller can see - or, for a function only a lane this run does not run can reach (root, KVM, a cloud account), `mutate-lane: <TestName>` in its doc comment, naming the lane's test that holds it.

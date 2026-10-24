@@ -1,0 +1,200 @@
+---
+title: mutate
+description: Breaks the code a change touched, one small edit at a time, and fails when no test notices. Coverage says a line ran; mutate says whether anything checks it.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import Example from '../../components/Example.astro';
+
+Coverage tells you a line **ran** during the tests. It does not tell you whether any test would
+**notice** if that line did something else. `mutate` checks exactly that, for the code your
+change touched: it makes small, deliberate mistakes in it - a `<` turned into `>=`, a field
+assignment dropped, a constant off by one - and runs your tests against each. A mistake the tests
+still pass is behaviour nothing holds.
+
+```sh
+go tool mutate -base origin/main
+```
+
+## An example: 100% coverage, one bug no test would catch
+
+A change adds `Allow` to a rate limiter: one call per interval goes through.
+
+<Example path="change/limiter.go" title="limiter.go" ins={{ range: '17-24' }} />
+
+It comes with two tests, and they execute every statement:
+
+<Example path="change/limiter_test.go" title="limiter_test.go" />
+
+```text
+$ go test -cover ./...
+ok  	example.com/ratelimit	0.002s	coverage: 100.0% of statements
+```
+
+Green, fully covered, ready to merge. Here is what `mutate` says:
+
+<Example path="survived.txt" title="go tool mutate -base origin/main" wrap mark={2} />
+
+It made two edits to `Allow`. Turning `<` into `>=` broke a test, so that line is held.
+**Deleting `l.last = now` broke nothing.** That deletion is a real bug: a limiter that never
+records the call it let through lets every call through. The tests missed it because neither of
+them ever calls `Allow` twice. The first test starts from a fresh limiter, and the second one sets
+`last` by hand.
+
+### The answer is a test
+
+The test that was missing is the one that describes what a limiter is for:
+
+<Example path="answer/limiter_test.go" title="limiter_test.go" ins={{ range: '22-32' }} />
+
+<Example path="answered.txt" title="go tool mutate -base origin/main" wrap />
+
+<Aside type="note" title="This example is real">
+The code, the tests and both outputs on this page are files in
+[`cmd/mutate/testdata/example`](https://github.com/spin-stack/go-tools/tree/main/cmd/mutate/testdata/example).
+`TestTheExampleTheSiteShows` runs `mutate` over them on every CI run and fails if the output
+changes. The timing table a run also prints is left out here.
+</Aside>
+
+## When a survivor is not a missing test
+
+An edit that survives means one of three things, and each has its own answer:
+
+| what the survivor means | the answer |
+|---|---|
+| Behaviour a caller depends on, and no test checks it. | **Write the test.** That's the common case, as in the example above. |
+| The edit changes nothing a caller can see: `-1` and `-2` both mean "no limit". | `// mutate-exempt: <reason>` on the line, or on the line above it. |
+| Only a test this run cannot reach checks the function, one that needs root, KVM or a cloud account. | `mutate-lane: <TestName>` in the function's doc comment, naming that test. |
+
+```go
+for _, sub := range m.re.FindAllStringSubmatch(text, -1) { // mutate-exempt: any n < 0 is every match
+	...
+}
+
+// Mount attaches the volume to the guest.
+//
+// mutate-lane: TestMountOnARealHost
+func Mount(v Volume) error {
+```
+
+An exemption has to stay true. `go tool mutate -stale-exempts` lists every `mutate-exempt`
+over a line `mutate` would not edit anyway, and fails if it finds one, so reasons don't pile up
+after the code under them changed. It needs no diff and runs in seconds, so it belongs in
+`task lint`.
+
+## What it edits
+
+Only functions with a line the diff added or changed, and in them:
+
+| edit | example | what it asks |
+|---|---|---|
+| a comparison or operator inverted | `<` becomes `>=`, `==` becomes `!=`, `&&` becomes `\|\|`, `+` becomes `-` | Does a test sit on each side of this decision? |
+| a returned comparison reduced to its left side | `return a && b` becomes `return a` | Does a test need both halves? |
+| a field assignment dropped | `p.last = now` becomes `_ = now` | Does anything read what this function leaves behind? |
+| an integer constant moved by one | `3` becomes `4` | Does a test pin the boundary? |
+
+It leaves out edits nobody could observe: a slice's capacity or a map's size hint, how many
+seconds a timeout is, values returned next to an error that is never nil (`return 0, err`), the
+conditions of branches that only log, generated code, and lines with a `mutate-exempt`. Except for
+the last, these used to be answered with exemptions by hand, often enough that `mutate` now skips
+them itself.
+
+## How a run stays fast
+
+Mutation testing has a reputation for being slow, because the naive approach builds and tests the
+whole module once per edit. `mutate` avoids most of that:
+
+<Steps>
+
+1. **Only the diff.** It edits the functions your change reached, not the module. A typical change
+   is a handful of functions.
+
+2. **A cap, spread out.** `-max` (12 by default) limits the edits per run. They are spread over the
+   changed functions one edit per function per round, so the cap covers many functions and doesn't
+   spend everything on the first one.
+
+3. **One build per package.** All of a package's edits are compiled into a single test binary, each
+   behind a switch, and turned on one at a time. That's one build per package, not one per edit.
+
+4. **Only the tests that reach the line.** Each test runs once with coverage first. An edit is then
+   tried only against the tests that execute its line, since a test that never runs it cannot
+   notice.
+
+5. **Through the importers.** A package with no tests of its own is tried through the packages that
+   import it. If those don't exist either, the run reports the package as untested rather than
+   counting it as a survivor.
+
+</Steps>
+
+`-cache <dir>` keeps the edits already refused, so a second run over the same code tries only the
+rest. It is off by default: a run from scratch is the one to trust when a test reads files from
+outside its package.
+
+## Running it
+
+Add it to the repository's `go.mod` as a tool:
+
+```sh
+go get -tool github.com/spin-stack/go-tools/cmd/mutate
+```
+
+A Taskfile entry, and the step in CI that runs it after the tests pass. On a pull request it diffs
+against the target branch, and on a push against the commit before it (this is go-tools' own
+workflow):
+
+```yaml title="Taskfile.yml"
+mutate:
+  vars:
+    BASE: '{{.BASE | default "origin/main"}}'
+  cmds:
+    - go tool mutate -base {{.BASE}} -max 200
+```
+
+```yaml title=".github/workflows/ci.yml"
+- uses: actions/checkout@...
+  with:
+    fetch-depth: 0 # the diff needs the branch point
+
+- name: What this change broke, and whether a test noticed
+  env:
+    EVENT: ${{ github.event_name }}
+    BASE_REF: ${{ github.base_ref }}
+    BEFORE: ${{ github.event.before }}
+  run: |
+    if [ "$EVENT" = "pull_request" ]; then base="origin/$BASE_REF"; else base="$BEFORE"; fi
+    git rev-parse --verify "$base^{commit}" >/dev/null 2>&1 || base=HEAD~1
+    task mutate BASE="$base"
+```
+
+| flag | default | |
+|---|---|---|
+| `-base` | `origin/main` | what the diff is taken against; Go files nothing has committed yet count as changed too |
+| `-max` | `12` | how many edits to run at most |
+| `-j` | half the CPUs | how many edits run at once |
+| `-timeout` | `5m` | how long one package's tests may take |
+| `-mem` | its share of free memory | GiB one test process may hold; negative for no limit (Linux) |
+| `-cache` | none | a directory to keep refused edits in between runs |
+| `-stale-exempts` | | report and fail on `mutate-exempt` reasons over nothing |
+
+It exits 0 when every edit was refused, 1 when one survived, and 2 when it could not run.
+
+### Tests that need an environment
+
+`mutate` runs your tests as `go test` would, in the environment it was started in. Anything they
+need besides the code, like a database, comes from that environment. spin runs `mutate` under its
+`hack/testpg`, which starts one PostgreSQL for every test process.
+
+### Keeping a broken edit from taking the machine
+
+An edit can turn a loop into one that never ends or a slice into one that grows forever. Every
+test process is limited to its share of the memory that was free when the run started (`-mem`).
+On Linux, run it in a cgroup systemd delegates:
+
+```sh
+systemd-run --user --scope -p Delegate=yes go tool mutate
+```
+
+With that, each test process gets a child cgroup the kernel holds to its memory, with no swap and
+at most 1024 tasks, and anything a test leaves running is killed. Without it, `mutate` measures
+each process tree from `/proc`, which a test that keeps starting new processes can escape. The
+run's first lines say which of the two it is doing.

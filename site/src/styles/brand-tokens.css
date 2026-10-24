@@ -1,0 +1,68 @@
+/* Written by `task palette` from palette.toml (spin-stack/brand). Edit palette.toml, not this file. */
+:root, .spin-dark {
+	--spin-accent: #27BFE8;
+	--spin-accent-text: #27BFE8;
+	--spin-border: #33435F;
+	--spin-border-strong: #6A7EA0;
+	--spin-destructive: #C2304F;
+	--spin-error: #F57AB4;
+	--spin-label: #5FE3D6;
+	--spin-muted: #9AA9C2;
+	--spin-on-accent: #111827;
+	--spin-overlay: #273552;
+	--spin-page: #111827;
+	--spin-raised: #202C47;
+	--spin-success: #3DDC97;
+	--spin-surface: #172035;
+	--spin-text: #E6EDF6;
+	--spin-warning: #FFC857;
+	--spin-accent-hover: #13293A;
+	--spin-accent-selected: #163D51;
+}
+:root[data-theme='light'] {
+	--spin-accent: #0A6FA3;
+	--spin-accent-text: #085E8C;
+	--spin-border: #B9C6D8;
+	--spin-border-strong: #6E7D96;
+	--spin-destructive: #B4234A;
+	--spin-error: #9B1B73;
+	--spin-label: #0C3C84;
+	--spin-muted: #4A5871;
+	--spin-on-accent: #FFFFFF;
+	--spin-overlay: #FFFFFF;
+	--spin-page: #FFFFFF;
+	--spin-raised: #DEE6F1;
+	--spin-success: #1E7046;
+	--spin-surface: #F0F4F9;
+	--spin-text: #111827;
+	--spin-warning: #8A5A00;
+	--spin-accent-hover: #E7F1F6;
+	--spin-accent-selected: #C9DFEB;
+}
+:root {
+	--spin-brand-blue: #2F6BE3;
+	--spin-brand-cyan: #27BFE8;
+	--spin-brand-deep: #0C3C84;
+	--spin-brand-frost: #EAF0F6;
+	--spin-brand-mint: #5FE3D6;
+	--spin-brand-navy: #111827;
+	--spin-font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--spin-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--spin-text-reading: 16px;
+	--spin-text-dense: 13px;
+	--spin-line-height: 1.6;
+	--spin-heading-weight: 600;
+	--spin-heading-tracking: -0.02em;
+	--spin-measure: 72ch;
+	--spin-sidebar: 17rem;
+	--spin-radius-sm: 4px;
+	--spin-radius: 8px;
+	--spin-radius-lg: 12px;
+	--spin-target: 24px;
+	--spin-target-touch: 44px;
+	--spin-duration-fast: 120ms;
+	--spin-duration: 200ms;
+	--spin-duration-slow: 400ms;
+	--spin-duration-draw: 700ms;
+	--spin-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}

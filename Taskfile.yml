@@ -5,6 +5,7 @@
 #                     gates run on itself: ctxlife, testquality, refs, and actionlint over .github/
 #   task mutate       break what the change against BASE (origin/main) touched, and ask the tests
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
+#   task site         the documentation site under site/, built into site/dist
 
 version: '3'
 
@@ -79,6 +80,20 @@ tasks:
       BASE: '{{.BASE | default "origin/main"}}'
     cmds:
       - go run ./cmd/mutate -base {{.BASE}} -max 200
+
+  site:
+    desc: Build the documentation site (site/, Astro Starlight) into site/dist; task site:dev serves it with live reload.
+    dir: site
+    cmds:
+      - pnpm install --frozen-lockfile
+      - pnpm build
+
+  site:dev:
+    desc: Serve the documentation site with live reload.
+    dir: site
+    cmds:
+      - pnpm install --frozen-lockfile
+      - pnpm dev
 
   versions:
     desc: Say which of versions.yaml's pins are behind their upstream (exits 1 when any is).
