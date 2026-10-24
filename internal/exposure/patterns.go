@@ -44,8 +44,17 @@ func DefaultPatterns() []Pattern {
 			Re:   regexp.MustCompile(`\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b`),
 		},
 		{
+			// The whole name, judged by its last label: gateway.internal.example is an example's,
+			// and a regexp that stopped at .internal would call it a host inside a network.
 			Kind: "internal-host",
-			Re:   regexp.MustCompile(`\b(?:[a-z0-9-]+\.)+(?:internal|local|corp|lan|intranet)\b|\bip-\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\b`),
+			Re:   regexp.MustCompile(`\b(?:[a-z0-9-]+\.)+[a-z0-9-]+\b`),
+			Skip: func(name string) bool {
+				return !slices.Contains([]string{"internal", "local", "corp", "lan", "intranet"}, name[strings.LastIndex(name, ".")+1:])
+			},
+		},
+		{
+			Kind: "internal-host",
+			Re:   regexp.MustCompile(`\bip-\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\b`),
 		},
 		{
 			Kind: "email",
