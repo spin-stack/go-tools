@@ -24,7 +24,7 @@ func TestAPrivateValueIsFoundAndAnExampleIsNot(t *testing.T) {
 		"role arn:aws:iam::210987654321:role/deploy and arn:aws:iam::123456789012:role/example",
 		`"account_id": "345678901234"`,
 		"the subnet 10.42.0.0/16, the gateway 192.168.1.1, 172.20.3.4 and 172.32.0.1, and 8.8.8.8",
-		"cp.spin.internal, printer.local, ip-10-0-1-2 and spin.dev",
+		"cp.spin.internal, printer.local, ip-10-0-1-2 and spin.dev, but gateway.internal.example is an example",
 		"ana@acme.io, ops@example.com, bot@e2e.test, git@github.com, ssh-ed25519@openssh.com, getty@tty2.service, 1+x@users.noreply.github.com, noreply@acme.io, no-reply@acme.io, git@acme.io",
 	}, "\n")
 	repo, _ := exposure.PrivateRepos("spin-stack", []string{"spin", "ci"})
