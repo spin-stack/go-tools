@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,19 +85,25 @@ func TestTheExampleTheSiteShows(t *testing.T) {
 }
 
 // abridged is what a run says about the edits, without what differs from one run to the next:
-// how it bounds the tests' memory, how its package was built, and where the time went.
+// how it bounds the tests' memory, how its package was built, where the time went, and the order
+// the edits finished in - each is said as it is answered, and two answered at once are said in
+// either order. They are sorted, so a survivor comes first.
 func abridged(out string) string {
-	var kept []string
+	var head, edits, tail []string
 	verdict := false
 	for _, line := range strings.Split(out, "\n") {
 		switch {
-		case verdict, strings.Contains(line, " planned across "),
-			strings.HasPrefix(line, "  SURVIVED  "), strings.HasPrefix(line, "  refused   "):
-			kept = append(kept, line)
+		case verdict:
+			tail = append(tail, line)
+		case strings.Contains(line, " planned across "):
+			head = append(head, line)
+		case strings.HasPrefix(line, "  SURVIVED  "), strings.HasPrefix(line, "  refused   "):
+			edits = append(edits, line)
 		case strings.HasPrefix(line, "mutate: ") && strings.Contains(line, " refused, "):
 			verdict = true
-			kept = append(kept, line)
+			tail = append(tail, line)
 		}
 	}
-	return strings.Join(kept, "\n")
+	slices.Sort(edits)
+	return strings.Join(slices.Concat(head, edits, tail), "\n")
 }
