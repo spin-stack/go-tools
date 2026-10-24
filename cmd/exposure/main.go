@@ -39,6 +39,7 @@ func main() {
 	leaksConfig := flag.String("gitleaks-config", "", "the repository's gitleaks config, as a path in its tree at HEAD (hack/gitleaks.toml)")
 	mirror := flag.String("mirror", "", "where the mirror clone is kept, cloned when absent and fetched when present; a temporary one by default")
 	github := flag.Bool("github", true, "read the repository's issues, pull requests, comments and releases on GitHub")
+	private := flag.String("private", "", "the owner's repositories that stay private, comma-separated, for links into them; by default those the token can see, and a workflow's token sees none")
 	flag.Parse()
 	if flag.NArg() != 1 || strings.Count(flag.Arg(0), "/") != 1 {
 		fmt.Fprintln(os.Stderr, "usage: exposure [flags] <owner/repo>")
@@ -47,7 +48,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	status, err := run(ctx, os.Stdout, options{
 		repo: flag.Arg(0), allow: *allowPath, patterns: *patternsPath, leaksConfig: *leaksConfig,
-		mirror: *mirror, github: *github,
+		mirror: *mirror, github: *github, private: *private,
 	})
 	stop()
 	if err != nil {
@@ -58,8 +59,8 @@ func main() {
 }
 
 type options struct {
-	repo, allow, patterns, leaksConfig, mirror string
-	github                                     bool
+	repo, allow, patterns, leaksConfig, mirror, private string
+	github                                              bool
 }
 
 func run(ctx context.Context, w io.Writer, o options) (int, error) {
@@ -67,25 +68,11 @@ func run(ctx context.Context, w io.Writer, o options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	patterns := exposure.DefaultPatterns()
-	if o.patterns != "" {
-		own, err := exposure.ReadPatterns(o.patterns)
-		if err != nil {
-			return 0, err
-		}
-		patterns = append(patterns, own...)
-	}
 	owner, name, _ := strings.Cut(o.repo, "/")
-	var gh exposure.GitHub
-	if o.github {
-		gh = exposure.GitHub{API: "https://api.github.com", Token: token()}
-		private, err := gh.PrivateRepos(ctx, owner, name)
-		if err != nil {
-			return 0, fmt.Errorf("listing %s's private repositories: %w", owner, err)
-		}
-		if p, ok := exposure.PrivateRepos(owner, private); ok {
-			patterns = append(patterns, p)
-		}
+	gh := exposure.GitHub{API: "https://api.github.com", Token: token()}
+	patterns, err := kinds(ctx, o, gh, owner, name)
+	if err != nil {
+		return 0, err
 	}
 
 	dir := o.mirror
@@ -150,6 +137,32 @@ func run(ctx context.Context, w io.Writer, o options) (int, error) {
 	}
 	_, _ = fmt.Fprintf(w, "OK: every value found is answered (%d allowlist line(s)); a person still reads the list above before the switch.\n", len(allowed))
 	return 0, nil
+}
+
+// kinds is what the repository is read for: the default patterns, its own, and links into the
+// owner's repositories that stay private.
+func kinds(ctx context.Context, o options, gh exposure.GitHub, owner, name string) ([]exposure.Pattern, error) {
+	patterns := exposure.DefaultPatterns()
+	if o.patterns != "" {
+		own, err := exposure.ReadPatterns(o.patterns)
+		if err != nil {
+			return nil, err
+		}
+		patterns = append(patterns, own...)
+	}
+	// Named, the same list wherever this runs: a workflow's token sees no private repository of
+	// the owner, and a person's sees them all, so asked, one run would find links the other cannot.
+	private := strings.FieldsFunc(o.private, func(r rune) bool { return r == ',' })
+	if o.private == "" && o.github {
+		var err error
+		if private, err = gh.PrivateRepos(ctx, owner, name); err != nil {
+			return nil, fmt.Errorf("listing %s's private repositories: %w", owner, err)
+		}
+	}
+	if p, ok := exposure.PrivateRepos(owner, private); ok {
+		patterns = append(patterns, p)
+	}
+	return patterns, nil
 }
 
 // mirrorClone makes dir a mirror of url - every ref, refs/pull/* included - or brings one up to

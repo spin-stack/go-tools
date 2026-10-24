@@ -86,7 +86,7 @@ Some things no pattern can judge, and `exposure` lists them rather than pretendi
 
 ```sh
 go get -tool github.com/spin-stack/go-tools/cmd/exposure
-go tool exposure [-allow file] [-patterns file] [-gitleaks-config path] [-mirror dir] <owner/repo>
+go tool exposure [-allow file] [-patterns file] [-gitleaks-config path] [-mirror dir] [-private repos] <owner/repo>
 ```
 
 | flag | |
@@ -95,6 +95,7 @@ go tool exposure [-allow file] [-patterns file] [-gitleaks-config path] [-mirror
 | `-patterns` | the repository's own kinds |
 | `-gitleaks-config` | the repository's gitleaks config, as a path in its tree at `HEAD` |
 | `-mirror` | keep the mirror clone in a directory, fetched on the next run; a temporary one by default |
+| `-private` | the owner's repositories that stay private, comma-separated; by default those the token can see. A workflow's token sees none, so a scheduled job names them |
 | `-github=false` | skip the GitHub API: commits only |
 
 It needs `git`, `go` (gitleaks runs as `go run` at the pinned version) and, for a private
