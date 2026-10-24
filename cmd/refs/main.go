@@ -25,30 +25,17 @@ func main() {
 	allowPath := flag.String("allow", "", "references made on purpose to something that is not here (none by default)")
 	pathspecs := flag.String("files", "AGENTS.md CLAUDE.md */AGENTS.md */CLAUDE.md",
 		"the prose to read, as git pathspecs separated by spaces: a tracked file one names is read")
-	taskExe := flag.String("task", taskExeFromEnv(), "the task binary to ask for names")
+	taskExe := flag.String("task", os.Getenv("TASK_EXE"), "the task binary to ask for names: TASK_EXE by default, else the Task go.mod pins (go tool task), else task on PATH")
 	decisions := flag.String("decisions", "docs/decisions", "the directory an ADR-NNNN resolves in")
 	flag.Parse()
 
-	if err := run(".", *allowPath, strings.Fields(*pathspecs), *taskExe, *decisions); err != nil {
+	if err := run(".", *allowPath, strings.Fields(*pathspecs), refs.TaskCommand(*taskExe), *decisions); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-// taskExeFromEnv is the Task to ask: TASK_EXE when it is set, else the Task the module's go.mod
-// pins, else task on PATH. A repository that takes Task as a go.mod tool runs it as `go tool task`,
-// which puts no task on PATH, so a CI that has only that has no task there to find.
-func taskExeFromEnv() string {
-	if v := os.Getenv("TASK_EXE"); v != "" {
-		return v
-	}
-	if out, err := exec.Command("go", "tool", "-n", "task").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
-		return strings.TrimSpace(string(out))
-	}
-	return "task"
-}
-
-func run(root, allowPath string, pathspecs []string, taskExe, decisions string) error {
+func run(root, allowPath string, pathspecs, task []string, decisions string) error {
 	allowed, err := allow.Read(allowPath)
 	if err != nil {
 		return fmt.Errorf("refs: %w", err)
@@ -76,7 +63,7 @@ func run(root, allowPath string, pathspecs []string, taskExe, decisions string) 
 		Root:      root,
 		Files:     files,
 		TopDirs:   tops,
-		Tasks:     taskLister(root, taskExe),
+		Tasks:     taskLister(root, task),
 		Decisions: decisions,
 	})
 	if err != nil {
@@ -115,7 +102,7 @@ func run(root, allowPath string, pathspecs []string, taskExe, decisions string) 
 // taskLister asks `task` for names as JSON and decodes it as JSON. The shell this replaced
 // pulled them out with a sed expression anchored on the pretty listing's layout; when the
 // layout moved, it read an empty list and called every reference broken.
-func taskLister(root, taskExe string) refs.TaskLister {
+func taskLister(root string, task []string) refs.TaskLister {
 	return func(dir string) ([]string, error) {
 		// A directory with no Taskfile has no tasks, and that is an answer. Any other error
 		// is not: a Taskfile this process cannot read would otherwise report every `task
@@ -130,16 +117,16 @@ func taskLister(root, taskExe string) refs.TaskLister {
 		// 3.54), so a listing left every task that had not run since its sources changed
 		// reporting itself as up to date. spin's e2e lane served a control plane built before the
 		// dashboard change it was gating, because `task refs` had run first in lint.
-		cmd := exec.Command(taskExe, "-d", dir, "--list-all", "--json", "--no-status") //nolint:gosec // the binary is the gate's own argument
+		cmd := exec.Command(task[0], append(task[1:], "-d", dir, "--list-all", "--json", "--no-status")...) //nolint:gosec // the binary is the gate's own argument
 		cmd.Dir = root
 		cmd.Env = append(os.Environ(), "NO_COLOR=1")
 		out, err := cmd.Output()
 		if err != nil {
 			var exit *exec.ExitError
 			if errors.As(err, &exit) {
-				return nil, fmt.Errorf("refs: %s -d %s --list-all --json --no-status: %w\n%s", taskExe, dir, err, exit.Stderr)
+				return nil, fmt.Errorf("refs: %s -d %s --list-all --json --no-status: %w\n%s", strings.Join(task, " "), dir, err, exit.Stderr)
 			}
-			return nil, fmt.Errorf("refs: running %s: %w", taskExe, err)
+			return nil, fmt.Errorf("refs: running %s: %w", strings.Join(task, " "), err)
 		}
 		var listing struct {
 			Tasks []struct {
