@@ -12,10 +12,11 @@ export const sidebar = [
 		],
 	},
 	{
-		label: 'Pins and releases',
+		label: 'Dependencies and releases',
 		items: [
 			{ label: 'versions', slug: 'versions' },
 			{ label: 'versions.yaml reference', slug: 'versions/reference' },
+			{ label: 'sfw', slug: 'sfw' },
 			{ label: 'Provenance and SBOMs', slug: 'supply-chain' },
 		],
 	},

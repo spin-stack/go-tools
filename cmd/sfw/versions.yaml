@@ -1,0 +1,34 @@
+# Socket Firewall Free, one entry for each platform `go tool sfw` runs on, named by its GOOS and
+# GOARCH: the command carries these pins (go:embed), so every repository takes them by its
+# go-tools version rather than writing its own. A bump is each of the four, to the same version:
+#   go run ./cmd/versions bump -file cmd/sfw/versions.yaml sfw-linux-amd64 <version>
+# A release is a week old before it is taken, as pnpm's minimumReleaseAge holds a package.
+
+- name: sfw-linux-amd64
+  kind: download
+  source: https://github.com/SocketDev/sfw-free/releases/download/v{version}/sfw-free-linux-x86_64
+  version: 1.15.4
+  pin: cf9f55b8343e1ef6e6dcccdb09b99c70c0430a22ed7d0079286eccddeaf72670
+  track: github-release https://github.com/SocketDev/sfw-free
+  note: go tool sfw pnpm install, in a repository with a lockfile; the binaries are not signed.
+
+- name: sfw-linux-arm64
+  kind: download
+  source: https://github.com/SocketDev/sfw-free/releases/download/v{version}/sfw-free-linux-arm64
+  version: 1.15.4
+  pin: c8c80aa582829f24f5d633f2c3f2ccd0b070bbee80bf3b956e5e2a9880184e20
+  track: follows sfw-linux-amd64
+
+- name: sfw-darwin-arm64
+  kind: download
+  source: https://github.com/SocketDev/sfw-free/releases/download/v{version}/sfw-free-macos-arm64
+  version: 1.15.4
+  pin: 1b705ea7c399727ee41aa93f63e0469d2c3787c50e1dd8842cb8ff5ceec9eb99
+  track: follows sfw-linux-amd64
+
+- name: sfw-darwin-amd64
+  kind: download
+  source: https://github.com/SocketDev/sfw-free/releases/download/v{version}/sfw-free-macos-x86_64
+  version: 1.15.4
+  pin: b19f96f0dd3ebc4ecc7111dbc43cc2b095f37bf759273c0bd9c0c4784ea24731
+  track: follows sfw-linux-amd64
