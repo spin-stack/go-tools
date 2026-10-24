@@ -310,3 +310,17 @@ func dedupe(in []Finding) []Finding {
 	}
 	return out
 }
+
+// TaskCommand is how to run the Task a TaskLister asks: exe when one is named, else the Task the
+// module's go.mod pins, else task on PATH. A repository that takes Task as a go.mod tool runs it as
+// `go tool task`, which puts no task on PATH. `go tool -n task` says whether go.mod pins one, but
+// not where to run it from: the path it printed in CI was a build directory gone once go returned.
+func TaskCommand(exe string) []string {
+	if exe != "" {
+		return []string{exe}
+	}
+	if exec.Command("go", "tool", "-n", "task").Run() == nil {
+		return []string{"go", "tool", "task"}
+	}
+	return []string{"task"}
+}

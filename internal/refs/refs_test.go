@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/spin-stack/go-tools/internal/allow"
@@ -291,5 +292,43 @@ func TestADecisionAndASymbolOfAMissingPackage(t *testing.T) {
 			}
 			wants(t, found, tc.want...)
 		})
+	}
+}
+
+// A module that takes Task as a go.mod tool has no task on PATH, and its tasks are asked of the
+// Task go.mod pins, run as `go tool task`, from a cold cache as CI's first run is. A Task named
+// outright is the one asked, and a module that pins none asks task on PATH.
+func TestTasksAreAskedOfTheTaskGoModPins(t *testing.T) {
+	mod := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(mod, "cmd", "task"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for rel, body := range map[string]string{
+		"go.mod":           "module example.com/m\n\ngo 1.24\n\ntool example.com/m/cmd/task\n",
+		"cmd/task/main.go": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"the pinned task\")\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(mod, rel), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(mod)
+	t.Setenv("GOCACHE", t.TempDir())
+
+	task := refs.TaskCommand("")
+	if !slices.Equal(task, []string{"go", "tool", "task"}) {
+		t.Fatalf("a module that pins Task asks %v", task)
+	}
+	out, err := exec.Command(task[0], task[1:]...).Output()
+	if err != nil || string(out) != "the pinned task\n" {
+		t.Errorf("the pinned Task, from a cold cache, said %q: %v", out, err)
+	}
+	if got := refs.TaskCommand("/opt/task"); !slices.Equal(got, []string{"/opt/task"}) {
+		t.Errorf("a Task named outright is not the one asked: %v", got)
+	}
+	if err := os.WriteFile(filepath.Join(mod, "go.mod"), []byte("module example.com/m\n\ngo 1.24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := refs.TaskCommand(""); !slices.Equal(got, []string{"task"}) {
+		t.Errorf("a module that pins no Task asks %v, not task on PATH", got)
 	}
 }
