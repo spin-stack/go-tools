@@ -49,13 +49,18 @@ if it were wrong.
 	/>
 </CardGrid>
 
-## Everything a build pins, in one file
+## What a build takes in, and what it ships
 
 <CardGrid>
 	<LinkCard
 		title="versions"
 		href="versions/"
 		description="Every image digest, tarball checksum and commit a repository depends on, written once in versions.yaml. It says what is out of date, bumps it, and a test fails on a pin written anywhere else."
+	/>
+	<LinkCard
+		title="sfw"
+		href="sfw/"
+		description="Every npm, pnpm and yarn install through Socket Firewall Free, which refuses confirmed malware before it lands. A gate fails on an install that isn't, and on a workflow that runs a package manager instead of a task."
 	/>
 	<LinkCard
 		title="Provenance and SBOMs"

@@ -36,6 +36,7 @@ tasks:
       - go tool testquality ./...
       - go tool refs
       - go tool mutate -stale-exempts
+      - go tool sfw check
       - go tool vulngate ./...
 
   mutate:
@@ -68,6 +69,7 @@ to `main`.
 | whether the agent instructions still describe this tree | [refs](../refs/) |
 | whether the code calls a vulnerable function that has a fix | [vulngate](../vulngate/) |
 | where every pinned image, tarball and commit is, and which are out of date | [versions](../versions/) |
+| whether every npm install goes through Socket Firewall, and every workflow through a task | [sfw](../sfw/) |
 | what a release was built from, signed | [provenance, attestgate, sbom](../supply-chain/) |
 
 ## Libraries
