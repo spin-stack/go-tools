@@ -1,3 +1,6 @@
+# pnpm run and pnpm exec install what they find missing unless told not to, and that install goes
+# to the registry around Socket Firewall: they fail instead, and task site installs through it.
+verifyDepsBeforeRun: error
 # Which dependencies may run a script when they are installed: pnpm 11 refuses the install over
 # one that is not named here.
 allowBuilds:

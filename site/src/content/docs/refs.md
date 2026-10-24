@@ -19,7 +19,9 @@ references against the tree:
 go tool refs
 ```
 
-It reads `AGENTS.md CLAUDE.md */AGENTS.md */CLAUDE.md` by default; `-files` names others.
+It reads `AGENTS.md CLAUDE.md */AGENTS.md */CLAUDE.md` by default; `-files` names others. It asks
+`TASK_EXE` for task names when that is set, else the Task the module's go.mod pins (`go tool task`,
+which puts no `task` on PATH), else `task` on PATH; `-task` names another.
 
 ## On purpose
 
