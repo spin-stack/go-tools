@@ -39,6 +39,10 @@ const (
 	Lockfile
 	// Unpinned is a package.json that does not name pnpm, at a version, as its packageManager.
 	Unpinned
+	// Unverified is a pnpm-workspace.yaml that lets pnpm run and pnpm exec install what they find
+	// missing - pnpm 11 does by default, from the registry and not through the firewall - or a
+	// package.json with no pnpm-workspace.yaml over it to say otherwise.
+	Unverified
 )
 
 func (f Finding) String() string {
@@ -49,6 +53,8 @@ func (f Finding) String() string {
 		return fmt.Sprintf("%s: another package manager's lockfile: `pnpm import` reads it into pnpm-lock.yaml, and then it goes", f.File)
 	case Unpinned:
 		return fmt.Sprintf("%s: no \"packageManager\": \"pnpm@<version>\": every install of it is to be pnpm, at the version named here", f.File)
+	case Unverified:
+		return fmt.Sprintf("%s: pnpm run installs what it finds missing, around the firewall: a pnpm-workspace.yaml beside it or above it says `verifyDepsBeforeRun: error`", f.File)
 	default:
 		return fmt.Sprintf("%s:%d: %q fetches packages without Socket Firewall: run it as `go tool sfw %s`", f.File, f.Line, f.Command, f.Command)
 	}
@@ -74,8 +80,15 @@ func Check(root string) ([]Finding, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sfw: listing %s: %w", root, err)
 	}
+	files := strings.Split(strings.TrimSpace(string(out)), "\n")
+	workspaces := map[string]bool{}
+	for _, rel := range files {
+		if kindOf(rel) == workspace {
+			workspaces[path.Dir(rel)] = true
+		}
+	}
 	var findings []Finding
-	for _, rel := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, rel := range files {
 		kind := kindOf(rel)
 		if kind == none {
 			continue
@@ -100,6 +113,21 @@ func Check(root string) ([]Finding, error) {
 			}
 			if !strings.HasPrefix(pkg.PackageManager, "pnpm@") {
 				findings = append(findings, Finding{File: rel, Command: path.Base(rel), Why: Unpinned})
+			}
+			if !under(path.Dir(rel), workspaces) {
+				findings = append(findings, Finding{File: rel, Command: path.Base(rel), Why: Unverified})
+			}
+			continue
+		}
+		if kind == workspace {
+			var ws struct {
+				VerifyDepsBeforeRun string `yaml:"verifyDepsBeforeRun"`
+			}
+			if err := yaml.Unmarshal(raw, &ws); err != nil {
+				return nil, fmt.Errorf("sfw: %s: %w", rel, err)
+			}
+			if ws.VerifyDepsBeforeRun != "error" {
+				findings = append(findings, Finding{File: rel, Command: path.Base(rel), Why: Unverified})
 			}
 			continue
 		}
@@ -128,6 +156,7 @@ const (
 	script
 	manifest
 	lockfile
+	workspace
 )
 
 func kindOf(rel string) kind {
@@ -144,10 +173,26 @@ func kindOf(rel string) kind {
 		return script
 	case base == "package.json":
 		return manifest
+	case base == "pnpm-workspace.yaml":
+		return workspace
 	case base == "package-lock.json", base == "npm-shrinkwrap.json", base == "yarn.lock", base == "bun.lockb", base == "bun.lock":
 		return lockfile
 	}
 	return none
+}
+
+// under says whether dir, or a directory above it, holds a pnpm-workspace.yaml: pnpm reads the
+// nearest one up the tree as the workspace's settings.
+func under(dir string, workspaces map[string]bool) bool {
+	for {
+		if workspaces[dir] {
+			return true
+		}
+		if dir == "." || dir == "/" {
+			return false
+		}
+		dir = path.Dir(dir)
+	}
 }
 
 // commands is the shell a file runs: a workflow's and a Taskfile's are the strings under run,

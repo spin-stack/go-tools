@@ -40,6 +40,12 @@ it the one that was reviewed. A repository gets a newer firewall by moving to a 
 | a pnpm command that fetches without the firewall: `install`, `add`, `update`, `dlx`, `import`, ... and `pnpx` | the same | `go tool sfw <the command>` |
 | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `bun.lock` | anywhere | `pnpm import`, then delete it |
 | a `package.json` without `"packageManager": "pnpm@<version>"` | anywhere | name pnpm and its version |
+| a `pnpm-workspace.yaml` without `verifyDepsBeforeRun: error`, or a `package.json` with none beside or above it | anywhere | `verifyDepsBeforeRun: error` |
+
+`verifyDepsBeforeRun` is the one that is easy to miss. pnpm 11 checks the dependencies before
+`pnpm run` and `pnpm exec`, and installs whatever it finds missing - from the registry, around the
+firewall, because nothing wrapped that `pnpm run` in `go tool sfw`. Set to `error`, it fails and
+says to run the install instead, which the task does through the firewall.
 
 One package manager means one lockfile and one set of install rules, `pnpm-workspace.yaml`'s:
 which dependencies may run scripts, and how old a release must be before it is taken. Commands that
