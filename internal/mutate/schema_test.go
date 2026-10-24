@@ -297,7 +297,7 @@ func TestAnImportersTestsAreBuiltFromTheModulesRoot(t *testing.T) {
 	assert.FileExists(t, bin)
 	assert.Equal(t, filepath.Join(root, "internal", "mutate"), dir)
 
-	bin, dir, err = mutate.ImporterBinary("./cmd/mutate", overlay, filepath.Join(work, "cmd.test"))
+	bin, dir, err = mutate.ImporterBinary("./cmd/ctxlife", overlay, filepath.Join(work, "cmd.test"))
 	require.NoError(t, err)
 	assert.Empty(t, bin, "a package with no tests was given a binary")
 	assert.Empty(t, dir)

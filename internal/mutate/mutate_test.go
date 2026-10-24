@@ -358,8 +358,9 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 // let the edit through - counted together, a change to a command with no tests would read as a
 // suite that refuses nothing.
 func TestAPackageWithNoTestsIsSaidSoAndNotCountedAsASurvivor(t *testing.T) {
-	// Not this package: running its own tests from inside them is a test that runs forever.
-	outcome, _ := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "mutate", "main.go")}, mutate.Asked{Timeout: "1m"})
+	// Not this package: running its own tests from inside them is a test that runs forever. A
+	// command with no tests of its own: cmd/mutate has the site's example now.
+	outcome, _ := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "ctxlife", "main.go")}, mutate.Asked{Timeout: "1m"})
 	assert.Equal(t, mutate.Untested, outcome, "a package with no test files was asked anyway")
 
 	// And one that has tests is run: unmutated, they pass, which is what a survivor looks like.
@@ -377,7 +378,7 @@ func TestAPackageWithNoTestsIsSaidSoAndNotCountedAsASurvivor(t *testing.T) {
 		return 0
 	}
 	before := importersRan()
-	outcome, out := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "mutate", "main.go")},
+	outcome, out := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "ctxlife", "main.go")},
 		mutate.Asked{Timeout: "2m", Importers: []string{"../fetch"}})
 	assert.Equal(t, mutate.Survived, outcome, "the importer's tests were not run: %s", out)
 	assert.Contains(t, out, "internal/fetch", "the run does not say which package answered")

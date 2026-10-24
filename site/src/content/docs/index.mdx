@@ -1,0 +1,82 @@
+---
+title: go-tools
+description: Go tools that hold a repository to what it claims - tests that notice a change, pins written once, releases that are attested.
+template: splash
+hero:
+  title: Checks for what a green build doesn't prove.
+  tagline: Small Go tools the spin-stack repositories run from their go.mod. Each one fails CI with a specific finding and says how to resolve it.
+  actions:
+    - text: Getting started
+      link: start/
+      icon: right-arrow
+    - text: See mutate catch a bug
+      link: mutate/
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## Tests that would notice
+
+Passing tests and high coverage show that code ran. These tools check whether anything would fail
+if it were wrong.
+
+<CardGrid>
+	<LinkCard
+		title="mutate"
+		href="mutate/"
+		description="Breaks the code your change touched, one small edit at a time, and fails when the tests still pass. Coverage says a line ran; mutate says whether anything checks it."
+	/>
+	<LinkCard
+		title="testquality"
+		href="testquality/"
+		description="Fails on a test that cannot fail: no assertion, no t.Error, nothing that reaches the test. It counts as covered and proves nothing."
+	/>
+	<LinkCard
+		title="ctxlife"
+		href="ctxlife/"
+		description="Fails on a goroutine that uses its caller's context and outlives the call: its work is cancelled the moment the function returns."
+	/>
+	<LinkCard
+		title="refs"
+		href="refs/"
+		description="Fails when AGENTS.md or CLAUDE.md names a path, a task or a package the tree no longer has, so instructions don't point at things that are gone."
+	/>
+	<LinkCard
+		title="vulngate"
+		href="vulngate/"
+		description="govulncheck as a gate: fails only on a vulnerability the code calls and that has a fix, the standard library included."
+	/>
+</CardGrid>
+
+## Everything a build pins, in one file
+
+<CardGrid>
+	<LinkCard
+		title="versions"
+		href="versions/"
+		description="Every image digest, tarball checksum and commit a repository depends on, written once in versions.yaml. It says what is out of date, bumps it, and a test fails on a pin written anywhere else."
+	/>
+	<LinkCard
+		title="Provenance and SBOMs"
+		href="supply-chain/"
+		description="SLSA provenance and CycloneDX SBOMs from what a build actually read, a gate that fails on a workflow publishing without attesting, and Sigstore's trusted root for verifying offline."
+	/>
+</CardGrid>
+
+## How they fit in
+
+<CardGrid>
+	<Card title="A Go tool, pinned like a dependency" icon="seti:go">
+		`go get -tool github.com/spin-stack/go-tools/cmd/<name>`, then `go tool <name>`. The version
+		is in go.mod, so every developer and every CI run uses the same one.
+	</Card>
+	<Card title="A finding says what to do" icon="approve-check">
+		Each failure names the file and line, why it matters, and the fix. Where there are exceptions,
+		they're a comment with a reason, and a reason nothing needs any more fails too.
+	</Card>
+	<Card title="Held to themselves" icon="setting">
+		This repository runs every gate on its own code. The example on the mutate page is a test
+		here: if the output changes, CI fails before the page goes out of date.
+	</Card>
+</CardGrid>
