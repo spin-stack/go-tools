@@ -19,6 +19,7 @@ export const sidebar = [
 			{ label: 'versions.yaml reference', slug: 'versions/reference' },
 			{ label: 'sfw', slug: 'sfw' },
 			{ label: 'Provenance and SBOMs', slug: 'supply-chain' },
+			{ label: 'exposure', slug: 'exposure' },
 		],
 	},
 ];

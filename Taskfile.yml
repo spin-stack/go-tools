@@ -127,17 +127,19 @@ tasks:
       - pnpm --dir site dev
 
   versions:
-    desc: Say which of versions.yaml's pins are behind their upstream, and of the firewall's cmd/sfw carries (exits 1 when any is).
+    desc: Say which of versions.yaml's pins are behind their upstream, and of those cmd/sfw and cmd/exposure carry (exits 1 when any is).
     cmds:
-      # Both, whichever is behind: the second file is the pins go tool sfw embeds for every repository.
+      # Every file, whichever is behind: the others are the pins go tool sfw and go tool exposure
+      # embed for every repository.
       - |
         status=0
         {{.VERSIONS}} check || status=1
         {{.VERSIONS}} check -file cmd/sfw/versions.yaml || status=1
+        {{.VERSIONS}} check -file cmd/exposure/versions.yaml || status=1
         exit $status
 
   bump:
-    desc: Pin one entry of versions.yaml at a version, the newest by default (task bump NAME=golangci-lint [VERSION=v2.14.0]; FILE=cmd/sfw/versions.yaml for the firewall's).
+    desc: Pin one entry of versions.yaml at a version, the newest by default (task bump NAME=golangci-lint [VERSION=v2.14.0]; FILE=cmd/sfw/versions.yaml or cmd/exposure/versions.yaml for what those commands embed).
     requires:
       vars: [NAME]
     vars:

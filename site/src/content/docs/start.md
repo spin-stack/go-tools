@@ -72,6 +72,7 @@ to `main`.
 | where every pinned image, tarball and commit is, and which are out of date | [versions](../versions/) |
 | whether every package install is pnpm, through Socket Firewall | [sfw](../sfw/) |
 | whether every workflow step is a task a developer can run too | [taskgate](../taskgate/) |
+| what a repository would show if it were made public | [exposure](../exposure/) |
 | what a release was built from, signed | [provenance, attestgate, sbom](../supply-chain/) |
 
 ## Libraries

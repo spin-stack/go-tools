@@ -1,0 +1,11 @@
+# What `go tool exposure` runs besides itself, embedded (go:embed) so every repository takes it
+# by its go-tools version; `task versions` reads it with the others.
+
+- name: gitleaks
+  kind: module
+  source: github.com/zricethezav/gitleaks/v8
+  version: v8.30.1
+  track: github-release https://github.com/gitleaks/gitleaks
+  note: >-
+    the secret scan over every ref; spin's lint:secrets runs the same version. A bump can add
+    rules: run go tool exposure over a repository whose report is known.
