@@ -19,11 +19,12 @@ import (
 	"github.com/spin-stack/go-tools/versions"
 )
 
-// A repository's commands, judged: a workflow runs tasks and no package manager of its own; a
-// Taskfile, a script or a Dockerfile fetches packages only through the firewall, and runs what is
-// installed as it likes. What only names a command - a description, a comment, a fixture - is no
-// command.
-func TestEveryInstallGoesThroughTheFirewall(t *testing.T) {
+// A repository's commands, judged: pnpm is the one package manager, wherever a command is
+// written - npm, npx, yarn and bun are refused even through the firewall - and what pnpm fetches it
+// fetches through the firewall; what runs what is installed is left alone. Another manager's
+// lockfile, and a package.json that does not name pnpm, are refused too. What only names a
+// command - a description, a comment, a fixture - is no command.
+func TestPnpmIsTheOnePackageManagerAndInstallsThroughTheFirewall(t *testing.T) {
 	repo := t.TempDir()
 	write := func(rel, body string) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(repo, rel)), 0o750))
@@ -39,7 +40,7 @@ func TestEveryInstallGoesThroughTheFirewall(t *testing.T) {
       - run: |
           cd site
           pnpm build
-      - run: go tool sfw pnpm install
+      - run: pnpm install
 `)
 	write(".github/actions/setup/action.yml", "runs:\n  steps:\n    - run: npx something\n      shell: bash\n")
 	write("Taskfile.yml", `version: '3'
@@ -68,10 +69,15 @@ tasks:
 	write(".github/actions/setup/notes.yml", "run: npm ci\n")
 	write(".github/actions/other/action.yaml", "runs:\n  steps:\n    - run: command yarn add x\n")
 	write("docs/Taskfile.txt", "cmds:\n  - npm install\n")
-	write("hack/setup.sh", "#!/bin/sh\nset -e\nnpm ci\nyarn\nsfw yarn install\nsfw\ngo tool sfw\nFOO=bar\ngo tool npx x\ncommand npm i\n")
+	write("hack/setup.sh", "#!/bin/sh\nset -e\npnpx cowsay\nsfw pnpx cowsay\nsfw yarn install\nsfw\ngo tool sfw\nFOO=bar\ngo tool sfw pnpm -w --filter web add x\ncommand pnpm i\npnpm\nbunx thing\n")
 	write("site/Dockerfile", "FROM node:22\nRUN corepack enable && pnpm install --frozen-lockfile\nRUN pnpm build\n")
-	write("README.md", "pnpm install\n")
+	write("site/package.json", `{"name": "site", "packageManager": "pnpm@11.27.1"}`)
+	write("old/package.json", `{"name": "old", "packageManager": "yarn@1.22.22"}`)
+	write("old/yarn.lock", "")
+	write("old/package-lock.json", "{}")
+	write("README.md", "npm install\n")
 	write("internal/x/testdata/Taskfile.yml", "tasks:\n  a:\n    cmds:\n      - npm install\n")
+	write("internal/x/testdata/package-lock.json", "{}")
 	write(".gitignore", "ignored/\n")
 	write("ignored/install.sh", "npm install\n")
 	git := exec.Command("git", "init", "-q", repo)
@@ -82,22 +88,33 @@ tasks:
 	require.NoError(t, err)
 	var got []string
 	for _, f := range findings {
-		got = append(got, fmt.Sprintf("%s:%d %s %v", f.File, f.Line, f.Command, f.Workflow))
+		got = append(got, fmt.Sprintf("%s:%d %s %d", f.File, f.Line, f.Command, f.Why))
 	}
+	firewall, other, lock, unpinned := sfw.Unfirewalled, sfw.NotPnpm, sfw.Lockfile, sfw.Unpinned
 	assert.ElementsMatch(t, []string{
-		".github/actions/setup/action.yml:3 npx something true",
-		".github/workflows/ci.yml:10 pnpm build true",
-		".github/workflows/ci.yml:11 pnpm install true",
-		"Taskfile.yml:9 pnpm --dir web install false",
-		"Taskfile.yml:15 pnpm dlx create-thing --yes false",
-		"hack/setup.sh:3 npm ci false",
-		"hack/setup.sh:4 yarn false",
-		"hack/setup.sh:10 npm i false",
-		".github/workflows/release.yaml:4 pnpm publish true",
-		".github/actions/other/action.yaml:3 yarn add x true",
-		"site/Dockerfile:2 pnpm install --frozen-lockfile false",
+		fmt.Sprintf(".github/actions/setup/action.yml:3 npx something %d", other),
+		fmt.Sprintf(".github/actions/other/action.yaml:3 yarn add x %d", other),
+		fmt.Sprintf(".github/workflows/ci.yml:11 pnpm install %d", firewall),
+		fmt.Sprintf("Taskfile.yml:9 pnpm --dir web install %d", firewall),
+		fmt.Sprintf("Taskfile.yml:15 pnpm dlx create-thing --yes %d", firewall),
+		fmt.Sprintf("Taskfile.yml:20 npm view astro version %d", other),
+		fmt.Sprintf("hack/setup.sh:3 pnpx cowsay %d", firewall),
+		fmt.Sprintf("hack/setup.sh:5 yarn install %d", other),
+		fmt.Sprintf("hack/setup.sh:10 pnpm i %d", firewall),
+		fmt.Sprintf("hack/setup.sh:12 bunx thing %d", other),
+		fmt.Sprintf("site/Dockerfile:2 pnpm install --frozen-lockfile %d", firewall),
+		fmt.Sprintf("old/package.json:0 package.json %d", unpinned),
+		fmt.Sprintf("old/yarn.lock:0 yarn.lock %d", lock),
+		fmt.Sprintf("old/package-lock.json:0 package-lock.json %d", lock),
 	}, got)
-	assert.Contains(t, findings[0].String(), "make it a task")
+	said := map[sfw.Why]string{}
+	for _, f := range findings {
+		said[f.Why] = f.String()
+	}
+	assert.Contains(t, said[firewall], "go tool sfw")
+	assert.Contains(t, said[other], "never npm")
+	assert.Contains(t, said[lock], "pnpm import")
+	assert.Contains(t, said[unpinned], "packageManager")
 }
 
 // The firewall is downloaded once, run from the cache after, and fetched again when what the

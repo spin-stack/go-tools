@@ -9,6 +9,7 @@ export const sidebar = [
 			{ label: 'ctxlife', slug: 'ctxlife' },
 			{ label: 'refs', slug: 'refs' },
 			{ label: 'vulngate', slug: 'vulngate' },
+			{ label: 'taskgate', slug: 'taskgate' },
 		],
 	},
 	{

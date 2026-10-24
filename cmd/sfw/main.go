@@ -1,9 +1,9 @@
-// Command sfw runs a package manager through Socket Firewall Free, at the binary this module
-// pins for the platform (versions.yaml beside this file), and is the gate that every install a
-// repository runs goes through it:
+// Command sfw runs pnpm through Socket Firewall Free, at the binary this module pins for the
+// platform (versions.yaml beside this file), and is the gate that pnpm is the one package manager
+// a repository uses and every install goes through the firewall:
 //
 //	go tool sfw pnpm install --frozen-lockfile   # the install, through the firewall
-//	go tool sfw check [dir]                      # fails on one that is not, and on a workflow that runs a package manager itself
+//	go tool sfw check [dir]                      # fails on npm, yarn, their lockfiles, and an install that skips it
 //
 // The binary is fetched the first time into the user's cache and checked against its pin on
 // every run. Free needs no account; it refuses what Socket has confirmed as malware and warns of
@@ -32,7 +32,7 @@ const usage = `sfw - package installs through Socket Firewall Free
 
 Usage:
   sfw <package manager> <args>...   run it through the firewall: sfw pnpm install --frozen-lockfile
-  sfw check [dir]                   fail on an install that is not, and on a package manager a workflow runs itself
+  sfw check [dir]                   fail on npm, npx, yarn, their lockfiles, a package.json not on pnpm, and a pnpm install not through it
 `
 
 func main() {
@@ -64,10 +64,10 @@ func check(args []string) int {
 		fmt.Println(f)
 	}
 	if len(findings) > 0 {
-		fmt.Printf("sfw: %d command(s) to move: a workflow runs tasks, and a task installs through `go tool sfw`\n", len(findings))
+		fmt.Printf("sfw: %d finding(s): pnpm is the package manager, and it installs through `go tool sfw`\n", len(findings))
 		return 1
 	}
-	fmt.Println("OK: every package install goes through Socket Firewall, and every workflow through a task.")
+	fmt.Println("OK: pnpm is the one package manager, and every install goes through Socket Firewall.")
 	return 0
 }
 

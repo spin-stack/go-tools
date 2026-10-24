@@ -2,6 +2,7 @@ package sfw
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,44 +14,61 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/spin-stack/go-tools/internal/shell"
 )
 
-// Finding is one command that breaks the rule, where it is written.
+// Finding is one thing that breaks the rule, where it is written.
 type Finding struct {
 	File    string
 	Line    int
-	Command string
-	// Workflow is a package manager run from a workflow, which is to be a task whatever it does;
-	// otherwise the command fetches packages without the firewall.
-	Workflow bool
+	Command string // the command, or the file's own name for what is not one
+	Why     Why
 }
+
+// Why is which rule a finding breaks.
+type Why int
+
+const (
+	// Unfirewalled is a pnpm command that fetches packages without Socket Firewall.
+	Unfirewalled Why = iota
+	// NotPnpm is npm, npx, yarn or bun: pnpm is the one package manager, so there is one lockfile
+	// and one set of install rules (pnpm-workspace.yaml's) to hold.
+	NotPnpm
+	// Lockfile is another package manager's lockfile, which pnpm neither reads nor writes.
+	Lockfile
+	// Unpinned is a package.json that does not name pnpm, at a version, as its packageManager.
+	Unpinned
+)
 
 func (f Finding) String() string {
-	if f.Workflow {
-		return fmt.Sprintf("%s:%d: %q runs a package manager from the workflow: make it a task, and run the task", f.File, f.Line, f.Command)
+	switch f.Why {
+	case NotPnpm:
+		return fmt.Sprintf("%s:%d: %q: pnpm is the package manager here, never npm, npx, yarn or bun: run it with pnpm (pnpm dlx for npx), through `go tool sfw` when it fetches", f.File, f.Line, f.Command)
+	case Lockfile:
+		return fmt.Sprintf("%s: another package manager's lockfile: `pnpm import` reads it into pnpm-lock.yaml, and then it goes", f.File)
+	case Unpinned:
+		return fmt.Sprintf("%s: no \"packageManager\": \"pnpm@<version>\": every install of it is to be pnpm, at the version named here", f.File)
+	default:
+		return fmt.Sprintf("%s:%d: %q fetches packages without Socket Firewall: run it as `go tool sfw %s`", f.File, f.Line, f.Command, f.Command)
 	}
-	return fmt.Sprintf("%s:%d: %q fetches packages without Socket Firewall: run it as `go tool sfw %s`", f.File, f.Line, f.Command, f.Command)
 }
 
-// managers are the commands that fetch from a JavaScript registry, each with the subcommands
-// that do: nil is every use of it. A subcommand that only runs what is installed - build, run,
-// test, pnpm exec - reaches no registry and is left alone.
-var managers = map[string][]string{
-	"npm":  {"install", "i", "ci", "add", "update", "up", "upgrade", "exec", "x", "create", "init"},
-	"pnpm": {"install", "i", "add", "update", "up", "upgrade", "dlx", "create", "fetch"},
-	"yarn": {"", "install", "add", "up", "upgrade", "dlx", "create"},
-	"npx":  nil,
-	"pnpx": nil,
-}
+// fetching are pnpm's subcommands that reach the registry. One that only runs what is installed -
+// build, run, test, exec - is left alone.
+var fetching = []string{"install", "i", "add", "update", "up", "upgrade", "dlx", "create", "fetch", "import"}
+
+// others are the package managers that are not pnpm, and pnpx, which is pnpm dlx.
+var others = []string{"npm", "npx", "yarn", "bun", "bunx"}
 
 // valued are the flags before a subcommand that take the word after them: `pnpm -C dashboard
 // install` installs.
 var valued = []string{"-C", "--dir", "--prefix", "--cwd", "-F", "--filter", "--workspace"}
 
 // Check is every finding in the files git lists under root - tracked, or untracked and not
-// ignored - that run commands: workflows and composite actions, Taskfiles, shell scripts and
-// Dockerfiles. What a workflow runs is to be a task, so a developer runs what CI runs; anything
-// that fetches packages is to go through the firewall, wherever it is written.
+// ignored: the commands workflows and composite actions, Taskfiles, shell scripts and Dockerfiles
+// run, and the package.json files and lockfiles themselves. pnpm is the one package manager, and
+// what it fetches it fetches through the firewall, wherever that is written.
 func Check(root string) ([]Finding, error) {
 	out, err := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
 	if err != nil {
@@ -62,6 +80,10 @@ func Check(root string) ([]Finding, error) {
 		if kind == none {
 			continue
 		}
+		if kind == lockfile {
+			findings = append(findings, Finding{File: rel, Command: path.Base(rel), Why: Lockfile})
+			continue
+		}
 		raw, err := os.ReadFile(filepath.Join(root, rel))
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -69,14 +91,27 @@ func Check(root string) ([]Finding, error) {
 			}
 			return nil, fmt.Errorf("sfw: %w", err)
 		}
+		if kind == manifest {
+			var pkg struct {
+				PackageManager string `json:"packageManager"`
+			}
+			if err := json.Unmarshal(raw, &pkg); err != nil {
+				return nil, fmt.Errorf("sfw: %s: %w", rel, err)
+			}
+			if !strings.HasPrefix(pkg.PackageManager, "pnpm@") {
+				findings = append(findings, Finding{File: rel, Command: path.Base(rel), Why: Unpinned})
+			}
+			continue
+		}
 		lines, err := commands(kind, raw)
 		if err != nil {
 			return nil, fmt.Errorf("sfw: %s: %w", rel, err)
 		}
 		for _, l := range lines {
-			for _, cmd := range segments(l.text) {
-				if f, ok := judge(cmd, kind == workflow); ok {
-					findings = append(findings, Finding{File: rel, Line: l.line, Command: f, Workflow: kind == workflow})
+			for _, cmd := range segments(l.Text) {
+				if f, ok := judge(cmd); ok {
+					f.File, f.Line = rel, l.Line
+					findings = append(findings, f)
 				}
 			}
 		}
@@ -91,6 +126,8 @@ const (
 	workflow
 	taskfile
 	script
+	manifest
+	lockfile
 )
 
 func kindOf(rel string) kind {
@@ -105,21 +142,19 @@ func kindOf(rel string) kind {
 		return taskfile
 	case strings.HasSuffix(base, ".sh"), strings.HasPrefix(base, "Dockerfile"), strings.HasSuffix(base, ".Dockerfile"):
 		return script
+	case base == "package.json":
+		return manifest
+	case base == "package-lock.json", base == "npm-shrinkwrap.json", base == "yarn.lock", base == "bun.lockb", base == "bun.lock":
+		return lockfile
 	}
 	return none
 }
 
-// line is one line of shell, with where it is written.
-type line struct {
-	text string
-	line int
-}
-
 // commands is the shell a file runs: a workflow's and a Taskfile's are the strings under run,
 // cmd, sh and cmds, and not a description that names a command; a script's is the whole file.
-func commands(k kind, raw []byte) ([]line, error) {
+func commands(k kind, raw []byte) ([]shell.Line, error) {
 	if k == script {
-		return shellLines(string(raw), 1), nil
+		return shell.Lines(string(raw), 1), nil
 	}
 	var doc yaml.Node
 	if err := yaml.NewDecoder(bytes.NewReader(raw)).Decode(&doc); err != nil {
@@ -128,7 +163,7 @@ func commands(k kind, raw []byte) ([]line, error) {
 		}
 		return nil, err
 	}
-	var out []line
+	var out []shell.Line
 	var walk func(n *yaml.Node, key string)
 	walk = func(n *yaml.Node, key string) {
 		switch n.Kind {
@@ -151,39 +186,13 @@ func commands(k kind, raw []byte) ([]line, error) {
 				if n.Style == yaml.LiteralStyle || n.Style == yaml.FoldedStyle {
 					first++ // the text starts under the | or the >
 				}
-				out = append(out, shellLines(n.Value, first)...)
+				out = append(out, shell.Lines(n.Value, first)...)
 			}
 		case yaml.AliasNode:
 		}
 	}
 	walk(&doc, "")
 	return out, nil
-}
-
-// shellLines is text as the lines a shell runs: a line continued with a backslash joined to the
-// next, and a comment dropped.
-func shellLines(text string, first int) []line {
-	var out []line
-	var cur strings.Builder
-	start := first
-	for i, l := range strings.Split(text, "\n") {
-		if cur.Len() == 0 {
-			start = first + i
-		}
-		if strings.HasPrefix(strings.TrimSpace(l), "#") {
-			continue
-		}
-		if strings.HasSuffix(l, "\\") {
-			cur.WriteString(strings.TrimSuffix(l, "\\") + " ")
-			continue
-		}
-		cur.WriteString(l)
-		if s := strings.TrimSpace(cur.String()); s != "" {
-			out = append(out, line{s, start})
-		}
-		cur.Reset()
-	}
-	return out
 }
 
 // segments is each simple command in a line: what is between &&, ||, ;, |, and inside $( ).
@@ -201,26 +210,21 @@ func segments(text string) []string {
 	return out
 }
 
-// judge says whether cmd breaks the rule, and the command as the finding names it: from a
-// workflow, any package manager does, the firewall's included; elsewhere, one that fetches and is
-// not run through the firewall.
-func judge(cmd string, fromWorkflow bool) (string, bool) {
+// judge is the finding cmd makes, without where it is written: any package manager but pnpm,
+// run through the firewall or not, and a pnpm command that fetches and is not run through it.
+func judge(cmd string) (Finding, bool) {
 	words, wrapped := unwrap(strings.Fields(cmd))
 	if len(words) == 0 {
-		return "", false
-	}
-	subs, ok := managers[words[0]]
-	if !ok {
-		return "", false
+		return Finding{}, false
 	}
 	said := strings.Join(words, " ")
-	if fromWorkflow {
-		return said, true
+	switch {
+	case slices.Contains(others, words[0]):
+		return Finding{Command: said, Why: NotPnpm}, true
+	case !wrapped && (words[0] == "pnpx" || words[0] == "pnpm" && fetches(words)):
+		return Finding{Command: said, Why: Unfirewalled}, true
 	}
-	if wrapped || !fetches(words, subs) {
-		return "", false
-	}
-	return said, true
+	return Finding{}, false
 }
 
 // unwrap is the command words run, past the variables set for it and what only runs it, and
@@ -246,12 +250,8 @@ func unwrap(words []string) ([]string, bool) {
 // command, and the command from this repository's own tree.
 var firewalls = [][]string{{"sfw"}, {"go", "tool", "sfw"}, {"go", "run", "./cmd/sfw"}}
 
-// fetches says whether a manager's command line reaches its registry.
-func fetches(words, subs []string) bool {
-	if subs == nil {
-		return true
-	}
-	sub := ""
+// fetches says whether a pnpm command line reaches the registry.
+func fetches(words []string) bool {
 	for i := 1; i < len(words); i++ {
 		w := words[i]
 		if slices.Contains(valued, w) {
@@ -261,8 +261,7 @@ func fetches(words, subs []string) bool {
 		if strings.HasPrefix(w, "-") {
 			continue
 		}
-		sub = w
-		break
+		return slices.Contains(fetching, w)
 	}
-	return slices.Contains(subs, sub)
+	return false
 }

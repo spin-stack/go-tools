@@ -1,5 +1,6 @@
-# The gate on every change: `task lint` and `task test`, the targets a developer runs, and not a
-# list of steps here that goes out of step with them.
+# The gate on every change: `task lint`, `task test` and `task mutate`, the targets a developer
+# runs, and not a list of steps here that goes out of step with them - taskgate holds every step
+# to one task.
 name: CI
 
 on:
@@ -52,24 +53,7 @@ jobs:
       # always(): a failed suite is when the per-function numbers are wanted.
       - name: Coverage summary
         if: always()
-        run: |
-          if [ ! -f coverage.out ]; then
-            echo "coverage.out was not produced; the tests may have failed before coverage ran." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          {
-            echo "## Go coverage"
-            echo
-            echo "**$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')** total"
-            echo
-            echo '<details><summary>Function detail</summary>'
-            echo
-            echo '```'
-            go tool cover -func=coverage.out
-            echo '```'
-            echo '</details>'
-          } >> "$GITHUB_STEP_SUMMARY"
-          go tool cover -html=coverage.out -o coverage.html
+        run: task coverage
 
       - name: Upload Go coverage HTML
         if: always()
@@ -81,18 +65,8 @@ jobs:
           if-no-files-found: ignore
 
       # The tests are green; this asks what they would have refused. On a pull request the diff is
-      # against what it merges into, on a push against what was there before.
+      # against what it merges into, on a push against what was there before (task mutate says how).
       - name: What this change broke, and whether a test noticed
         env:
-          EVENT: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
           BEFORE: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT" = "pull_request" ]; then
-            base="origin/$BASE_REF"
-          else
-            base="$BEFORE"
-          fi
-          git rev-parse --verify "$base^{commit}" >/dev/null 2>&1 || base=HEAD~1
-          task mutate BASE="$base"
+        run: task mutate

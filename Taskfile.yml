@@ -2,8 +2,9 @@
 #
 #   task test         the Go tests, under the race detector, held to a coverage floor
 #   task lint         golangci-lint with spin's rules, at spin's version, this repository's own
-#                     gates run on itself: ctxlife, testquality, refs, sfw, and actionlint over .github/
+#                     gates run on itself: ctxlife, testquality, refs, sfw, taskgate, and actionlint
 #   task mutate       break what the change against BASE (origin/main) touched, and ask the tests
+#   task coverage     coverage.out's numbers, to the terminal or the workflow run's summary
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
 #   task site         the documentation site under site/, built into site/dist
 
@@ -55,6 +56,7 @@ tasks:
       - go run ./cmd/refs
       - go run ./cmd/mutate -stale-exempts
       - go run ./cmd/sfw check
+      - go run ./cmd/taskgate -allow .github/taskgate-allow.txt
       # A vulnerability the code calls and that has a fix fails, the standard library's too: the
       # answer is the upgrade. It asks vuln.go.dev, so lint needs the network.
       - go run ./cmd/vulngate ./...
@@ -76,11 +78,40 @@ tasks:
           fi
 
   mutate:
-    desc: Break what the change against BASE touched and fail on an edit no test refuses (BASE=origin/main).
-    vars:
-      BASE: '{{.BASE | default "origin/main"}}'
+    desc: Break what the change against BASE touched and fail on an edit no test refuses (BASE=origin/main; in CI, what the run's event diffs against).
     cmds:
-      - go run ./cmd/mutate -base {{.BASE}} -max 200
+      # In a workflow, the base is the event's: a pull request's is what it merges into, a push's
+      # what the branch was before it (BEFORE, which the workflow hands in), or the commit before
+      # when that is not in the clone - a branch's first push.
+      - |
+        base="{{.BASE}}"
+        if [ -z "$base" ] && [ "${GITHUB_EVENT_NAME:-}" = pull_request ]; then
+          base="origin/$GITHUB_BASE_REF"
+        elif [ -z "$base" ] && [ -n "${GITHUB_ACTIONS:-}" ]; then
+          base="${BEFORE:-}"
+          git rev-parse --verify -q "$base^{commit}" >/dev/null || base=HEAD~1
+        fi
+        go run ./cmd/mutate -base "${base:-origin/main}" -max 200
+
+  coverage:
+    desc: Write coverage.out's total and per-function numbers to the run's summary ($GITHUB_STEP_SUMMARY, or the terminal) and coverage.html.
+    cmds:
+      - |
+        out="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+        if [ ! -f coverage.out ]; then
+          echo "coverage.out was not produced; the tests may have failed before coverage ran." >> "$out"
+          exit 0
+        fi
+        {
+          echo "## Go coverage"
+          echo
+          echo "**$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')** total"
+          echo
+          printf '<details><summary>Function detail</summary>\n\n```\n'
+          go tool cover -func=coverage.out
+          printf '```\n</details>\n'
+        } >> "$out"
+        go tool cover -html=coverage.out -o coverage.html
 
   site:
     desc: Build the documentation site (site/, Astro Starlight) into site/dist; task site:dev serves it with live reload.
