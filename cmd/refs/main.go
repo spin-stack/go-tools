@@ -35,9 +35,15 @@ func main() {
 	}
 }
 
+// taskExeFromEnv is the Task to ask: TASK_EXE when it is set, else the Task the module's go.mod
+// pins, else task on PATH. A repository that takes Task as a go.mod tool runs it as `go tool task`,
+// which puts no task on PATH, so a CI that has only that has no task there to find.
 func taskExeFromEnv() string {
 	if v := os.Getenv("TASK_EXE"); v != "" {
 		return v
+	}
+	if out, err := exec.Command("go", "tool", "-n", "task").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
+		return strings.TrimSpace(string(out))
 	}
 	return "task"
 }

@@ -72,6 +72,10 @@ tasks:
 	write("hack/setup.sh", "#!/bin/sh\nset -e\npnpx cowsay\nsfw pnpx cowsay\nsfw yarn install\nsfw\ngo tool sfw\nFOO=bar\ngo tool sfw pnpm -w --filter web add x\ncommand pnpm i\npnpm\nbunx thing\n")
 	write("site/Dockerfile", "FROM node:22\nRUN corepack enable && pnpm install --frozen-lockfile\nRUN pnpm build\n")
 	write("site/package.json", `{"name": "site", "packageManager": "pnpm@11.27.1"}`)
+	write("site/pnpm-workspace.yaml", "verifyDepsBeforeRun: error\n")
+	write("site/pkg/web/package.json", `{"name": "web", "packageManager": "pnpm@11.27.1"}`)
+	write("lax/pnpm-workspace.yaml", "allowBuilds:\n  esbuild: true\n")
+	write("lax/package.json", `{"name": "lax", "packageManager": "pnpm@11.27.1"}`)
 	write("old/package.json", `{"name": "old", "packageManager": "yarn@1.22.22"}`)
 	write("old/yarn.lock", "")
 	write("old/package-lock.json", "{}")
@@ -90,7 +94,7 @@ tasks:
 	for _, f := range findings {
 		got = append(got, fmt.Sprintf("%s:%d %s %d", f.File, f.Line, f.Command, f.Why))
 	}
-	firewall, other, lock, unpinned := sfw.Unfirewalled, sfw.NotPnpm, sfw.Lockfile, sfw.Unpinned
+	firewall, other, lock, unpinned, unverified := sfw.Unfirewalled, sfw.NotPnpm, sfw.Lockfile, sfw.Unpinned, sfw.Unverified
 	assert.ElementsMatch(t, []string{
 		fmt.Sprintf(".github/actions/setup/action.yml:3 npx something %d", other),
 		fmt.Sprintf(".github/actions/other/action.yaml:3 yarn add x %d", other),
@@ -104,6 +108,8 @@ tasks:
 		fmt.Sprintf("hack/setup.sh:12 bunx thing %d", other),
 		fmt.Sprintf("site/Dockerfile:2 pnpm install --frozen-lockfile %d", firewall),
 		fmt.Sprintf("old/package.json:0 package.json %d", unpinned),
+		fmt.Sprintf("old/package.json:0 package.json %d", unverified),
+		fmt.Sprintf("lax/pnpm-workspace.yaml:0 pnpm-workspace.yaml %d", unverified),
 		fmt.Sprintf("old/yarn.lock:0 yarn.lock %d", lock),
 		fmt.Sprintf("old/package-lock.json:0 package-lock.json %d", lock),
 	}, got)
@@ -115,6 +121,7 @@ tasks:
 	assert.Contains(t, said[other], "never npm")
 	assert.Contains(t, said[lock], "pnpm import")
 	assert.Contains(t, said[unpinned], "packageManager")
+	assert.Contains(t, said[unverified], "verifyDepsBeforeRun: error")
 }
 
 // The firewall is downloaded once, run from the cache after, and fetched again when what the
