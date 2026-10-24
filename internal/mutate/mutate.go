@@ -69,7 +69,7 @@ func Changed(base string) (map[string]map[int]bool, error) {
 		switch {
 		case strings.HasPrefix(line, "+++ b/"):
 			file = strings.TrimPrefix(line, "+++ b/")
-			if !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
+			if !asked(file) {
 				file = ""
 			}
 		case strings.HasPrefix(line, "@@") && file != "":
@@ -92,7 +92,7 @@ func Changed(base string) (map[string]map[int]bool, error) {
 		return nil, fmt.Errorf("reading what is not committed yet: %w", err)
 	}
 	for _, path := range strings.Fields(string(untracked)) {
-		if strings.HasSuffix(path, "_test.go") {
+		if !asked(path) {
 			continue
 		}
 		lines, err := os.ReadFile(path)
@@ -106,6 +106,22 @@ func Changed(base string) (map[string]map[int]bool, error) {
 		changed[path] = whole
 	}
 	return changed, nil
+}
+
+// asked is whether a changed file is one this asks the tests about: Go that is not a test, in a
+// directory the go command builds. Under testdata, or a directory named with a leading . or _,
+// it is a fixture go never compiles into the package - one written to fail on purpose, as
+// cmd/mutate's example is.
+func asked(path string) bool {
+	if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		return false
+	}
+	for _, dir := range strings.Split(pathpkg.Dir(path), "/") {
+		if dir == "testdata" || strings.HasPrefix(dir, ".") && dir != "." || strings.HasPrefix(dir, "_") {
+			return false
+		}
+	}
+	return true
 }
 
 // hunk is the range of the new file a hunk header names: @@ -old,n +new,m @@.

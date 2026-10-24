@@ -338,6 +338,12 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 	require.NoError(t, os.WriteFile("sample.go", []byte(strings.Join(lines, "\n")), 0o600))
 	require.NoError(t, os.WriteFile("sample_test.go", []byte("package sample\n\n// changed\n"), 0o600))
 	require.NoError(t, os.WriteFile("new.go", []byte("package sample\n\nfunc New() int { return 1 }\n"), 0o600))
+	// Fixtures the go command never builds, committed and not: no package's code.
+	for _, dir := range []string{"testdata/example", "_scratch", ".hidden"} {
+		require.NoError(t, os.MkdirAll(dir, 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "fixture.go"), []byte("package fixture\n\nfunc F() int { return 1 }\n"), 0o600))
+	}
+	run("add", "testdata")
 	// A file that is not Go, changed in the same diff: its hunks are nobody's lines.
 	require.NoError(t, os.WriteFile("notes.txt", []byte("a\nb\n"), 0o600))
 	run("add", "notes.txt")
@@ -347,6 +353,9 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 	assert.NotContains(t, changed, "", "a hunk of a file that is not Go was counted as a file with no name")
 
 	assert.NotContains(t, changed, "sample_test.go", "a mutation of a test is a question about nothing")
+	for _, fixture := range []string{"testdata/example/fixture.go", "_scratch/fixture.go", ".hidden/fixture.go"} {
+		assert.NotContains(t, changed, fixture, "a fixture the go command never builds was broken")
+	}
 	require.Contains(t, changed, "sample.go")
 	assert.Equal(t, map[int]bool{12: true, 33: true, 34: true}, changed["sample.go"], "the lines the change touched are not the lines reported")
 	require.Contains(t, changed, "new.go", "a file that is not committed yet is not in any diff, and is all new code")
