@@ -6,6 +6,7 @@ import (
 	"errors"
 	"go/ast"
 	"go/constant"
+	"go/token"
 	"go/types"
 	"strings"
 	"time"
@@ -212,14 +213,31 @@ type longSleep struct {
 	d    time.Duration
 }
 
-// longSleeps is every time.Sleep in fn whose duration is a constant of a second or more: under a
-// second paces a loop, and a duration the test computes is not a number to judge here. A helper's
-// sleep is the helper's, not every caller's.
+// longSleeps is every time.Sleep in fn whose duration is a constant of a second or more and that
+// is not inside a loop: a loop that sleeps looks again, which is a wait for a condition, with the
+// loop's own bound. Under a second paces anything, and a duration the test computes is not a
+// number to judge here. A helper's sleep is the helper's, not every caller's.
 func longSleeps(pass *analysis.Pass, fn *ast.FuncDecl) []longSleep {
+	var loops []ast.Node
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.ForStmt, *ast.RangeStmt:
+			loops = append(loops, n)
+		}
+		return true
+	})
+	inLoop := func(pos token.Pos) bool {
+		for _, l := range loops {
+			if l.Pos() <= pos && pos < l.End() {
+				return true
+			}
+		}
+		return false
+	}
 	var found []longSleep
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) != 1 {
+		if !ok || len(call.Args) != 1 || inLoop(call.Pos()) {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
