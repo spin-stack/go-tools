@@ -16,7 +16,7 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`vulngate`](https://spin-stack.github.io/go-tools/vulngate/) | vulnerabilities the code calls and that have a fix |
 | [`versions`](https://spin-stack.github.io/go-tools/versions/) | pins written outside `versions.yaml`, and pins behind their upstream |
 | [`sfw`](https://spin-stack.github.io/go-tools/sfw/) | npm, npx or yarn, and a pnpm install that does not go through Socket Firewall |
-| [`taskgate`](https://spin-stack.github.io/go-tools/taskgate/) | a workflow step that is not one `task`, so CI and a developer run the same thing |
+| [`taskgate`](https://spin-stack.github.io/go-tools/taskgate/) | a workflow step that is not one `task`, a task that holds a program rather than a few commands, and a script a task runs that decides anything - so CI and a developer run the same thing, and what decides is Go with a test |
 | [`exposure`](https://spin-stack.github.io/go-tools/exposure/) | what a repository would show if made public: secrets and private values in every ref's commits, pull request heads included, and in its issues, comments and releases |
 | [`provenance`, `sbom`, `attestgate`, `trustroot`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM |
 

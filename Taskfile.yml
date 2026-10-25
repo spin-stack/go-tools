@@ -98,19 +98,9 @@ tasks:
     cmds:
       - |
         out="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
-        if [ ! -f coverage.out ]; then
-          echo "coverage.out was not produced; the tests may have failed before coverage ran." >> "$out"
-          exit 0
-        fi
-        {
-          echo "## Go coverage"
-          echo
-          echo "**$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')** total"
-          echo
-          printf '<details><summary>Function detail</summary>\n\n```\n'
-          go tool cover -func=coverage.out
-          printf '```\n</details>\n'
-        } >> "$out"
+        [ -f coverage.out ] || { echo "coverage.out was not produced; the tests may have failed before coverage ran." >> "$out"; exit 0; }
+        func=$(go tool cover -func=coverage.out)
+        printf '## Go coverage\n\n**%s** total\n\n<details><summary>Function detail</summary>\n\n```\n%s\n```\n</details>\n' "$(awk '/^total:/ {print $3}' <<< "$func")" "$func" >> "$out"
         go tool cover -html=coverage.out -o coverage.html
 
   site:

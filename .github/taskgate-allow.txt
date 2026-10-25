@@ -1,4 +1,7 @@
-# Workflow steps that are not one task, each with why (go tool taskgate -allow).
+# What taskgate allows on purpose, each with why (go tool taskgate -allow): a workflow step that is
+# not one task, as <file>/<job>/<step>; a task's shell over the limit, as <file>:<task>; a script a
+# task runs that is a program, by its path. A step listed is a decision; a block or a script listed
+# is work owed.
 #
 # Task is installed from its pin in versions.yaml, so the step that reads the pin runs before there
 # is a Task. Task as a go.mod tool would have none, but go-tools is a library: its tools' modules
