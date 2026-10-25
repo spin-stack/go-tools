@@ -95,8 +95,8 @@ by measured time rather than by count; with none, it splits by name.
 
 ## flakes
 
-A test that failed and passed on the same tree is a flake by definition: the same bytes, another
-answer. One that failed on every run of every tree it failed on was the code, broken then. The
+A test that failed and did not fail on another run of the same tree is a flake by definition: the
+same bytes, another answer. One that failed on runs in a row was the code, broken then. The
 difference is what a rerun answers and what it does not, and reading it off the last few days'
 runs by hand is where a flake stays a rumour.
 
@@ -106,16 +106,23 @@ go tool proven flakes -limit 100          # the last 100 runs of ci.yml, and of 
 
 For every run that failed, the tests its kept logs say failed: the run's artifacts first - a
 lane's logs, which a fleet keeps only when the lane failed - and, when it kept none, its failed
-jobs' logs. Each failed test is then judged by its trees:
+jobs' logs. Each failed test is then judged, by its trees and then along each branch's runs:
+
+- **flaky**: another finished run on a tree it failed on did not fail it;
+- **intermittent**: along one branch it failed, did not on a later or earlier run, and failed
+  again - on and off across commits;
+- **red**: it failed on finished runs in a row, nothing in between where it did not;
+- **once**: one failure and no other run of its tree to tell; a rerun of the commit would.
 
 ```text
 | test | failed | of runs | branches | verdict |
 | --- | --- | --- | --- | --- |
-| ci.yml: TestARunningWorkspaceResumesFromASnapshotsMemory | 3 ([401](...) [400](...) [399](...)) | 160 | e2e-hosts, ci/three-shards | flaky: passed on the same tree |
-| kvm.yml: TestAnImageRewrittenInTheBucketIsNotCloned | 3 ([403](...) [402](...) [398](...)) | 160 | main | red: failed on every run of its trees |
-flaky more than once, for hack/quarantine.txt or a fix: ci.yml: TestARunningWorkspaceResumesFromASnapshotsMemory
+| kvm.yml: TestWhereQemuLaunchGoes | 4 ([398](...) [371](...) [363](...) [362](...)) | 200 | main | intermittent: on and off along its branch |
+| kvm.yml: TestAnImageRewrittenInTheBucketIsNotCloned | 5 ([403](...) [402](...) [401](...) [400](...) [399](...)) | 200 | main | red: failed on runs in a row |
+| ci.yml: TestTheConnectionsHeldOpenAreMeasured | 1 ([408](...)) | 200 | hack/e2ehosts | flaky: did not fail on another run of the same tree |
+flaky more than once, for hack/quarantine.txt or a fix: kvm.yml: TestWhereQemuLaunchGoes
 ```
 
 The table goes to the run's summary when there is one. A cancelled run finished nothing and says
-nothing; a run whose logs are gone counts as a run the test did not fail in only when it passed.
-Run it on a schedule beside the gate, so the list is read where the reruns are paid for.
+nothing; a failed run whose logs are gone says nothing either, and counts for a test only when it
+passed. Run it on a schedule beside the gate, so the list is read where the reruns are paid for.

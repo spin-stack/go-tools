@@ -40,7 +40,8 @@ const usage = `usage: proven tree|base|release|times|flakes [flags]
   release  refuse (exit 1) unless the gate passed on the tree and -also's lanes on the commit
   times    times=<lines>, each test's seconds from the last gate that passed
   flakes   every test that failed in the last -limit runs of -workflow and -also: flaky when it
-           passed on the same tree, red when it failed on every run of its trees
+           did not fail on another run of the same tree, intermittent when on and off along a
+           branch, red when it failed on runs in a row, once when nothing else tells
 
 Each takes -repo, -sha, -workflow, -events; -h says the rest.
 `
@@ -249,8 +250,8 @@ func times(ctx context.Context, gh proven.GitHub, workflow, jobs string, limit i
 // flakes is every test that failed in the last limit runs of each workflow, judged by its trees
 // (proven.Flakes): the failed tests of a run are read from the artifacts it kept - a lane's logs,
 // which the fleet keeps only when the lane failed - and, when it kept none, from its failed
-// jobs' logs. The table goes to the run's summary and stdout; the flaky tests with more than one
-// failure are named last, as the candidates for a quarantine.
+// jobs' logs. The table goes to the run's summary and stdout; the tests flaky more than once or
+// intermittent are named last, as the candidates for a quarantine.
 func flakes(ctx context.Context, gh proven.GitHub, trees proven.Trees, workflows []string, limit int) error {
 	var all []proven.Failure
 	runsAsked := 0
@@ -293,7 +294,7 @@ func flakes(ctx context.Context, gh proven.GitHub, trees proven.Trees, workflows
 	}
 	var candidates []string
 	for _, f := range all {
-		if f.Flaky && len(f.Runs) > 1 {
+		if (f.Kind == proven.Flaky && len(f.Runs) > 1) || f.Kind == proven.Intermittent {
 			candidates = append(candidates, f.Test)
 		}
 	}
