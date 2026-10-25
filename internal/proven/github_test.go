@@ -39,6 +39,17 @@ func github(t *testing.T) (*httptest.Server, *[]string) {
 			} else {
 				_, _ = w.Write([]byte(`{"jobs": [{"id": 72, "name": "e2e-verify:1/2"}]}`))
 			}
+		case "/repos/o/r/actions/runs/17/artifacts":
+			if r.URL.Query().Get("page") == "" {
+				w.Header().Set("Link", `<`+"http://"+r.Host+`/repos/o/r/actions/runs/17/artifacts?per_page=100&page=2>; rel="next"`)
+				_, _ = w.Write([]byte(`{"artifacts": [{"name": "ci-lanes-short-17", "archive_download_url": "http://` + r.Host + `/repos/o/r/actions/artifacts/5/zip", "expired": false}]}`)) //nolint:gosec // the test server names itself, as the API names where an artifact is
+			} else {
+				_, _ = w.Write([]byte(`{"artifacts": [{"name": "old", "archive_download_url": "x", "expired": true}]}`))
+			}
+		case "/repos/o/r/actions/artifacts/5/zip":
+			http.Redirect(w, r, "/blob/5", http.StatusFound)
+		case "/blob/5":
+			_, _ = w.Write([]byte("PK-bytes"))
 		case "/repos/o/r/actions/jobs/72/logs":
 			http.Redirect(w, r, "/blob/72", http.StatusFound)
 		case "/blob/72":
@@ -80,6 +91,14 @@ func TestTheClientReadsOneRepository(t *testing.T) {
 
 	_, err = gh.Tree(ctx, "nope")
 	require.ErrorContains(t, err, "404 Not Found: {\"message\": \"Not Found\"}")
+	artifacts, err := gh.Artifacts(ctx, 17)
+	require.NoError(t, err)
+	assert.Equal(t, []proven.Artifact{{Name: "ci-lanes-short-17", URL: "http://" + srv.Listener.Addr().String() + "/repos/o/r/actions/artifacts/5/zip"}, {Name: "old", URL: "x", Expired: true}}, artifacts)
+	archive, err := gh.Archive(ctx, artifacts[0].URL)
+	require.NoError(t, err)
+	assert.Equal(t, "PK-bytes", string(archive))
+	_, err = gh.Archive(ctx, "/repos/o/r/actions/artifacts/9/zip")
+	require.Error(t, err)
 	_, err = gh.Jobs(ctx, 8)
 	require.ErrorContains(t, err, "/actions/runs/8/jobs")
 	_, err = gh.Log(ctx, 9)

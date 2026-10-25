@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -33,6 +35,7 @@ func stdout(t *testing.T, f func()) string {
 type ciRun struct {
 	ID         int64  `json:"id"`
 	HeadSHA    string `json:"head_sha"`
+	HeadBranch string `json:"head_branch"`
 	Event      string `json:"event"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
@@ -44,10 +47,12 @@ type ciRun struct {
 // commit; whose kvm.yml is as the test says; and whose one e2e-verify job logged two tests. The
 // command is run in the clone, as the workflow's environment has it.
 type fixture struct {
-	main  []string // main, main~1, main~2
-	pr    string
-	kvm   []ciRun
-	asked []string
+	main    []string // main, main~1, main~2
+	pr      string
+	kvm     []ciRun
+	asked   []string
+	api     string // the test server
+	archive []byte // run 6's artifact, a zip of a lane's logs
 }
 
 func setup(t *testing.T) *fixture {
@@ -79,7 +84,7 @@ func setup(t *testing.T) *fixture {
 			// As the API filters: status=success is the passed runs, status=completed every finished one.
 			var runs []ciRun
 			for _, run := range []ciRun{
-				{ID: 6, HeadSHA: f.main[0], Event: "schedule", Status: "completed", Conclusion: "failure", URL: "u6"},
+				{ID: 6, HeadSHA: f.main[0], HeadBranch: "main", Event: "schedule", Status: "completed", Conclusion: "failure", URL: "u6"},
 				{ID: 5, HeadSHA: "elsewhere", Event: "schedule", Status: "completed", Conclusion: "cancelled", URL: "u5"},
 				{ID: 4, HeadSHA: f.pr, Event: "workflow_dispatch", Status: "completed", Conclusion: "success", URL: "u4"},
 				{ID: 3, HeadSHA: f.main[2], Event: "schedule", Status: "completed", Conclusion: "success", URL: "u3"},
@@ -100,6 +105,9 @@ func setup(t *testing.T) *fixture {
 		case "/repos/o/r/actions/jobs/31/logs":
 			_, _ = w.Write([]byte("--- PASS: TestA (1.40s)\n--- FAIL: TestB (2s)\n"))
 		default:
+			if f.flakesAPI(w, r) {
+				return
+			}
 			// A commit the clone has not: its tree is never the one asked about.
 			if strings.HasPrefix(r.URL.Path, "/repos/o/r/commits/") {
 				_, _ = w.Write([]byte(`{"commit": {"tree": {"sha": "other"}}}`))
@@ -109,6 +117,7 @@ func setup(t *testing.T) *fixture {
 		}
 	}))
 	t.Cleanup(srv.Close)
+	f.api = srv.URL
 	t.Setenv("GITHUB_API_URL", srv.URL)
 	t.Setenv("GITHUB_REPOSITORY", "o/r")
 	t.Setenv("GH_TOKEN", "tok")
@@ -117,6 +126,37 @@ func setup(t *testing.T) *fixture {
 	t.Setenv("GITHUB_SHA", "")
 	t.Setenv("GITHUB_REF", "")
 	return f
+}
+
+// flakesAPI answers what flakes asks: run 6 (ci.yml, failed) kept a lane's logs as an artifact;
+// kvm's failed runs kept none, and their failed jobs' logs are read instead. False for anything
+// else.
+func (f *fixture) flakesAPI(w http.ResponseWriter, r *http.Request) bool {
+	switch r.URL.Path {
+	case "/repos/o/r/actions/runs/6/artifacts":
+		_, _ = w.Write([]byte(`{"artifacts": [{"name": "ci-lanes-short-6", "archive_download_url": "` + f.api + `/archive/6", "expired": false}, {"name": "old", "archive_download_url": "` + f.api + `/archive/none", "expired": true}]}`))
+	case "/archive/6":
+		_, _ = w.Write(f.archive)
+	case "/repos/o/r/actions/runs/30/artifacts", "/repos/o/r/actions/runs/33/artifacts", "/repos/o/r/actions/runs/35/artifacts", "/repos/o/r/actions/runs/36/artifacts":
+		_, _ = w.Write([]byte(`{"artifacts": []}`))
+	case "/repos/o/r/actions/runs/35/jobs":
+		_, _ = w.Write([]byte(`{"jobs": [{"id": 37, "name": "Root lanes", "conclusion": "failure"}]}`))
+	case "/repos/o/r/actions/runs/36/jobs":
+		_, _ = w.Write([]byte(`{"jobs": [{"id": 38, "name": "Root lanes", "conclusion": "failure"}]}`))
+	case "/repos/o/r/actions/jobs/37/logs":
+		_, _ = w.Write([]byte("--- FAIL: TestD (3s)\n"))
+	case "/repos/o/r/actions/jobs/38/logs":
+		_, _ = w.Write([]byte("--- FAIL: TestD (3s)\n--- FAIL: TestC (1s)\n"))
+	case "/repos/o/r/actions/runs/30/jobs":
+		_, _ = w.Write([]byte(`{"jobs": [{"id": 31, "name": "e2e-verify:1/1", "conclusion": "failure"}, {"id": 39, "name": "short", "conclusion": "success"}]}`))
+	case "/repos/o/r/actions/runs/33/jobs":
+		_, _ = w.Write([]byte(`{"jobs": [{"id": 34, "name": "e2e-verify:1/1", "conclusion": "failure"}]}`))
+	case "/repos/o/r/actions/jobs/34/logs":
+		_, _ = w.Write([]byte("kvm\tRoot lanes\t2026-10-25T12:00:00Z --- FAIL: TestB (3s)\n--- FAIL: TestE (1s)\n"))
+	default:
+		return false
+	}
+	return true
 }
 
 // tree answers for the commit's tree: main~1 is proven by the pull request's run on the same tree,
@@ -231,6 +271,63 @@ func TestTimesAreTheLastGatesThatLoggedAny(t *testing.T) {
 	out = stdout(t, func() { err = run(t.Context(), []string{"times", "-jobs", "none"}) })
 	require.NoError(t, err)
 	assert.Equal(t, "run none: 0 tests' times\ntimes=\n", out)
+}
+
+// flakes: run 6 failed TestA on main's tree, which no other run has - red; kvm's TestB failed on
+// two runs of main~1's tree and passed on a third - flaky, and a quarantine candidate. The table
+// goes to the summary when there is one.
+func TestFlakesAreTheTestsThatPassedOnTheSameTree(t *testing.T) {
+	f := setup(t)
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range map[string]string{"_output/ci-local/short.log": "--- FAIL: TestA (1s)\n", "_output/ci-local/failed": "test\n"} {
+		w, err := zw.Create(name)
+		require.NoError(t, err)
+		_, err = w.Write([]byte(body))
+		require.NoError(t, err)
+	}
+	require.NoError(t, zw.Close())
+	f.archive = buf.Bytes()
+	f.kvm = []ciRun{
+		{ID: 36, HeadSHA: f.main[2], HeadBranch: "main", Event: "push", Status: "completed", Conclusion: "failure", URL: "u36"},
+		{ID: 35, HeadSHA: f.main[2], HeadBranch: "main", Event: "push", Status: "completed", Conclusion: "failure", URL: "u35"},
+		{ID: 33, HeadSHA: f.main[1], HeadBranch: "main", Event: "push", Status: "completed", Conclusion: "failure", URL: "u33"},
+		{ID: 32, HeadSHA: f.main[1], HeadBranch: "main", Event: "push", Status: "completed", Conclusion: "success", URL: "u32"},
+		{ID: 30, HeadSHA: f.main[1], HeadBranch: "main", Event: "push", Status: "completed", Conclusion: "failure", URL: "u30"},
+	}
+	summaryFile := filepath.Join(t.TempDir(), "summary")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryFile)
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"flakes"}) })
+	require.NoError(t, err)
+	// TestD failed twice on main~2's tree and passed nowhere: red, and no candidate however many
+	// times; TestE failed once beside a pass: flaky, and no candidate for once.
+	assert.Equal(t, "| test | failed | of runs | branches | verdict |\n| --- | --- | --- | --- | --- |\n"+
+		"| kvm.yml: TestB | 2 ([33](u33) [30](u30)) | 9 | main | flaky: passed on the same tree |\n"+
+		"| kvm.yml: TestD | 2 ([36](u36) [35](u35)) | 9 | main | red: failed on every run of its trees |\n"+
+		"| ci.yml: TestA | 1 ([6](u6)) | 9 | main | red: failed on every run of its trees |\n"+
+		"| kvm.yml: TestC | 1 ([36](u36)) | 9 | main | flaky: passed on the same tree |\n"+
+		"| kvm.yml: TestE | 1 ([33](u33)) | 9 | main | flaky: passed on the same tree |\n"+
+		"flaky more than once, for hack/quarantine.txt or a fix: kvm.yml: TestB\n", out)
+	written, err := os.ReadFile(summaryFile)
+	require.NoError(t, err)
+	assert.Equal(t, 7, strings.Count(string(written), "\n"))
+	assert.Contains(t, f.asked, "/repos/o/r/actions/runs/6/artifacts?per_page=100")
+	assert.NotContains(t, strings.Join(f.asked, " "), "/archive/none", "an expired artifact is not fetched")
+	assert.Contains(t, f.asked, "/repos/o/r/actions/jobs/34/logs")
+	assert.NotContains(t, f.asked, "/repos/o/r/actions/jobs/39/logs", "a job that passed has no failure to read")
+	assert.NotContains(t, strings.Join(f.asked, " "), "/runs/6/jobs", "a run whose artifact named its failures is not asked for its jobs")
+
+	// Nothing flaky more than once: said so. -also empty asks one workflow.
+	f.kvm = nil
+	out = stdout(t, func() { err = run(t.Context(), []string{"flakes", "-also", ""}) })
+	require.NoError(t, err)
+	assert.Contains(t, out, "1 failed tests in 4 runs; none flaky more than once\n")
+
+	// An artifact that is not a zip is said with its name.
+	f.archive = []byte("nope")
+	err = run(t.Context(), []string{"flakes", "-also", ""})
+	assert.ErrorContains(t, err, "run 6: artifact ci-lanes-short-6: the artifact is not a zip")
 }
 
 // What is refused before the API is asked: no command, an unknown one, a flag it has not, no

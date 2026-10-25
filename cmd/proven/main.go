@@ -5,6 +5,7 @@
 //	go tool proven base      what a run on main is of: proven=true, or base=<commit> for the diff
 //	go tool proven release   exits 1 unless the gate passed on the tree and the push lanes on the commit
 //	go tool proven times     times=<lines>: each test's seconds in the last gate that passed
+//	go tool proven flakes    which failed tests are flaky (passed on the same tree) and which were red
 //
 // The repository is -repo or $GITHUB_REPOSITORY, the commit -sha or $GITHUB_SHA or HEAD, the token
 // $GH_TOKEN or $GITHUB_TOKEN, the API $GITHUB_API_URL or github.com's. The gate is -workflow,
@@ -19,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/spin-stack/go-tools/internal/proven"
@@ -31,12 +33,14 @@ func main() {
 	}
 }
 
-const usage = `usage: proven tree|base|release|times [flags]
+const usage = `usage: proven tree|base|release|times|flakes [flags]
 
   tree     proven=true|false, whether the gate passed on the commit's tree
   base     what a run on main is of: proven=true, or base=<commit> for mutate's diff
   release  refuse (exit 1) unless the gate passed on the tree and -also's lanes on the commit
   times    times=<lines>, each test's seconds from the last gate that passed
+  flakes   every test that failed in the last -limit runs of -workflow and -also: flaky when it
+           passed on the same tree, red when it failed on every run of its trees
 
 Each takes -repo, -sha, -workflow, -events; -h says the rest.
 `
@@ -103,8 +107,14 @@ func run(ctx context.Context, argv []string) error {
 		return release(ctx, gh, trees, *sha, *workflow, ev, *limit, *also)
 	case "times":
 		return times(ctx, gh, *workflow, *jobs, *limit)
+	case "flakes":
+		workflows := []string{*workflow}
+		if *also != "" {
+			workflows = append(workflows, *also)
+		}
+		return flakes(ctx, gh, trees, workflows, *limit)
 	}
-	return fmt.Errorf("no command %q; one of tree, base, release, times", argv[0])
+	return fmt.Errorf("no command %q; one of tree, base, release, times, flakes", argv[0])
 }
 
 // tree answers whether the gate passed on the commit's tree, for a workflow that then runs only
@@ -234,6 +244,119 @@ func times(ctx context.Context, gh proven.GitHub, workflow, jobs string, limit i
 	}
 	fmt.Println("run none: 0 tests' times")
 	return output("times", "")
+}
+
+// flakes is every test that failed in the last limit runs of each workflow, judged by its trees
+// (proven.Flakes): the failed tests of a run are read from the artifacts it kept - a lane's logs,
+// which the fleet keeps only when the lane failed - and, when it kept none, from its failed
+// jobs' logs. The table goes to the run's summary and stdout; the flaky tests with more than one
+// failure are named last, as the candidates for a quarantine.
+func flakes(ctx context.Context, gh proven.GitHub, trees proven.Trees, workflows []string, limit int) error {
+	var all []proven.Failure
+	runsAsked := 0
+	for _, w := range workflows {
+		runs, err := gh.Runs(ctx, w, completed, limit)
+		if err != nil {
+			return err
+		}
+		runsAsked += len(runs)
+		failed := map[int64][]string{}
+		for _, r := range runs {
+			if r.Conclusion != "failure" {
+				continue
+			}
+			tests, err := failedTests(ctx, gh, r.ID)
+			if err != nil {
+				return fmt.Errorf("run %d: %w", r.ID, err)
+			}
+			failed[r.ID] = tests
+		}
+		found, err := proven.Flakes(ctx, runs, failed, trees)
+		if err != nil {
+			return err
+		}
+		for i := range found {
+			found[i].Test = w + ": " + found[i].Test
+		}
+		all = append(all, found...)
+	}
+	// The workflows' failures as one list, most failures first, then by name.
+	sort.Slice(all, func(i, j int) bool {
+		if len(all[i].Runs) != len(all[j].Runs) {
+			return len(all[i].Runs) > len(all[j].Runs)
+		}
+		return all[i].Test < all[j].Test
+	})
+	lines := proven.Report(all, runsAsked)
+	for _, l := range lines {
+		summary(l)
+	}
+	var candidates []string
+	for _, f := range all {
+		if f.Flaky && len(f.Runs) > 1 {
+			candidates = append(candidates, f.Test)
+		}
+	}
+	if len(candidates) == 0 {
+		fmt.Printf("%d failed tests in %d runs; none flaky more than once\n", len(all), runsAsked)
+		return nil
+	}
+	fmt.Printf("flaky more than once, for hack/quarantine.txt or a fix: %s\n", strings.Join(candidates, ", "))
+	return nil
+}
+
+// failedTests is every test a failed run's kept logs say failed: its artifacts, each a zip, else
+// its failed jobs' logs.
+func failedTests(ctx context.Context, gh proven.GitHub, run int64) ([]string, error) {
+	artifacts, err := gh.Artifacts(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	var tests []string
+	for _, a := range artifacts {
+		if a.Expired {
+			continue
+		}
+		archive, err := gh.Archive(ctx, a.URL)
+		if err != nil {
+			return nil, err
+		}
+		found, err := proven.FailedIn(archive)
+		if err != nil {
+			return nil, fmt.Errorf("artifact %s: %w", a.Name, err)
+		}
+		tests = append(tests, found...)
+	}
+	if len(tests) > 0 {
+		return unique(tests), nil
+	}
+	jobs, err := gh.Jobs(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range jobs {
+		if j.Conclusion != "failure" {
+			continue
+		}
+		log, err := gh.Log(ctx, j.ID)
+		if err != nil {
+			return nil, err
+		}
+		tests = append(tests, proven.Failed(log)...)
+	}
+	return unique(tests), nil
+}
+
+func unique(s []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, x := range s {
+		if !seen[x] {
+			seen[x] = true
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // output hands the workflow one name=value through $GITHUB_OUTPUT - a heredoc when the value has

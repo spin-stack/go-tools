@@ -28,8 +28,16 @@ type Run struct {
 	URL        string `json:"html_url"`
 }
 
+// completed is the status of a run that is over, whatever it concluded.
+const completed = "completed"
+
 // Passed is a run that finished and succeeded.
-func (r Run) Passed() bool { return r.Status == "completed" && r.Conclusion == "success" }
+func (r Run) Passed() bool { return r.Status == completed && r.Conclusion == "success" }
+
+// Finished is a run that ran to an answer, success or failure: a cancelled run answered nothing.
+func (r Run) Finished() bool {
+	return r.Status == completed && (r.Conclusion == "success" || r.Conclusion == "failure")
+}
 
 // Commit is one commit with its tree.
 type Commit struct {

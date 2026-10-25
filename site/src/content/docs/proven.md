@@ -1,6 +1,6 @@
 ---
 title: proven
-description: Asks GitHub what CI already proved about a commit - which run answers for its tree, what a run on main is of, whether a release may be made, how long each test took - and writes the answer where the workflow reads it.
+description: Asks GitHub what CI already proved about a commit - which run answers for its tree, what a run on main is of, whether a release may be made, how long each test took, which failed tests are flaky - and writes the answer where the workflow reads it.
 ---
 
 A workflow that decides something from what GitHub says - which commit to diff against, whether
@@ -11,7 +11,7 @@ commits, the lane timed out, and nothing on main could pass again until somebody
 `proven` is those functions in Go, with their tables, and one small client for the API.
 
 ```sh
-go tool proven tree|base|release|times [flags]
+go tool proven tree|base|release|times|flakes [flags]
 ```
 
 Every command takes the repository from `-repo` or `$GITHUB_REPOSITORY`, the commit from `-sha`
@@ -92,3 +92,30 @@ no run reached is released by dispatching the gate on main first.
 names start with `-jobs` (`e2e-verify`), from the newest run that passed and logged any - a run
 proven by another ran no lane. A split of the tests over machines reads it, so the shards are even
 by measured time rather than by count; with none, it splits by name.
+
+## flakes
+
+A test that failed and passed on the same tree is a flake by definition: the same bytes, another
+answer. One that failed on every run of every tree it failed on was the code, broken then. The
+difference is what a rerun answers and what it does not, and reading it off the last few days'
+runs by hand is where a flake stays a rumour.
+
+```sh
+go tool proven flakes -limit 100          # the last 100 runs of ci.yml, and of -also (kvm.yml)
+```
+
+For every run that failed, the tests its kept logs say failed: the run's artifacts first - a
+lane's logs, which a fleet keeps only when the lane failed - and, when it kept none, its failed
+jobs' logs. Each failed test is then judged by its trees:
+
+```text
+| test | failed | of runs | branches | verdict |
+| --- | --- | --- | --- | --- |
+| ci.yml: TestARunningWorkspaceResumesFromASnapshotsMemory | 3 ([401](...) [400](...) [399](...)) | 160 | e2e-hosts, ci/three-shards | flaky: passed on the same tree |
+| kvm.yml: TestAnImageRewrittenInTheBucketIsNotCloned | 3 ([403](...) [402](...) [398](...)) | 160 | main | red: failed on every run of its trees |
+flaky more than once, for hack/quarantine.txt or a fix: ci.yml: TestARunningWorkspaceResumesFromASnapshotsMemory
+```
+
+The table goes to the run's summary when there is one. A cancelled run finished nothing and says
+nothing; a run whose logs are gone counts as a run the test did not fail in only when it passed.
+Run it on a schedule beside the gate, so the list is read where the reruns are paid for.
