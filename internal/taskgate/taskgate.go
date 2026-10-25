@@ -102,14 +102,15 @@ func Check(root string, limits Limits) ([]Finding, error) {
 	return append(findings, found...), nil
 }
 
-// read is rel's bytes, or none for a file git lists that is gone - deleted, not yet staged - or
-// that is a directory - a submodule, which git lists by its path - neither of which holds shell.
+// read is rel's bytes, or none for a path git lists that holds no shell: a file that is gone -
+// deleted, not yet staged - or a directory - a submodule, which git lists by its path.
 func read(root, rel string) ([]byte, error) {
-	raw, err := os.ReadFile(filepath.Join(root, rel))
+	p := filepath.Join(root, rel)
+	if fi, err := os.Stat(p); os.IsNotExist(err) || err == nil && fi.IsDir() {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(p)
 	if err != nil {
-		if fi, serr := os.Stat(filepath.Join(root, rel)); os.IsNotExist(err) || serr == nil && fi.IsDir() {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("taskgate: %w", err)
 	}
 	return raw, nil
