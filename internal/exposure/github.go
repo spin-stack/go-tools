@@ -83,11 +83,19 @@ func (g GitHub) Surfaces(ctx context.Context, repo string, patterns []Pattern) (
 	}
 	look := []string{
 		fmt.Sprintf("%d issue(s) and %d pull request(s), their comments and review comments: read for the patterns above, and a person reads what no pattern names", len(issues)-prs, prs),
-		fmt.Sprintf("%d Actions run(s): their logs turn public with the repository, and nothing here reads them - delete the ones nobody needs before the switch", runs.TotalCount),
+		fmt.Sprintf("%d Actions run(s): their logs are public whenever the repository is, and nothing here reads them - delete the ones nobody needs", runs.TotalCount),
 		fmt.Sprintf("%d Actions artifact(s): public with the repository - delete the ones nobody needs", artifacts.TotalCount),
 		fmt.Sprintf("%d release(s) with %d asset(s): the notes are read here, the assets are not", len(releases), assets),
 	}
 	return t.findings(), look, nil
+}
+
+// Private is whether repo is private: the switch is still ahead of it, or it is public already
+// and what the run lists is what it shows now.
+func (g GitHub) Private(ctx context.Context, repo string) (bool, error) {
+	var r struct{ Private bool }
+	err := g.get(ctx, "/repos/"+repo, &r, nil)
+	return r.Private, err
 }
 
 // PrivateRepos is the names of the owner's repositories that are private, other than this one:

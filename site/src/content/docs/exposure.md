@@ -22,7 +22,7 @@ exposure: spin-stack/spin: 6432 commit(s) in every ref, 2001 of them off the def
   ...
 To look at, by a person:
   - 3113 file(s) some commit had and the default branch no longer does: deleted is not gone
-  - 2446 Actions run(s): their logs turn public with the repository, and nothing here reads them - delete the ones nobody needs before the switch
+  - 2446 Actions run(s): their logs are public whenever the repository is, and nothing here reads them - delete the ones nobody needs
   ...
 ```
 
@@ -105,4 +105,5 @@ spin's 6432 commits about 35.
 
 It is a check for the day before a repository goes public, and for a repository that already is,
 from a scheduled job: a value that lands in a pull request after the switch is published the
-moment the pull request is opened.
+moment the pull request is opened. On a public repository its last line says so: what it lists is
+what the repository shows now, and a person reads what is new in it.

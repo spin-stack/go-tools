@@ -102,7 +102,17 @@ func run(ctx context.Context, w io.Writer, o options) (int, error) {
 		fmt.Sprintf("%d file(s) some commit had and the default branch no longer does: deleted is not gone", len(history.Deleted)),
 		fmt.Sprintf("%d binary file(s) some commit added: an image or an archive is read by opening it", len(history.Binaries)),
 	}
+	// What the person does with the list: read it before making the repository public, or, on one
+	// already public - a scheduled run - read what is new in it, which is out already.
+	next := "a person still reads the list above before the switch"
 	if o.github {
+		private, err := gh.Private(ctx, o.repo)
+		if err != nil {
+			return 0, err
+		}
+		if !private {
+			next = "the repository is public already, so the list above is what it shows now: a person reads what is new in it"
+		}
 		surfaced, more, err := gh.Surfaces(ctx, o.repo, patterns)
 		if err != nil {
 			return 0, err
@@ -135,7 +145,7 @@ func run(ctx context.Context, w io.Writer, o options) (int, error) {
 			len(unexplained), len(stale))
 		return 1, nil
 	}
-	_, _ = fmt.Fprintf(w, "OK: every value found is answered (%d allowlist line(s)); a person still reads the list above before the switch.\n", len(allowed))
+	_, _ = fmt.Fprintf(w, "OK: every value found is answered (%d allowlist line(s)); %s.\n", len(allowed), next)
 	return 0, nil
 }
 

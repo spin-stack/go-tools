@@ -151,8 +151,8 @@ func TestTheAllowlistAnswersAValueOrAKindAndGoesStale(t *testing.T) {
 }
 
 // GitHub's side is read page by page: issues and pull requests, their comments and review
-// comments, release notes; Actions' runs and artifacts are counted to be looked at, and the
-// owner's private repositories, this one aside, are named.
+// comments, release notes; Actions' runs and artifacts are counted to be looked at, whether the
+// repository is private is asked, and the owner's private repositories, this one aside, are named.
 func TestGitHubsSideIsReadEveryPage(t *testing.T) {
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +173,8 @@ func TestGitHubsSideIsReadEveryPage(t *testing.T) {
 			_, _ = w.Write([]byte(`{"total_count":7}`))
 		case "/repos/o/r/actions/artifacts?":
 			_, _ = w.Write([]byte(`{"total_count":3}`))
+		case "/repos/o/r?":
+			_, _ = w.Write([]byte(`{"private":true}`))
 		case "/orgs/o/repos?":
 			_, _ = w.Write([]byte(`[{"name":"r","private":true},{"name":"secret","private":true},{"name":"open","private":false}]`))
 		default:
@@ -193,6 +195,10 @@ func TestGitHubsSideIsReadEveryPage(t *testing.T) {
 	assert.Contains(t, look[1], "7 Actions run(s)")
 	assert.Contains(t, look[2], "3 Actions artifact(s)")
 	assert.Contains(t, look[3], "1 release(s) with 2 asset(s)")
+
+	isPrivate, err := gh.Private(t.Context(), "o/r")
+	require.NoError(t, err)
+	assert.True(t, isPrivate)
 
 	private, err := gh.PrivateRepos(t.Context(), "o", "r")
 	require.NoError(t, err)
