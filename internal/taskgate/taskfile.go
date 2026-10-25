@@ -30,8 +30,9 @@ func (b Block) String() string {
 		b.File, b.Line, b.Task, b.Lines, b.Limit)
 }
 
-// Script is a script a task runs that is a program: longer than the limit, or one that decides -
-// reads JSON, or writes what a workflow reads next - and so has an answer a test could hold.
+// Script is a script a task runs - a file named .sh or opening with a shell's #! line - that is a
+// program: longer than the limit, or one that decides - reads JSON, or writes what a workflow
+// reads next - and so has an answer a test could hold.
 type Script struct {
 	File  string // the script, relative to the root
 	By    string // <file>:<task> of the first task found running it
@@ -78,6 +79,9 @@ func tasks(root string, files []string, listed map[string]bool, limits Limits) (
 		raw, err := read(root, s.File)
 		if err != nil {
 			return nil, err
+		}
+		if !isShell(s.File, raw) {
+			continue
 		}
 		lines := shell.Lines(string(raw), 1) // mutate-exempt: a script's lines are counted, not placed
 		s.Lines = len(lines)
@@ -225,16 +229,22 @@ func collect(task string, node *yaml.Node) []shellIn {
 	return out
 }
 
-// called is the scripts a line of shell in the Taskfile at rel runs: each word that ends in .sh
-// and names a file git lists, relative to the Taskfile's directory - where Task runs it - or to
-// the root.
+// shebang is the first line of a file a shell runs: sh, bash, dash or zsh, by path or through env.
+var shebang = regexp.MustCompile(`^#![^\n]*\b(sh|bash|dash|zsh)\b`)
+
+// isShell is a file a shell runs: named .sh, or opening with a shell's #! line. The files a task
+// names are not all scripts - a config, a module file - and a script is not always named .sh.
+func isShell(rel string, raw []byte) bool {
+	return strings.HasSuffix(rel, ".sh") || shebang.Match(raw)
+}
+
+// called is the files a line of shell in the Taskfile at rel names: each word that is a path git
+// lists, relative to the Taskfile's directory - where Task runs it - or to the root. Which of them
+// are scripts is read from the files.
 func called(rel, line string, listed map[string]bool) []string {
 	var out []string
 	for _, w := range strings.Fields(line) {
 		w = strings.Trim(w, `"'()$;&|`)
-		if !strings.HasSuffix(w, ".sh") {
-			continue
-		}
 		for _, p := range []string{path.Join(path.Dir(rel), w), path.Clean(w)} {
 			if listed[p] {
 				out = append(out, filepath.ToSlash(p))
