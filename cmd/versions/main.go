@@ -46,6 +46,7 @@ Usage:
   versions version <name>             one entry's version
   versions ref     <name>             an image's reference, by its digest
   versions url     <name>             a download's URL, at its version
+  versions newer   <name> <version>   <version> when it is newer than the pin, nothing when not
   versions check                      what is behind its upstream; exits 1 when anything is
   versions bump    <name> [version]   pin an entry at a version, the newest by default
 
@@ -95,6 +96,8 @@ func run(ctx context.Context, argv []string) error {
 		return nil
 	case "version", "ref", "url":
 		return one(os.Stdout, v, cmd, names)
+	case "newer":
+		return newer(os.Stdout, v, names)
 	case "check":
 		if len(names) != 0 {
 			return errors.New("check: takes no names; it checks every entry")
@@ -129,6 +132,26 @@ func one(w io.Writer, v *versions.Versions, cmd string, names []string) error {
 		return fmt.Errorf("%s: %s is a %s", cmd, e.Name, e.Kind)
 	}
 	_, err = fmt.Fprintln(w, out)
+	return err
+}
+
+// newer prints the version given when it is newer than the entry's, and nothing when it is not:
+// what a workflow told of a release asks before proposing a bump, so one told twice, or of an
+// old release, proposes nothing (spin's machine.yml). A version not of the entry's form is an
+// error, not an old version.
+func newer(w io.Writer, v *versions.Versions, names []string) error {
+	if len(names) != 2 {
+		return errors.New("newer: <name> <version>")
+	}
+	e, err := v.Get(names[0])
+	if err != nil {
+		return err
+	}
+	is, err := e.Newer(names[1])
+	if err != nil || !is {
+		return err
+	}
+	_, err = fmt.Fprintln(w, names[1])
 	return err
 }
 

@@ -306,3 +306,32 @@ func field(m *yaml.Node, key string) *yaml.Node {
 	}
 	return nil
 }
+
+// Newer is whether version is newer than e's: both read as numbers between dots, a leading v
+// apart, so v20261013.02 is newer than v20261013.01 and 7.2.10 than 7.2.9. A version not in the
+// pin's form - a v the pin has not or lacks, another count of parts, a word - is refused: it is
+// not one of e's releases, whatever it is.
+func (e Entry) Newer(version string) (bool, error) {
+	pin, err := parts(e.Version)
+	if err != nil {
+		return false, fmt.Errorf("versions: %s's own version %q is not numbers between dots", e.Name, e.Version)
+	}
+	given, err := parts(version)
+	if err != nil || len(given) != len(pin) || strings.HasPrefix(version, "v") != strings.HasPrefix(e.Version, "v") {
+		return false, fmt.Errorf("versions: %q is not a version of %s's form, %s", version, e.Name, e.Version)
+	}
+	return slices.Compare(given, pin) > 0, nil
+}
+
+// parts is a version's numbers between dots, a leading v apart.
+func parts(version string) ([]int, error) {
+	var out []int
+	for f := range strings.SplitSeq(strings.TrimPrefix(version, "v"), ".") {
+		n, err := strconv.Atoi(f)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("%q is not numbers between dots", version)
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}

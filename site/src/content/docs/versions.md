@@ -50,6 +50,7 @@ go tool versions env  debian kernel   # the same, as KEY=value lines
 go tool versions ref  debian          # debian:trixie@sha256:...
 go tool versions url  kernel          # the download's URL at its version
 go tool versions version kernel       # 7.2.8
+go tool versions newer kernel 7.2.9   # 7.2.9: newer than the pin; nothing when not, an error when not of its form
 ```
 
 A Dockerfile declares the arguments with no default, and the Taskfile passes them:
