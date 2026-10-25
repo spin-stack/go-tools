@@ -134,7 +134,9 @@ func setup(t *testing.T) *fixture {
 func (f *fixture) flakesAPI(w http.ResponseWriter, r *http.Request) bool {
 	switch r.URL.Path {
 	case "/repos/o/r/actions/runs/6/artifacts":
-		_, _ = w.Write([]byte(`{"artifacts": [{"name": "ci-lanes-short-6", "archive_download_url": "` + f.api + `/archive/6", "expired": false}, {"name": "old", "archive_download_url": "` + f.api + `/archive/none", "expired": true}]}`))
+		_, _ = w.Write([]byte(`{"artifacts": [{"name": "ci-lanes-short-6", "archive_download_url": "` + f.api + `/archive/6", "expired": false}, {"name": "old", "archive_download_url": "` + f.api + `/archive/none", "expired": true}, {"name": "deleted", "archive_download_url": "` + f.api + `/archive/gone", "expired": false}]}`))
+	case "/archive/gone":
+		http.Error(w, "gone", http.StatusGone)
 	case "/archive/6":
 		_, _ = w.Write(f.archive)
 	case "/repos/o/r/actions/runs/30/artifacts", "/repos/o/r/actions/runs/33/artifacts", "/repos/o/r/actions/runs/35/artifacts", "/repos/o/r/actions/runs/36/artifacts":
@@ -142,7 +144,10 @@ func (f *fixture) flakesAPI(w http.ResponseWriter, r *http.Request) bool {
 	case "/repos/o/r/actions/runs/35/jobs":
 		_, _ = w.Write([]byte(`{"jobs": [{"id": 37, "name": "Root lanes", "conclusion": "failure"}]}`))
 	case "/repos/o/r/actions/runs/36/jobs":
-		_, _ = w.Write([]byte(`{"jobs": [{"id": 38, "name": "Root lanes", "conclusion": "failure"}]}`))
+		// Job 40's log is gone, as last week's are: it says nothing, and 38's is still read.
+		_, _ = w.Write([]byte(`{"jobs": [{"id": 40, "name": "Seal", "conclusion": "failure"}, {"id": 38, "name": "Root lanes", "conclusion": "failure"}]}`))
+	case "/repos/o/r/actions/jobs/40/logs":
+		http.Error(w, "BlobNotFound", http.StatusNotFound)
 	case "/repos/o/r/actions/jobs/37/logs":
 		_, _ = w.Write([]byte("--- FAIL: TestD (3s)\n"))
 	case "/repos/o/r/actions/jobs/38/logs":
@@ -314,6 +319,8 @@ func TestFlakesAreTheTestsThatPassedOnTheSameTree(t *testing.T) {
 	assert.Equal(t, 7, strings.Count(string(written), "\n"))
 	assert.Contains(t, f.asked, "/repos/o/r/actions/runs/6/artifacts?per_page=100")
 	assert.NotContains(t, strings.Join(f.asked, " "), "/archive/none", "an expired artifact is not fetched")
+	assert.Contains(t, f.asked, "/archive/gone", "one the API no longer holds is asked for, and says nothing")
+	assert.Contains(t, f.asked, "/repos/o/r/actions/jobs/40/logs")
 	assert.Contains(t, f.asked, "/repos/o/r/actions/jobs/34/logs")
 	assert.NotContains(t, f.asked, "/repos/o/r/actions/jobs/39/logs", "a job that passed has no failure to read")
 	assert.NotContains(t, strings.Join(f.asked, " "), "/runs/6/jobs", "a run whose artifact named its failures is not asked for its jobs")

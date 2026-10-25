@@ -3,6 +3,7 @@ package proven
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -172,10 +173,19 @@ func (g GitHub) do(ctx context.Context, u, accept string) (*http.Response, error
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512)) // mutate-exempt: how much of a refusal is quoted
 		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+			return nil, fmt.Errorf("GET %s: %s: %s: %w", u, resp.Status, strings.TrimSpace(string(body)), ErrGone)
+		}
 		return nil, fmt.Errorf("GET %s: %s: %s", u, resp.Status, strings.TrimSpace(string(body)))
 	}
 	return resp, nil
 }
+
+// ErrGone is what the API answers for a log or an artifact it no longer holds: a job's log is
+// kept for a while, then its blob is deleted, and a run from last week has jobs whose logs are a
+// 404 in the API and a BlobNotFound where they were. What is gone says nothing; it is no reason
+// to stop reading the rest.
+var ErrGone = errors.New("no longer held")
 
 // TreesOf is a Trees that asks the clone at root first - free, and the commit is there for
 // anything on main - and the API for a commit the clone has not: a pull request's head.

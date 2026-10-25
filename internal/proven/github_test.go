@@ -98,7 +98,7 @@ func TestTheClientReadsOneRepository(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "PK-bytes", string(archive))
 	_, err = gh.Archive(ctx, "/repos/o/r/actions/artifacts/9/zip")
-	require.Error(t, err)
+	require.ErrorIs(t, err, proven.ErrGone, "a 404 is what the API says of a blob it deleted")
 	_, err = gh.Jobs(ctx, 8)
 	require.ErrorContains(t, err, "/actions/runs/8/jobs")
 	_, err = gh.Log(ctx, 9)
@@ -161,4 +161,17 @@ func TestTreesComeFromTheCloneThenTheAPI(t *testing.T) {
 
 	_, err = proven.FirstParent(ctx, root, "nope", 2)
 	require.ErrorContains(t, err, "git log nope")
+}
+
+// Without a token nothing is sent as one: the header is absent, not "Bearer " and nothing.
+func TestNoTokenSendsNoAuthorization(t *testing.T) {
+	var header string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"workflow_runs": []}`))
+	}))
+	defer srv.Close()
+	_, err := proven.GitHub{API: srv.URL, Repo: "o/r"}.Runs(t.Context(), "ci.yml", nil, 1)
+	require.NoError(t, err)
+	assert.Empty(t, header)
 }
