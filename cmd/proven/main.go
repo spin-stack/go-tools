@@ -306,7 +306,7 @@ func flakes(ctx context.Context, gh proven.GitHub, trees proven.Trees, workflows
 }
 
 // failedTests is every test a failed run's kept logs say failed: its artifacts, each a zip, else
-// its failed jobs' logs.
+// its failed jobs' logs. A log or an artifact the API no longer holds says nothing (proven.ErrGone).
 func failedTests(ctx context.Context, gh proven.GitHub, run int64) ([]string, error) {
 	artifacts, err := gh.Artifacts(ctx, run)
 	if err != nil {
@@ -318,6 +318,9 @@ func failedTests(ctx context.Context, gh proven.GitHub, run int64) ([]string, er
 			continue
 		}
 		archive, err := gh.Archive(ctx, a.URL)
+		if errors.Is(err, proven.ErrGone) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -339,6 +342,9 @@ func failedTests(ctx context.Context, gh proven.GitHub, run int64) ([]string, er
 			continue
 		}
 		log, err := gh.Log(ctx, j.ID)
+		if errors.Is(err, proven.ErrGone) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
