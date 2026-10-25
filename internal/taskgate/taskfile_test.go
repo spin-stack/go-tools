@@ -181,7 +181,9 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 		"go.mod":                       "module x\n",
 		"configs/a.yaml":               "a: GITHUB_OUTPUT\n",
 		"hack/long.sh":                 "#!/bin/sh\n# three\n\na\nb\nc\n",
-		"hack/short.sh":                "#!/bin/sh\n# one\na\nb\n",
+		"hack/short.sh":                "#!/bin/sh\n# one: a dispatcher, whose pieces are read too\n. hack/lib.sh\nexec bash hack/piece.sh\n",
+		"hack/lib.sh":                  "#!/bin/sh\nbash hack/short.sh\nbash hack/piece.sh\n",
+		"hack/piece.sh":                "#!/bin/sh\na\nb\nc\n",
 		"hack/jq.sh":                   "#!/bin/sh\ncurl x | jq .a\n",
 	})
 	// Staged and then deleted: git lists it, and there is nothing to read.
@@ -202,6 +204,9 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 		{File: "hack/jq.sh", By: "Taskfile.yml:lanes", Lines: 1, Limit: 2, Reads: []string{"jq"}},
 		{File: "sub/run.sh", By: "sub/Taskfile.yml:local", Lines: 1, Limit: 2, Reads: []string{"GITHUB_ENV"}},
 		{File: "hack/quickwit", By: "Taskfile.yml:lanes", Lines: 2, Limit: 2, Reads: []string{"GITHUB_OUTPUT"}},
+		// Run by a script a task runs, not by a task: the piece is held as the dispatcher is, and
+		// the cycle through lib.sh ends.
+		{File: "hack/piece.sh", By: "hack/short.sh", Lines: 3, Limit: 2},
 	}, got)
 	for _, s := range got {
 		if s.File == "hack/ci-base.sh" {
@@ -223,7 +228,7 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 	for _, f := range findings {
 		files = append(files, f.Key())
 	}
-	assert.ElementsMatch(t, []string{"hack/ci-base.sh", "hack/long.sh", "hack/short.sh", "hack/jq.sh", "sub/run.sh", "hack/quickwit"}, files)
+	assert.ElementsMatch(t, []string{"hack/ci-base.sh", "hack/long.sh", "hack/short.sh", "hack/jq.sh", "sub/run.sh", "hack/quickwit", "hack/lib.sh", "hack/piece.sh"}, files)
 	assert.Equal(t, "hack/x.sh:1: 2 lines of shell (limit 1): a program, whose only test is the run that calls it (Taskfile.yml:x); Go, with a test",
 		taskgate.Script{File: "hack/x.sh", By: "Taskfile.yml:x", Lines: 2, Limit: 1}.String())
 }

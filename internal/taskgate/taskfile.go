@@ -35,7 +35,7 @@ func (b Block) String() string {
 // reads next - and so has an answer a test could hold.
 type Script struct {
 	File  string // the script, relative to the root
-	By    string // <file>:<task> of the first task found running it
+	By    string // <file>:<task> of the first task found running it, or the script that runs it
 	Lines int
 	Limit int
 	Reads []string // the markers of a decision it has, in the order of the file
@@ -75,7 +75,14 @@ func tasks(root string, files []string, listed map[string]bool, limits Limits) (
 	if err != nil {
 		return nil, err
 	}
+	known := map[string]bool{}
 	for _, s := range scripts {
+		known[s.File] = true
+	}
+	// A script a script runs is read too, by the same words: a program split into pieces a
+	// dispatcher runs is the same program, and the pieces are held to the same limits.
+	for i := 0; i < len(scripts); i++ {
+		s := scripts[i]
 		raw, err := read(root, s.File)
 		if err != nil {
 			return nil, err
@@ -88,6 +95,12 @@ func tasks(root string, files []string, listed map[string]bool, limits Limits) (
 		for _, l := range lines {
 			if m := decides.FindStringSubmatch(l.Text); m != nil {
 				s.Reads = append(s.Reads, m[1])
+			}
+			for _, c := range called(s.File, l.Text, listed) {
+				if !known[c] {
+					known[c] = true
+					scripts = append(scripts, &Script{File: c, By: s.File, Limit: limits.Script})
+				}
 			}
 		}
 		s.Reads = unique(s.Reads)
