@@ -5,8 +5,10 @@ package testquality
 import (
 	"errors"
 	"go/ast"
+	"go/constant"
 	"go/types"
 	"strings"
+	"time"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -61,6 +63,13 @@ func run(pass *analysis.Pass) (any, error) {
 			pass.Reportf(fn.Pos(), "%s cannot fail: nothing in it reaches t.Error, t.Fatal, "+
 				"t.Skip or an assertion, and no helper is handed the test. A test that asserts "+
 				"nothing passes forever and reports this package as covered", fn.Name.Name)
+		}
+
+		for _, sleep := range longSleeps(pass, fn) {
+			pass.Reportf(sleep.call.Pos(), "%s sleeps %s for nothing it can see: a wait on the clock "+
+				"passes on a quiet machine and fails on a loaded one, which is what a flake is. Wait for "+
+				"the condition - a channel, a log line, Eventually - or say in the allowlist why the "+
+				"clock is the only signal there is", fn.Name.Name, sleep.d)
 		}
 	})
 
@@ -195,4 +204,42 @@ func isFromPackage(pass *analysis.Pass, call *ast.CallExpr, pkgs map[string]bool
 		return false
 	}
 	return pkgs[fn.Pkg().Path()]
+}
+
+// longSleep is one time.Sleep in a test's body, closures included, of a second or more.
+type longSleep struct {
+	call *ast.CallExpr
+	d    time.Duration
+}
+
+// longSleeps is every time.Sleep in fn whose duration is a constant of a second or more: under a
+// second paces a loop, and a duration the test computes is not a number to judge here. A helper's
+// sleep is the helper's, not every caller's.
+func longSleeps(pass *analysis.Pass, fn *ast.FuncDecl) []longSleep {
+	var found []longSleep
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Sleep" || !isFromPackage(pass, call, map[string]bool{"time": true}) {
+			return true
+		}
+		// A duration that is not a constant has no value here (the zero TypeAndValue's is nil).
+		value := pass.TypesInfo.Types[call.Args[0]].Value
+		if value == nil {
+			return true
+		}
+		ns, exact := constant.Int64Val(constant.ToInt(value))
+		if !exact {
+			return true
+		}
+		if ns < int64(time.Second) {
+			return true
+		}
+		found = append(found, longSleep{call: call, d: time.Duration(ns)})
+		return true
+	})
+	return found
 }
