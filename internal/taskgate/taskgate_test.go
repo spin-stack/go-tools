@@ -47,7 +47,9 @@ jobs:
     uses: ./.github/workflows/release.yaml
   docs:
     steps:
-      - run: make html
+      - run: |
+          # the pages
+          make html
 `)
 	write(".github/workflows/release.yaml", "on: workflow_call\njobs:\n  publish:\n    steps:\n      - name: Push\n        run: >\n          docker push x\n")
 	write(".github/workflows/empty.yml", "")
@@ -62,8 +64,13 @@ jobs:
 	git := exec.Command("git", "init", "-q", repo)
 	out, err := git.CombinedOutput()
 	require.NoError(t, err, "%s", out)
+	// Staged and then deleted: git lists it, and there is nothing to read.
+	write(".github/workflows/staged.yml", "jobs:\n  x:\n    steps:\n      - run: make\n")
+	out, err = exec.Command("git", "-C", repo, "add", ".github/workflows/staged.yml").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	require.NoError(t, os.Remove(filepath.Join(repo, ".github/workflows/staged.yml")))
 
-	findings, err := taskgate.Check(repo)
+	findings, err := taskgate.Check(repo, taskgate.Limits{})
 	require.NoError(t, err)
 	type step struct {
 		key  string
@@ -72,14 +79,16 @@ jobs:
 	}
 	var got []step
 	for _, f := range findings {
-		got = append(got, step{f.Key(), f.Line, f.Run})
+		s, ok := f.(taskgate.Step)
+		require.True(t, ok, "%v", f)
+		got = append(got, step{s.Key(), s.Line, s.Run})
 	}
 	assert.ElementsMatch(t, []step{
 		{".github/workflows/ci.yml/gate/Shell", 17, "go test ./... ..."},
 		{".github/workflows/ci.yml/gate/#8", 19, "task lint && echo done"},
 		{".github/workflows/ci.yml/gate/#9", 20, "task mutate > out.txt"},
 		{".github/workflows/ci.yml/gate/#10", 21, "go vet ./..."},
-		{".github/workflows/ci.yml/docs/#1", 26, "make html"},
+		{".github/workflows/ci.yml/docs/#1", 27, "make html"},
 		{".github/workflows/release.yaml/publish/Push", 7, "docker push x"},
 		{".github/actions/setup/action.yml/Go", 5, "go version"},
 	}, got)

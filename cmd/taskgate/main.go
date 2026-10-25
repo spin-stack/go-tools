@@ -1,10 +1,13 @@
-// Command taskgate fails on a workflow step that runs anything but one task, so what CI does is
-// written once, in the Taskfile, and a developer runs the same thing:
+// Command taskgate fails on a workflow step that runs anything but one task, on a task that holds
+// a program rather than a few commands, and on a script a task runs that is a program - so what
+// CI does is written once, in the Taskfile, a developer runs the same thing, and what decides
+// anything is Go with a test:
 //
-//	go tool taskgate [-allow file] [dir]
+//	go tool taskgate [-allow file] [-max-lines n] [-max-script-lines n] [dir]
 //
-// -allow names the steps that are not a task on purpose, one `<file>/<job>/<step>  # why` a line
-// (a composite action's without the job); a line that matches no step fails too.
+// -allow names what is allowed on purpose, one `<key>  # why` a line: a step as
+// `<file>/<job>/<step>` (a composite action's without the job), a Taskfile's block as
+// `<file>:<task>`, a script by its path. A line that matches nothing fails too.
 package main
 
 import (
@@ -17,7 +20,9 @@ import (
 )
 
 func main() {
-	allowPath := flag.String("allow", "", "steps that are not a task on purpose, `<file>/<job>/<step>  # why` a line (none by default)")
+	allowPath := flag.String("allow", "", "what is allowed on purpose, `<key>  # why` a line (none by default)")
+	maxLines := flag.Int("max-lines", 12, "lines of shell a task's own cmd or sh may hold; 0 is any")
+	maxScript := flag.Int("max-script-lines", 40, "lines of shell a script a task runs may hold; 0 is any")
 	flag.Parse()
 	root := "."
 	if flag.NArg() > 0 {
@@ -28,7 +33,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "taskgate: %v\n", err)
 		os.Exit(2)
 	}
-	findings, err := taskgate.Check(root)
+	findings, err := taskgate.Check(root, taskgate.Limits{Block: *maxLines, Script: *maxScript})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -38,11 +43,11 @@ func main() {
 		fmt.Println(f)
 	}
 	for _, k := range stale {
-		fmt.Printf("%s is in %s and is no step that is not a task: remove the line\n", k, *allowPath)
+		fmt.Printf("%s is in %s and is no finding: remove the line\n", k, *allowPath)
 	}
 	if len(unexplained)+len(stale) > 0 {
-		fmt.Printf("taskgate: %d step(s) to make a task, %d stale exemption(s)\n", len(unexplained), len(stale))
+		fmt.Printf("taskgate: %d finding(s), %d stale exemption(s)\n", len(unexplained), len(stale))
 		os.Exit(1)
 	}
-	fmt.Printf("OK: every workflow step runs a task (%d exempt).\n", len(allowed))
+	fmt.Printf("OK: every workflow step runs a task, and every task is commands (%d exempt).\n", len(allowed))
 }
