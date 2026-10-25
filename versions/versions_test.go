@@ -190,3 +190,41 @@ func TestAnEntryOutOfItsKindsFormIsRefused(t *testing.T) {
 		t.Errorf("a module by its package path: %v", err)
 	}
 }
+
+// A version is newer than an entry's when its numbers are, read between the dots; one not in the
+// pin's form is no version of the entry at all.
+func TestAVersionIsNewerByItsNumbers(t *testing.T) {
+	for _, tc := range []struct {
+		pin, given string
+		newer      bool
+		refused    bool
+	}{
+		{"v20261013.01", "v20261013.02", true, false},
+		{"v20261013.01", "v20261014.01", true, false},
+		{"v20261013.01", "v20261013.01", false, false},
+		{"v20261013.02", "v20261013.01", false, false},
+		{"v20261013.01", "v20261012.09", false, false},
+		{"7.2.9", "7.2.10", true, false},
+		{"7.2.9", "7.10.0", true, false},
+		{"7.2.9", "7.2.9", false, false},
+		{"7.2.9", "v7.2.10", false, true},
+		{"v1.2", "1.3", false, true},
+		{"v20261013.01", "v20261013", false, true},
+		{"v20261013.01", "v20261013.01.1", false, true},
+		{"v20261013.01", "v20261013.-1", false, true},
+		{"v20261013.01", "latest", false, true},
+		{"v20261013.01", "", false, true},
+		{"trixie", "trixie-2", false, true},
+	} {
+		got, err := Entry{Name: "it", Version: tc.pin}.Newer(tc.given)
+		if tc.refused {
+			if err == nil || !strings.Contains(err.Error(), "form") && !strings.Contains(err.Error(), "own version") {
+				t.Errorf("%s given %s: want refused, got %v, %v", tc.pin, tc.given, got, err)
+			}
+			continue
+		}
+		if err != nil || got != tc.newer {
+			t.Errorf("%s given %s: want %v, got %v, %v", tc.pin, tc.given, tc.newer, got, err)
+		}
+	}
+}
