@@ -55,8 +55,47 @@ func (g GitHub) Tree(ctx context.Context, sha string) (string, error) {
 
 // Job is one job of a run.
 type Job struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Conclusion string `json:"conclusion"` // success, failure, cancelled, skipped; empty until completed
+}
+
+// Artifact is one file a run kept: a lane's logs, when it failed.
+type Artifact struct {
+	Name    string `json:"name"`
+	URL     string `json:"archive_download_url"`
+	Expired bool   `json:"expired"`
+}
+
+// Artifacts is every artifact of run, over however many pages.
+func (g GitHub) Artifacts(ctx context.Context, run int64) ([]Artifact, error) {
+	var all []Artifact
+	for u := "/repos/" + g.Repo + "/actions/runs/" + strconv.FormatInt(run, 10) + "/artifacts?per_page=100"; u != ""; { // mutate-exempt: the page size, which only how many pages are asked sees
+		var page struct {
+			Artifacts []Artifact `json:"artifacts"`
+		}
+		var link string
+		if err := g.get(ctx, u, &page, &link); err != nil {
+			return nil, err
+		}
+		all = append(all, page.Artifacts...)
+		u = ""
+		if m := next.FindStringSubmatch(link); m != nil {
+			u = m[1]
+		}
+	}
+	return all, nil
+}
+
+// Archive is an artifact's zip, by the URL the listing gave: the API redirects to where the bytes
+// are, and the client follows.
+func (g GitHub) Archive(ctx context.Context, u string) ([]byte, error) {
+	resp, err := g.do(ctx, u, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }() // read-only
+	return io.ReadAll(resp.Body)
 }
 
 // Jobs is every job of run, over however many pages.
