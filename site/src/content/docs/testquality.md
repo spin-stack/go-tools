@@ -50,9 +50,10 @@ A sleep of a second or more in a test's body - a subtest's or a goroutine's incl
 on the clock: it passes on a quiet machine and fails on a loaded one, which is what a flake is.
 Of 45 failed fleet gates in two days of one repository, the real flakes were each a wait with a
 bound that the machine's load outran. Wait for the condition - a channel, a log line, an
-`Eventually` - or say in the allowlist why the clock is the only signal there is. Under a second
-paces a loop and is not flagged; a duration the test computes is not a number to judge; a helper's
-sleep is the helper's, one line to fix however many tests call it.
+`Eventually` - or say in the allowlist why the clock is the only signal there is. A sleep inside a
+loop looks again, which is a wait for a condition with the loop's own bound, and is not flagged;
+nor is one under a second, which paces; nor a duration the test computes, which is not a number to
+judge; a helper's sleep is the helper's, one line to fix however many tests call it.
 
 Tests behind the `integration` and `e2e` build tags are analyzed too: a test in another lane is
 held like any other.

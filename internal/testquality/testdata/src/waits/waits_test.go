@@ -32,10 +32,22 @@ func TestSleepsInASubtestAndAGoroutine(t *testing.T) {
 	}
 }
 
-// Under a second paces a loop, and a duration the test computes is not a number to judge here.
+// Under a second paces a loop, and a duration the test computes is not a number to judge here. A
+// loop that sleeps looks again, which is a wait for a condition with the loop's own bound.
 func TestPacesAndComputes(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	time.Sleep(999 * time.Millisecond)
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
+		if t.Name() != "" {
+			break
+		}
+	}
+	for !ready() {
+		time.Sleep(5 * time.Second)
+	}
+	for range 3 {
+		func() { time.Sleep(time.Second) }()
+	}
 	d := time.Duration(t.Name()[0]) * time.Second
 	time.Sleep(d)
 	time.Sleep(backoff(3))
@@ -48,6 +60,17 @@ func TestPacesAndComputes(t *testing.T) {
 	}
 }
 
+// A sleep after a loop is not the loop's.
+func TestSleepsAfterALoop(t *testing.T) {
+	for !ready() {
+		time.Sleep(time.Second)
+	}
+	time.Sleep(4 * time.Second) // want `TestSleepsAfterALoop sleeps 4s`
+	if t.Name() == "" {
+		t.Fatal("named")
+	}
+}
+
 // A helper's sleep is the helper's: a helper named by many tests is one line to fix.
 func waitABit(t *testing.T) {
 	t.Helper()
@@ -55,6 +78,8 @@ func waitABit(t *testing.T) {
 }
 
 func backoff(n int) time.Duration { return time.Duration(n) * time.Second }
+
+func ready() bool { return true }
 
 type clock struct{}
 
