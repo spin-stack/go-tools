@@ -1,0 +1,297 @@
+package main
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// stdout is what f printed to os.Stdout.
+func stdout(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	was := os.Stdout
+	os.Stdout = w
+	f()
+	os.Stdout = was
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(out)
+}
+
+type ciRun struct {
+	ID         int64  `json:"id"`
+	HeadSHA    string `json:"head_sha"`
+	Event      string `json:"event"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"html_url"`
+}
+
+// fixture is a clone of main with three commits and a pull request's head that has the second's
+// tree, and an API whose ci.yml passed on that head (on a dispatch) and, older, on the first
+// commit; whose kvm.yml is as the test says; and whose one e2e-verify job logged two tests. The
+// command is run in the clone, as the workflow's environment has it.
+type fixture struct {
+	main  []string // main, main~1, main~2
+	pr    string
+	kvm   []ciRun
+	asked []string
+}
+
+func setup(t *testing.T) *fixture {
+	t.Helper()
+	root := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "main")
+	for _, name := range []string{"one", "two", "three"} {
+		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(name), 0o600))
+		git("add", name)
+		git("commit", "-q", "-m", name)
+	}
+	git("checkout", "-q", "-b", "pr", "HEAD~1")
+	git("commit", "-q", "--allow-empty", "-m", "rebased")
+	git("checkout", "-q", "main")
+	f := &fixture{main: []string{git("rev-parse", "main"), git("rev-parse", "main~1"), git("rev-parse", "main~2")}, pr: git("rev-parse", "pr")}
+	t.Chdir(root)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.asked = append(f.asked, r.URL.RequestURI())
+		assert.Equal(t, "Bearer tok", r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/repos/o/r/actions/workflows/ci.yml/runs":
+			// As the API filters: status=success is the passed runs, status=completed every finished one.
+			var runs []ciRun
+			for _, run := range []ciRun{
+				{ID: 6, HeadSHA: f.main[0], Event: "schedule", Status: "completed", Conclusion: "failure", URL: "u6"},
+				{ID: 5, HeadSHA: "elsewhere", Event: "schedule", Status: "completed", Conclusion: "cancelled", URL: "u5"},
+				{ID: 4, HeadSHA: f.pr, Event: "workflow_dispatch", Status: "completed", Conclusion: "success", URL: "u4"},
+				{ID: 3, HeadSHA: f.main[2], Event: "schedule", Status: "completed", Conclusion: "success", URL: "u3"},
+			} {
+				if r.URL.Query().Get("status") != "success" || run.Conclusion == "success" {
+					runs = append(runs, run)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": runs})
+		case "/repos/o/r/actions/workflows/kvm.yml/runs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": f.kvm})
+		case "/repos/o/r/actions/runs/4/jobs":
+			_, _ = w.Write([]byte(`{"jobs": [{"id": 41, "name": "short"}, {"id": 42, "name": "e2e-verify:1/1"}]}`))
+		case "/repos/o/r/actions/runs/3/jobs":
+			_, _ = w.Write([]byte(`{"jobs": [{"id": 31, "name": "e2e-verify:1/1"}]}`))
+		case "/repos/o/r/actions/jobs/42/logs":
+			_, _ = w.Write([]byte("--- PASS: TestA (1.50s)\n"))
+		case "/repos/o/r/actions/jobs/31/logs":
+			_, _ = w.Write([]byte("--- PASS: TestA (1.40s)\n--- FAIL: TestB (2s)\n"))
+		default:
+			// A commit the clone has not: its tree is never the one asked about.
+			if strings.HasPrefix(r.URL.Path, "/repos/o/r/commits/") {
+				_, _ = w.Write([]byte(`{"commit": {"tree": {"sha": "other"}}}`))
+				return
+			}
+			http.Error(w, "not here", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_REPOSITORY", "o/r")
+	t.Setenv("GH_TOKEN", "tok")
+	t.Setenv("GITHUB_OUTPUT", "")
+	t.Setenv("GITHUB_STEP_SUMMARY", "")
+	t.Setenv("GITHUB_SHA", "")
+	t.Setenv("GITHUB_REF", "")
+	return f
+}
+
+// tree answers for the commit's tree: main~1 is proven by the pull request's run on the same tree,
+// main by nothing, and the answer is proven=true|false either way, written to the workflow's
+// output when there is one and said when there is not.
+func TestTreeAnswersForTheTree(t *testing.T) {
+	f := setup(t)
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"tree", "-sha", f.main[1]}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree: u4: what that run ran is not run again\nproven=true\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"tree", "-sha", f.main[0]}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml did not pass on "+f.main[0]+"'s tree (failure): u6: every lane\nproven=false\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"tree", "-sha", f.main[0], "-events", "push"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml never finished on "+f.main[0]+"'s tree: every lane\nproven=false\n", out)
+
+	output := filepath.Join(t.TempDir(), "output")
+	summary := filepath.Join(t.TempDir(), "summary")
+	t.Setenv("GITHUB_OUTPUT", output)
+	t.Setenv("GITHUB_STEP_SUMMARY", summary)
+	t.Setenv("GITHUB_SHA", f.pr)
+	out = stdout(t, func() { err = run(t.Context(), []string{"tree"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on "+f.pr+"'s tree: u4: what that run ran is not run again\n", out)
+	written, err := os.ReadFile(output)
+	require.NoError(t, err)
+	assert.Equal(t, "proven=true\n", string(written))
+	written, err = os.ReadFile(summary)
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on "+f.pr+"'s tree: u4: what that run ran is not run again\n", string(written))
+}
+
+// base is what a run on main is of: main~1 is proven, by the pull request's run on its tree; main
+// is new since main~1, which is its base - and not main~2, where the last run on main itself
+// passed (spin#659); a run not on main is of its branch against main. A main whose history has
+// no commit any run passed on is of its last commit; one with no commit before is an error.
+func TestBaseIsWhatMainBecameSinceARunPassed(t *testing.T) {
+	f := setup(t)
+	t.Setenv("GITHUB_REF", "refs/heads/main")
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"base", "-sha", f.main[0]}) })
+	require.NoError(t, err)
+	assert.Equal(t, "main moved since "+f.main[1]+" (u4); every lane, mutate against it\nbase="+f.main[1]+"\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"base", "-sha", f.main[1]}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on main's tree: u4\nproven=true\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"base", "-sha", f.main[0], "-events", "push"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "none of main's last 3 commits passed in the last 40 runs: the last commit is what is new\nbase="+f.main[1]+"\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"base", "-sha", f.main[0], "-events", "push", "-depth", "2"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "none of main's last 2 commits passed in the last 40 runs: the last commit is what is new\nbase="+f.main[1]+"\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"base", "-sha", f.main[2], "-events", "push"}) })
+	require.ErrorContains(t, err, "no commit before")
+	assert.Empty(t, out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"base", "-sha", f.main[0], "-ref", "refs/heads/fix"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "a dispatch on refs/heads/fix: every lane, mutate against main\nbase=origin/main\n", out)
+}
+
+// release refuses unless ci.yml passed on the tree and kvm.yml's newest run on the commit passed,
+// and says each answer; -also "" asks only the gate.
+func TestReleaseIsRefusedUntilBothPassed(t *testing.T) {
+	f := setup(t)
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1]}) })
+	require.ErrorIs(t, err, errRefused)
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree: u4\n::error::kvm.yml never ran on "+f.main[1]+" from a push to main: a release is made from a commit main tested\n", out)
+
+	f.kvm = []ciRun{{ID: 9, HeadSHA: f.main[1], Event: "push", Status: "completed", Conclusion: "success", URL: "k9"}}
+	out = stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1]}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree: u4\nkvm.yml passed on "+f.main[1]+": k9\n", out)
+	assert.Contains(t, f.asked, "/repos/o/r/actions/workflows/kvm.yml/runs?head_sha="+f.main[1]+"&per_page=40")
+
+	f.kvm = []ciRun{{ID: 9, HeadSHA: f.main[1], Event: "pull_request", Status: "completed", Conclusion: "success", URL: "k9"}}
+	out = stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1]}) })
+	require.ErrorIs(t, err, errRefused)
+	assert.Contains(t, out, "kvm.yml never ran")
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[0], "-also", ""}) })
+	require.ErrorIs(t, err, errRefused)
+	assert.Equal(t, "::error::ci.yml did not pass on "+f.main[0]+"'s tree (failure): u6\n", out)
+}
+
+// times is each test's time from the newest run that passed whose e2e-verify jobs logged any -
+// run 4's one, not run 3's two; with no such run, none.
+func TestTimesAreTheLastGatesThatLoggedAny(t *testing.T) {
+	f := setup(t)
+	output := filepath.Join(t.TempDir(), "output")
+	t.Setenv("GITHUB_OUTPUT", output)
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"times"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "run 4: 1 tests' times\n", out)
+	written, err := os.ReadFile(output)
+	require.NoError(t, err)
+	assert.Equal(t, "times=1.50 TestA\n", string(written))
+	assert.Contains(t, f.asked, "/repos/o/r/actions/workflows/ci.yml/runs?per_page=40&status=success")
+
+	t.Setenv("GITHUB_OUTPUT", "")
+	out = stdout(t, func() { err = run(t.Context(), []string{"times", "-jobs", "none"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "run none: 0 tests' times\ntimes=\n", out)
+}
+
+// What is refused before the API is asked: no command, an unknown one, a flag it has not, no
+// repository; help is said for the asking. HEAD is the commit when none is named.
+func TestWhatIsRefusedBeforeAsking(t *testing.T) {
+	f := setup(t)
+	for name, tc := range map[string]struct {
+		argv  []string
+		fails string
+		out   string
+	}{
+		"nothing":         {fails: "a command is needed", out: usage},
+		"help":            {argv: []string{"help"}, out: usage},
+		"-h":              {argv: []string{"-h"}, out: usage},
+		"an unknown one":  {argv: []string{"frob"}, fails: `no command "frob"`},
+		"an unknown flag": {argv: []string{"tree", "-nope"}, fails: "flag provided but not defined"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var err error
+			out := stdout(t, func() { err = run(t.Context(), tc.argv) })
+			if tc.fails == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tc.fails)
+			}
+			assert.Equal(t, tc.out, out)
+		})
+	}
+	t.Setenv("GITHUB_REPOSITORY", "")
+	err := run(t.Context(), []string{"tree"})
+	require.ErrorContains(t, err, "GITHUB_REPOSITORY")
+
+	t.Setenv("GITHUB_REPOSITORY", "o/r")
+	out := stdout(t, func() { err = run(t.Context(), []string{"tree"}) })
+	require.NoError(t, err)
+	assert.Contains(t, out, f.main[0]+"'s tree", "HEAD is main")
+}
+
+// The token is GH_TOKEN, else GITHUB_TOKEN.
+func TestTheTokenIsEitherOfTheTwo(t *testing.T) {
+	f := setup(t)
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "tok")
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"tree", "-sha", f.main[1]}) })
+	require.NoError(t, err)
+	assert.Contains(t, out, "proven=true")
+}
+
+// An output with lines is a heredoc, one without is name=value; a file that cannot be written is
+// an error, since the answer is the output.
+func TestAnOutputReachesTheWorkflow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "output")
+	t.Setenv("GITHUB_OUTPUT", path)
+	require.NoError(t, output("a", "1"))
+	require.NoError(t, output("b", "x\ny"))
+	written, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "a=1\nb<<EOF\nx\ny\nEOF\n", string(written))
+
+	t.Setenv("GITHUB_OUTPUT", "/dev/full")
+	require.Error(t, output("a", "1"))
+	t.Setenv("GITHUB_OUTPUT", filepath.Join(t.TempDir(), "none", "output"))
+	require.Error(t, output("a", "1"))
+}
