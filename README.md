@@ -10,7 +10,7 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | tool | what it catches |
 |---|---|
 | [`mutate`](https://spin-stack.github.io/go-tools/mutate/) | code your change touched that no test checks, even at 100% coverage: it breaks the code one small edit at a time and fails when the tests still pass |
-| [`testquality`](https://spin-stack.github.io/go-tools/testquality/) | tests that cannot fail, and tests skipped unconditionally |
+| [`testquality`](https://spin-stack.github.io/go-tools/testquality/) | tests that cannot fail, tests skipped unconditionally, and tests that sleep a second or more where a condition should be waited for |
 | [`ctxlife`](https://spin-stack.github.io/go-tools/ctxlife/) | goroutines that use their caller's context and outlive the call |
 | [`refs`](https://spin-stack.github.io/go-tools/refs/) | paths, tasks and packages that AGENTS.md or CLAUDE.md names and the tree no longer has |
 | [`vulngate`](https://spin-stack.github.io/go-tools/vulngate/) | vulnerabilities the code calls and that have a fix |

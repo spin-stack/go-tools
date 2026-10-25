@@ -19,6 +19,12 @@ func TestTestsThatCanFailAreNotFlagged(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), testquality.Analyzer, "canfail")
 }
 
+// A sleep of a second or more in a test's body, closures included, is a wait on the clock; under a
+// second, a computed duration and a helper's sleep are not flagged.
+func TestLongSleepsInATestAreFlagged(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), testquality.Analyzer, "waits")
+}
+
 func TestTestsThatNeverRunAreFlagged(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), testquality.Analyzer, "skipped")
 }

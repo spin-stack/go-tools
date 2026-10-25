@@ -1,6 +1,6 @@
 ---
 title: testquality
-description: Fails on a test that cannot fail, or one skipped unconditionally. Such a test counts as covered, passes forever, and proves nothing.
+description: Fails on a test that cannot fail, one skipped unconditionally, or one that sleeps a second or more where a condition should be waited for. The first two count as covered, pass forever and prove nothing; the third passes on a quiet machine and fails on a loaded one.
 ---
 
 A test that cannot fail is worse than no test: it shows up green, it counts toward coverage, and
@@ -33,11 +33,26 @@ func TestSkippedOutright(t *testing.T) {
 	t.Skip("comes back when the feature is written")
 	t.Fatal("never reached")
 }
+
+func TestWaitsOnTheClock(t *testing.T) {
+	start(t)
+	time.Sleep(5 * time.Second) // for the server to be up, presumably
+	assertUp(t)
+}
 ```
 
-The first two are reported as `cannot fail` and the third as `is skipped unconditionally`. A test
-that hands `t` to a helper counts as one that can fail, and so does one where a closure captures
-`t` and calls an assertion package. Subtests are inspected with the rest of the body.
+The first two are reported as `cannot fail`, the third as `is skipped unconditionally`, and the
+fourth as `sleeps 5s for nothing it can see`. A test that hands `t` to a helper counts as one that
+can fail, and so does one where a closure captures `t` and calls an assertion package. Subtests
+are inspected with the rest of the body.
+
+A sleep of a second or more in a test's body - a subtest's or a goroutine's included - is a wait
+on the clock: it passes on a quiet machine and fails on a loaded one, which is what a flake is.
+Of 45 failed fleet gates in two days of one repository, the real flakes were each a wait with a
+bound that the machine's load outran. Wait for the condition - a channel, a log line, an
+`Eventually` - or say in the allowlist why the clock is the only signal there is. Under a second
+paces a loop and is not flagged; a duration the test computes is not a number to judge; a helper's
+sleep is the helper's, one line to fix however many tests call it.
 
 Tests behind the `integration` and `e2e` build tags are analyzed too: a test in another lane is
 held like any other.
