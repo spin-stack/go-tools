@@ -62,24 +62,40 @@ func FailedIn(archive []byte) ([]string, error) {
 	return out, nil
 }
 
+// Kind is what a test's failures across runs say about it.
+type Kind string
+
+const (
+	// Flaky is a test that did not fail in another finished run on a tree it failed on: the same
+	// bytes, another answer. A rerun of the commit is what shows it.
+	Flaky Kind = "flaky"
+	// Intermittent is a test that, on one branch, failed, did not fail on a later or earlier finished
+	// run, and failed again: on and off across commits, which a change in between could explain and
+	// a flake explains better.
+	Intermittent Kind = "intermittent"
+	// Red is a test that failed on finished runs in a row on a branch, nothing in between where it
+	// did not: the code was broken then.
+	Red Kind = "red"
+	// Once is a test that failed and has no other finished run on its tree or beside it on its
+	// branch to be judged by: a rerun of the commit would tell.
+	Once Kind = "once"
+)
+
 // Failure is one test's failures across a workflow's runs, and what they say about it.
 type Failure struct {
 	Test     string
 	Runs     []Run           // the runs it failed in, newest first
 	Branches []string        // sorted, each once
 	Trees    map[string]bool // the trees it failed on
-	// Flaky is whether some tree it failed on has another finished run of the same workflow in
-	// which it did not fail: the same bytes, another answer. A test that failed on every run of
-	// every tree it failed on is red, not flaky - the code was broken then.
-	Flaky bool
+	Kind     Kind
 }
 
 // Flakes judges every failed test of runs (newest first, one workflow) by failed, each run's
-// failed tests: which are flaky and which were red. A cancelled run finished nothing and says
-// nothing; a run whose failed tests are unknown (no logs) counts as a run the test did not fail in
-// only when it passed.
+// failed tests. A cancelled run finished nothing and says nothing; a run whose failed tests are
+// unknown (its logs gone) counts as a run the test did not fail in only when it passed.
 func Flakes(ctx context.Context, runs []Run, failed map[int64][]string, trees Trees) ([]Failure, error) {
 	tree := map[int64]string{}
+	var finished []Run
 	for _, r := range runs {
 		if !r.Finished() {
 			continue
@@ -89,12 +105,10 @@ func Flakes(ctx context.Context, runs []Run, failed map[int64][]string, trees Tr
 			return nil, fmt.Errorf("run %d's tree: %w", r.ID, err)
 		}
 		tree[r.ID] = t
+		finished = append(finished, r)
 	}
 	byTest := map[string]*Failure{}
-	for _, r := range runs {
-		if _, ok := tree[r.ID]; !ok {
-			continue
-		}
+	for _, r := range finished {
 		for _, test := range failed[r.ID] {
 			f := byTest[test]
 			if f == nil {
@@ -110,17 +124,7 @@ func Flakes(ctx context.Context, runs []Run, failed map[int64][]string, trees Tr
 	}
 	var out []Failure
 	for _, f := range byTest {
-		for _, r := range runs {
-			t, ok := tree[r.ID]
-			if !ok || !f.Trees[t] {
-				continue
-			}
-			// Another run on a tree it failed on, where it did not fail: passed, or failed on others.
-			if (r.Passed() || len(failed[r.ID]) > 0) && !slices.Contains(failed[r.ID], f.Test) {
-				f.Flaky = true
-				break
-			}
-		}
+		f.Kind = kind(*f, finished, failed, tree)
 		sort.Strings(f.Branches)
 		out = append(out, *f)
 	}
@@ -133,15 +137,73 @@ func Flakes(ctx context.Context, runs []Run, failed map[int64][]string, trees Tr
 	return out, nil
 }
 
+// outcome is what a finished run says of one test: it failed, it did not (the run passed, or
+// failed on other tests alone), or nothing (the run failed and its logs are gone).
+func outcome(r Run, test string, failed map[int64][]string) (failedIt, known bool) {
+	if slices.Contains(failed[r.ID], test) {
+		return true, true
+	}
+	return false, r.Passed() || len(failed[r.ID]) > 0
+}
+
+// kind reads the test's outcomes: on its trees (Flaky), then along each branch's finished runs
+// in order (Intermittent, Red), else Once.
+func kind(f Failure, finished []Run, failed map[int64][]string, tree map[int64]string) Kind {
+	for _, r := range finished {
+		if failedIt, known := outcome(r, f.Test, failed); f.Trees[tree[r.ID]] && known && !failedIt {
+			return Flaky
+		}
+	}
+	red := false
+	for _, branch := range f.Branches {
+		// The branch's finished runs with a known outcome, newest first.
+		var outcomes []bool
+		for _, r := range finished {
+			if r.HeadBranch != branch {
+				continue
+			}
+			if failedIt, known := outcome(r, f.Test, failed); known {
+				outcomes = append(outcomes, failedIt)
+			}
+		}
+		for i := 1; i < len(outcomes); i++ {
+			if outcomes[i] && outcomes[i-1] {
+				red = true
+			}
+		}
+		// Failed, did not, failed: on and off. It failed on this branch, so a first and a last are
+		// there to find.
+		first, last := slices.Index(outcomes, true), len(outcomes)-1-slices.Index(reverse(outcomes), true)
+		if last > first && slices.Contains(outcomes[first:last], false) {
+			return Intermittent
+		}
+	}
+	if red {
+		return Red
+	}
+	return Once
+}
+
+func reverse(b []bool) []bool {
+	out := make([]bool, len(b))
+	for i, v := range b {
+		out[len(b)-1-i] = v
+	}
+	return out
+}
+
 // Report is the failures as a table for a run's summary and a person's eye: the flaky ones first
 // as they are the ones a rerun answers, then the red ones, which were the code.
 func Report(failures []Failure, runs int) []string {
 	lines := []string{"| test | failed | of runs | branches | verdict |", "| --- | --- | --- | --- | --- |"}
+	said := map[Kind]string{
+		Flaky:        "flaky: did not fail on another run of the same tree",
+		Intermittent: "intermittent: on and off along its branch",
+		Red:          "red: failed on runs in a row",
+		Once:         "once: no other run of its tree to tell",
+	}
 	for _, f := range failures {
-		verdict := "red: failed on every run of its trees"
-		if f.Flaky {
-			verdict = "flaky: passed on the same tree"
-		}
+		verdict := said[f.Kind]
 		ids := make([]string, 0, len(f.Runs))
 		for _, r := range f.Runs {
 			ids = append(ids, fmt.Sprintf("[%d](%s)", r.ID, r.URL))

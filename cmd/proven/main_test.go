@@ -305,14 +305,15 @@ func TestFlakesAreTheTestsThatPassedOnTheSameTree(t *testing.T) {
 	var err error
 	out := stdout(t, func() { err = run(t.Context(), []string{"flakes"}) })
 	require.NoError(t, err)
-	// TestD failed twice on main~2's tree and passed nowhere: red, and no candidate however many
-	// times; TestE failed once beside a pass: flaky, and no candidate for once.
+	// TestD failed twice in a row on main's tree: red, and no candidate however many times; TestE
+	// failed once beside a pass: flaky, and no candidate for once; TestA failed once with nothing
+	// else on its tree: once.
 	assert.Equal(t, "| test | failed | of runs | branches | verdict |\n| --- | --- | --- | --- | --- |\n"+
-		"| kvm.yml: TestB | 2 ([33](u33) [30](u30)) | 9 | main | flaky: passed on the same tree |\n"+
-		"| kvm.yml: TestD | 2 ([36](u36) [35](u35)) | 9 | main | red: failed on every run of its trees |\n"+
-		"| ci.yml: TestA | 1 ([6](u6)) | 9 | main | red: failed on every run of its trees |\n"+
-		"| kvm.yml: TestC | 1 ([36](u36)) | 9 | main | flaky: passed on the same tree |\n"+
-		"| kvm.yml: TestE | 1 ([33](u33)) | 9 | main | flaky: passed on the same tree |\n"+
+		"| kvm.yml: TestB | 2 ([33](u33) [30](u30)) | 9 | main | flaky: did not fail on another run of the same tree |\n"+
+		"| kvm.yml: TestD | 2 ([36](u36) [35](u35)) | 9 | main | red: failed on runs in a row |\n"+
+		"| ci.yml: TestA | 1 ([6](u6)) | 9 | main | once: no other run of its tree to tell |\n"+
+		"| kvm.yml: TestC | 1 ([36](u36)) | 9 | main | flaky: did not fail on another run of the same tree |\n"+
+		"| kvm.yml: TestE | 1 ([33](u33)) | 9 | main | flaky: did not fail on another run of the same tree |\n"+
 		"flaky more than once, for hack/quarantine.txt or a fix: kvm.yml: TestB\n", out)
 	written, err := os.ReadFile(summaryFile)
 	require.NoError(t, err)
