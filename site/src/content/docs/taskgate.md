@@ -79,6 +79,10 @@ function with a table test waiting to be written, and a shell script's only test
 calls it - which is how a script that chose which commit CI tested against ran for two days on a
 base nobody had asked for before anyone read it.
 
+A script a script runs - a word of its shell naming a file in the repository, the same way - is
+read too, under the same limits: a program cut into pieces behind a dispatcher is the same
+program, and each piece answers for itself (the finding names the script that runs it).
+
 A script that drives the machine and is under the limit is a script, and `taskgate` says nothing
 about it.
 
