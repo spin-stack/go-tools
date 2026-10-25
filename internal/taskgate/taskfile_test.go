@@ -232,3 +232,18 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 	assert.Equal(t, "hack/x.sh:1: 2 lines of shell (limit 1): a program, whose only test is the run that calls it (Taskfile.yml:x); Go, with a test",
 		taskgate.Script{File: "hack/x.sh", By: "Taskfile.yml:x", Lines: 2, Limit: 1}.String())
 }
+
+// A submodule is a path git lists that is a directory, not a script: a task that names it - its
+// dir, a cd into it - is commands like any other, and the gate reads on past it.
+func TestASubmoduleATaskNamesIsNoScript(t *testing.T) {
+	root := repo(t, map[string]string{
+		"Taskfile.yml": "tasks:\n  oracle:\n    dir: reference\n    cmds:\n      - pnpm --dir reference install\n",
+	})
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "reference"), 0o750))
+	out, err := exec.Command("git", "-C", root, "update-index", "--add", "--cacheinfo",
+		"160000,5dc7533314b5ba7ec3875c30143dfe1aec644870,reference").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	findings, err := taskgate.Check(root, taskgate.Limits{Block: 12, Script: 40})
+	require.NoError(t, err)
+	assert.Empty(t, findings)
+}
