@@ -144,11 +144,12 @@ func TestEveryTaskfileIsRead(t *testing.T) {
 	}, keys)
 }
 
-// A script a task runs - a word ending in .sh that names a file git lists, beside the Taskfile or
-// at the root, however it is quoted - is a program when it is longer than the limit or when it
-// decides: it writes what the workflow reads next, or reads JSON with jq. One that is neither is
-// a script. The finding is the script's, named by its path, whichever tasks run it, and says the
-// first.
+// A script a task runs - a word that names a file git lists, beside the Taskfile or at the root,
+// however it is quoted, which is shell by its .sh name or its #! line - is a program when it is
+// longer than the limit or when it decides: it writes what the workflow reads next, or reads JSON
+// with jq. One that is neither is a script; a file a task names that is not shell - a Python
+// script, a Go file, a config, go.mod - is not read for either. The finding is the script's, named
+// by its path, whichever tasks run it, and says the first.
 func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 	root := repo(t, map[string]string{
 		"Taskfile.yml": `tasks:
@@ -162,18 +163,26 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
       - ./hack/short.sh && (hack/jq.sh)
       - bash hack/missing.sh
       - bash hack/staged.sh
+      - bash hack/quickwit --version 2>/dev/null
+      - python3 hack/tidy
+      - go run ./hack/lanes/cmd/lanes touched go.mod configs/a.yaml
   sub:
     dir: sub
     cmds:
       - task: base
 `,
-		"sub/Taskfile.yml": "tasks:\n  local:\n    cmds:\n      - ./run.sh\n      - bash hack/short.sh\n",
-		"sub/run.sh":       "#!/bin/sh\necho 'name=x' >> \"${GITHUB_ENV}\"\n",
-		"hack/ci-base.sh":  "#!/usr/bin/env bash\n# decides\nset -euo pipefail\necho base=1 >> \"${GITHUB_OUTPUT:-/dev/stdout}\"\ngh api x --jq .y\nxjq --notjq\necho proven=1 >> \"${GITHUB_OUTPUT}\"\n",
-		"hack/staged.sh":   "#!/bin/sh\na\nb\nc\n",
-		"hack/long.sh":     "#!/bin/sh\n# three\n\na\nb\nc\n",
-		"hack/short.sh":    "#!/bin/sh\n# one\na\nb\n",
-		"hack/jq.sh":       "#!/bin/sh\ncurl x | jq .a\n",
+		"sub/Taskfile.yml":             "tasks:\n  local:\n    cmds:\n      - ./run.sh\n      - bash hack/short.sh\n",
+		"sub/run.sh":                   "#!/bin/sh\necho 'name=x' >> \"${GITHUB_ENV}\"\n",
+		"hack/ci-base.sh":              "#!/usr/bin/env bash\n# decides\nset -euo pipefail\necho base=1 >> \"${GITHUB_OUTPUT:-/dev/stdout}\"\ngh api x --jq .y\nxjq --notjq\necho proven=1 >> \"${GITHUB_OUTPUT}\"\n",
+		"hack/staged.sh":               "#!/bin/sh\na\nb\nc\n",
+		"hack/quickwit":                "#!/usr/bin/env bash\nset -euo pipefail\necho 'version=1' >> \"${GITHUB_OUTPUT}\"\n",
+		"hack/tidy":                    "#!/usr/bin/env python3\nimport os\nprint(os.environ['GITHUB_OUTPUT'])\n",
+		"hack/lanes/cmd/lanes/main.go": "package main\n// GITHUB_OUTPUT is written by jq here, says a comment\n",
+		"go.mod":                       "module x\n",
+		"configs/a.yaml":               "a: GITHUB_OUTPUT\n",
+		"hack/long.sh":                 "#!/bin/sh\n# three\n\na\nb\nc\n",
+		"hack/short.sh":                "#!/bin/sh\n# one\na\nb\n",
+		"hack/jq.sh":                   "#!/bin/sh\ncurl x | jq .a\n",
 	})
 	// Staged and then deleted: git lists it, and there is nothing to read.
 	out, err := exec.Command("git", "-C", root, "add", "hack/staged.sh").CombinedOutput()
@@ -192,6 +201,7 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 		{File: "hack/long.sh", By: "Taskfile.yml:lanes", Lines: 3, Limit: 2},
 		{File: "hack/jq.sh", By: "Taskfile.yml:lanes", Lines: 1, Limit: 2, Reads: []string{"jq"}},
 		{File: "sub/run.sh", By: "sub/Taskfile.yml:local", Lines: 1, Limit: 2, Reads: []string{"GITHUB_ENV"}},
+		{File: "hack/quickwit", By: "Taskfile.yml:lanes", Lines: 2, Limit: 2, Reads: []string{"GITHUB_OUTPUT"}},
 	}, got)
 	for _, s := range got {
 		if s.File == "hack/ci-base.sh" {
@@ -213,7 +223,7 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 	for _, f := range findings {
 		files = append(files, f.Key())
 	}
-	assert.ElementsMatch(t, []string{"hack/ci-base.sh", "hack/long.sh", "hack/short.sh", "hack/jq.sh", "sub/run.sh"}, files)
+	assert.ElementsMatch(t, []string{"hack/ci-base.sh", "hack/long.sh", "hack/short.sh", "hack/jq.sh", "sub/run.sh", "hack/quickwit"}, files)
 	assert.Equal(t, "hack/x.sh:1: 2 lines of shell (limit 1): a program, whose only test is the run that calls it (Taskfile.yml:x); Go, with a test",
 		taskgate.Script{File: "hack/x.sh", By: "Taskfile.yml:x", Lines: 2, Limit: 1}.String())
 }

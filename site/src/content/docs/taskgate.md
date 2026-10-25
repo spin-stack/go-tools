@@ -70,8 +70,9 @@ reviewable diff. What *asserts* something goes to a test. What *decides* somethi
 
 ## What a script may be
 
-A word in a task's shell that ends in `.sh` and names a file in the repository is a script the
-task runs, and `taskgate` reads it too. A script fails when it is longer than `-max-script-lines`
+A word in a task's shell that names a file in the repository, and that file is shell - named
+`.sh`, or opening with a `#!` line that runs `sh`, `bash`, `dash` or `zsh` - is a script the task
+runs, and `taskgate` reads it too. A script fails when it is longer than `-max-script-lines`
 (40 by default, counted the same way), or when it decides: it writes to `$GITHUB_OUTPUT` or
 `$GITHUB_ENV`, the answer the workflow reads next, or it reads JSON with `jq`. Each of those is a
 function with a table test waiting to be written, and a shell script's only test is the run that
