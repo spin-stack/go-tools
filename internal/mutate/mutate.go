@@ -668,9 +668,6 @@ const (
 	Exceeded
 )
 
-// buildFailed is go test's word that a package it was to test did not build.
-var buildFailed = regexp.MustCompile(`(?m)^FAIL\s+\S+\s+\[build failed\]$`)
-
 // targetedTimeout is how long the tests that reach a mutated line may take.
 const targetedTimeout = "1m"
 
@@ -686,35 +683,50 @@ type Asked struct {
 	Reaching []string
 	// Importers are the packages asked when the package's own tests let the edit through.
 	Importers []string
+	// Tree is where the tests run, the caller's to hold for the call; nil is one of the call's
+	// own. Never the package's own directory (Tree says why).
+	Tree *Tree
 }
 
-// Run builds and runs the tests of the package the mutated file belongs to, stopping at the
-// first that fails.
+// Run builds the tests of the package the mutated file belongs to where its sources are, and runs
+// them in the tree, stopping at the first that fails.
 //
 // An edit its own package's tests let through is asked of the packages that import that one
 // directly, when importers names any: a package's behaviour is often held by its caller's tests -
 // the QMP client's file passing by the chain manager's - and counting those as survivors made the
 // gate report tests that exist as missing. Only a survivor pays for the second run.
-func Run(m Mutation, a Asked) (Outcome, string) {
+//
+// The binaries are built with go test -c and run here rather than by go test, which runs each in
+// its package's directory, where every edit asked at once would read what the others wrote.
+func Run(m Mutation, a Asked) (Outcome, string, error) {
 	dir := filepath.Dir(m.File)
 	tests := hasTests(dir)
 	if !tests && len(a.Importers) == 0 {
-		return Untested, ""
+		return Untested, "", nil
 	}
-	// The package's own tests are run in its directory; its importers, named from the module's
+	tree := a.Tree
+	if tree == nil {
+		work, err := os.MkdirTemp("", "mutate-tree-")
+		if err != nil {
+			return 0, "", err
+		}
+		defer func() { _ = os.RemoveAll(work) }()
+		tree = NewTree(work)
+	}
+	// The package's own tests are named from its directory; its importers, from the module's
 	// root, from where this runs.
 	type testRun struct {
 		dir  string
 		pkgs []string
 		only []string
-		what string // what its process is counted under
+		what string // what its processes are counted under
 	}
 	var runs []testRun
 	if tests && (a.Reaching == nil || len(a.Reaching) > 0) {
-		runs = append(runs, testRun{dir: dir, pkgs: []string{"."}, only: a.Reaching, what: "alone: build and run the package's tests"})
+		runs = append(runs, testRun{dir: dir, pkgs: []string{"."}, only: a.Reaching, what: "the package's tests"})
 	}
 	if len(a.Importers) > 0 {
-		runs = append(runs, testRun{pkgs: a.Importers, what: "alone: build and run the importers' tests"})
+		runs = append(runs, testRun{pkgs: a.Importers, what: "the importers' tests"})
 	}
 	var said strings.Builder
 	for _, set := range runs {
@@ -727,35 +739,75 @@ func Run(m Mutation, a Asked) (Outcome, string) {
 			// package's whole allowance.
 			timeout = targetedTimeout
 		}
-		// -p 1: this run is one of the caller's budget of test processes, and go test over several
-		// packages would otherwise run a binary per core, each with a PostgreSQL of its own.
-		args := append(append([]string{"test"}, set.pkgs...), "-p", "1", "-count=1", "-failfast", "-v", "-timeout", timeout)
-		if a.Overlay != "" {
-			args = append(args, "-overlay", a.Overlay)
+		list := exec.Command("go", append([]string{"list", "-f", "{{.ImportPath}} {{.Dir}}"}, set.pkgs...)...) //nolint:gosec // go list over this repository's packages
+		list.Dir = set.dir
+		listed, err := output("listing", list)
+		if err != nil {
+			return 0, said.String(), fmt.Errorf("mutate: listing %s: %w", strings.Join(set.pkgs, " "), err)
 		}
-		if len(set.only) > 0 {
-			args = append(args, "-run", "^("+strings.Join(set.only, "|")+")$")
+		for _, line := range strings.Split(strings.TrimSpace(string(listed)), "\n") {
+			path, pkgDir, _ := strings.Cut(line, " ")
+			outcome, err := runPackage(tree, path, pkgDir, set.dir, set.what, set.only, timeout, a.Overlay, &said)
+			if err != nil || outcome != Survived {
+				return outcome, said.String(), err
+			}
 		}
-		cmd := exec.Command("go", args...) //nolint:gosec // go test over this repository's packages
-		cmd.Dir = set.dir
-		cmd.Env = testEnv()
-		out, exceeded, err := bounded(set.what, cmd)
-		countTests("", out)
-		said.Write(out)
-		if exceeded {
-			return Exceeded, said.String()
-		}
-		if err == nil {
-			continue
-		}
-		// go test's own line, not the words anywhere: a test that fails may print them - this
-		// package's do, about the modules they build - and that is an edit refused.
-		if buildFailed.Match(out) || strings.Contains(string(out), "build constraints exclude") {
-			return Unbuildable, said.String()
-		}
-		return Killed, said.String()
 	}
-	return Survived, said.String()
+	return Survived, said.String(), nil
+}
+
+// runPackage builds the tests of the package at path, from dir, and runs them in the tree's copy
+// of pkgDir, writing what they said to said. Survived where it has no test this build would run.
+func runPackage(tree *Tree, path, pkgDir, dir, what string, only []string, timeout, overlay string, said *strings.Builder) (Outcome, error) {
+	bin, err := tree.bin()
+	if err != nil {
+		return 0, err
+	}
+	args := []string{"test", "-c", "-vet=off", "-o", bin}
+	if overlay != "" {
+		args = append(args, "-overlay", overlay)
+	}
+	build := exec.Command("go", append(args, path)...) //nolint:gosec // go test over this repository's packages
+	build.Dir = dir
+	out, exceeded, err := bounded("alone: build "+what, build)
+	said.Write(out)
+	if exceeded {
+		return Exceeded, nil
+	}
+	if err != nil {
+		return Unbuildable, nil //nolint:nilerr // a build that fails is the edit's answer: it asks nothing
+	}
+	if _, err := os.Stat(bin); err != nil {
+		return Survived, nil //nolint:nilerr // no test binary: the package has no tests
+	}
+	args = []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout", timeout}
+	if len(only) > 0 {
+		args = append(args, "-test.run", "^("+strings.Join(only, "|")+")$")
+	}
+	run := exec.Command(bin, args...) //nolint:gosec // a test binary this run built
+	run.Env = testEnv()
+	var runErr error
+	if err := tree.in(pkgDir, func(at string) {
+		run.Dir = at
+		out, exceeded, runErr = bounded("alone: run "+what, run)
+	}); err != nil {
+		return 0, err
+	}
+	countTests(path, out)
+	said.Write(out)
+	// go test's own line for the package, so what is said names who answered.
+	verdict := "ok  "
+	if runErr != nil {
+		verdict = "FAIL"
+	}
+	fmt.Fprintf(said, "%s\t%s\n", verdict, path)
+	switch {
+	case exceeded:
+		return Exceeded, nil
+	case runErr != nil:
+		return Killed, nil //nolint:nilerr // a test that fails is the edit refused, not this run failing
+	}
+	return Survived, nil
 }
 
 // hasTests is whether the package in dir has a test go would build: one whose tests are all of

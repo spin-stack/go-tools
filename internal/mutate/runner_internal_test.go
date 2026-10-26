@@ -35,10 +35,10 @@ func TestAnEditWithNoCoverageIsAskedOfEveryTest(t *testing.T) {
 	if err != nil || s.Binary == "" || len(s.Built) == 0 {
 		t.Fatalf("schema: %+v, %v", s, err)
 	}
-	p := pkgRun{dir: dir, timeout: "2m", slots: make(chan struct{}, 1)}
+	p := pkgRun{dir: dir, timeout: "2m", slots: Slots(t.TempDir(), 1)}
 	for _, m := range s.Built {
-		if got := p.built(m, s, nil); got != Killed {
-			t.Errorf("%s: %v with no coverage, want refused by the test nobody measured", m, got)
+		if got, err := p.built(m, s, nil); err != nil || got != Killed {
+			t.Errorf("%s: %v (%v) with no coverage, want refused by the test nobody measured", m, got, err)
 		}
 	}
 }
@@ -77,7 +77,7 @@ func TestAnEditThatAllocatesForEverIsStoppedAndRefused(t *testing.T) {
 	plan[0].ID = 1
 	// Unbounded, which builds what the package imports: on a cold cache that is the standard
 	// library, compiled a package a core, which is no test's memory.
-	if outcome, out := Run(plan[0], Asked{Timeout: "2m"}); outcome != Survived {
+	if outcome, out := runTests(t, plan[0], Asked{Timeout: "2m"}); outcome != Survived {
 		t.Fatalf("the package as it is was %v: %s", outcome, out)
 	}
 	memLimit = 256 << 20
@@ -101,10 +101,10 @@ func TestAnEditThatAllocatesForEverIsStoppedAndRefused(t *testing.T) {
 	}
 	// The package as it is, built and run the same way under the same bound, is let be: it is the
 	// edit's loop that is stopped, not the go command and its compiler.
-	if outcome, out := Run(plan[0], Asked{Timeout: "2m"}); outcome != Survived {
+	if outcome, out := runTests(t, plan[0], Asked{Timeout: "2m"}); outcome != Survived {
 		t.Fatalf("the package as it is was %v under the bound: %s", outcome, out)
 	}
-	if outcome, out := Run(plan[0], Asked{Overlay: overlay, Timeout: "2m"}); outcome != Exceeded {
+	if outcome, out := runTests(t, plan[0], Asked{Overlay: overlay, Timeout: "2m"}); outcome != Exceeded {
 		t.Errorf("the edit built alone was %v, not stopped at its bound: %s", outcome, out)
 	}
 	// Killed, it is gone once the kernel has reaped it; left running, it sleeps for an hour.

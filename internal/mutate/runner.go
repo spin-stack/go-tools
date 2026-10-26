@@ -4,10 +4,13 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,6 +20,9 @@ type Tally struct {
 	Survived, Refused             []Mutation
 	Killed, Unbuildable, Untested int
 	UntestedPackages              map[string]bool
+	// Wrote are the files the tests left, changed or removed where they ran, by their paths in
+	// the source, which none of them was written to (Tree).
+	Wrote []string
 }
 
 // result is what the tests did about one mutation.
@@ -40,7 +46,8 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 	// One budget of test processes for the whole run, which measuring coverage draws on too: a
 	// mutation's run and each package's coverage each had one of their own, and ten mutations
 	// measuring ten tests each were a hundred test processes and as many PostgreSQL containers.
-	slots := make(chan struct{}, max(jobs, 1)) // mutate-exempt: how many run at once, not what they say
+	// Each slot is a tree of its own (Tree), which the process holding it runs in.
+	slots := Slots(filepath.Join(work, "trees"), max(jobs, 1)) // mutate-exempt: how many run at once, not what they say
 	// Builds are what cost: go parallelises one across the machine already, so they go one at a
 	// time, beside the test processes.
 	b := &builds{sem: make(chan struct{}, 1), work: work, bins: map[string]*importerBinary{}}
@@ -97,13 +104,25 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 		}
 	}
 	sort.Slice(t.Survived, func(i, j int) bool { return t.Survived[i].String() < t.Survived[j].String() })
+	// Every process is done, so every tree is back.
+	wrote := map[string]bool{}
+	for range cap(slots) {
+		for _, path := range (<-slots).Wrote() {
+			wrote[path] = true
+		}
+	}
+	t.Wrote = slices.Sorted(maps.Keys(wrote))
+	if len(t.Wrote) > 0 {
+		_, _ = fmt.Fprintf(w, "  the tests left or changed these in their copy of the module, and not in the source: %s\n",
+			strings.Join(t.Wrote, ", "))
+	}
 	return t, firstErr
 }
 
 // pkgRun is one package's mutations put to the tests.
 type pkgRun struct {
 	dir, work, timeout string
-	slots              chan struct{}
+	slots              chan *Tree
 	builds             *builds
 	importers          []string
 	results            chan<- result
@@ -131,7 +150,8 @@ func (p pkgRun) run(ms []Mutation, covers *coverages) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p.results <- result{m: m, outcome: p.built(m, s, c)}
+			outcome, err := p.built(m, s, c)
+			p.results <- result{m: m, outcome: outcome, err: err}
 		}()
 	}
 	for i, m := range s.Alone {
@@ -141,9 +161,9 @@ func (p pkgRun) run(ms []Mutation, covers *coverages) {
 			// Measured before a slot is taken: the measuring takes slots of its own, and holding
 			// one while waiting on the others is how a budget of one never finishes.
 			reaching := covers.of(p.dir)
-			p.slots <- struct{}{}
-			defer func() { <-p.slots }()
-			outcome, err := runAlone(m, filepath.Join(p.work, "alone-"+strconv.Itoa(i)), p.timeout, reaching, p.importers, p.out)
+			tree := <-p.slots
+			defer func() { p.slots <- tree }()
+			outcome, err := runAlone(m, filepath.Join(p.work, "alone-"+strconv.Itoa(i)), p.timeout, reaching, p.importers, tree, p.out)
 			p.results <- result{m: m, outcome: outcome, err: err}
 		}()
 	}
@@ -152,15 +172,15 @@ func (p pkgRun) run(ms []Mutation, covers *coverages) {
 
 // built puts m, which is in s's binary, to the package's tests that reach its line, then to each
 // importer's tests, built once with the same schema: a survivor pays for the second.
-func (p pkgRun) built(m Mutation, s *Schema, c *Coverage) Outcome {
+func (p pkgRun) built(m Mutation, s *Schema, c *Coverage) (Outcome, error) {
 	if s.Binary == "" && len(p.importers) == 0 {
-		return Untested
+		return Untested, nil
 	}
-	ask := func(bin, dir string, only []string) Outcome {
-		p.slots <- struct{}{}
-		defer func() { <-p.slots }()
-		outcome, _ := Ask(bin, dir, m.ID, p.timeout, only)
-		return outcome
+	ask := func(bin, dir string, only []string) (Outcome, error) {
+		tree := <-p.slots
+		defer func() { p.slots <- tree }()
+		outcome, _, err := Ask(tree, bin, dir, m.ID, p.timeout, only)
+		return outcome, err
 	}
 	if s.Binary != "" {
 		var reaching []string
@@ -168,8 +188,8 @@ func (p pkgRun) built(m Mutation, s *Schema, c *Coverage) Outcome {
 			reaching = c.Reaching(m.File, m.Line)
 		}
 		if reaching == nil || len(reaching) > 0 {
-			if outcome := ask(s.Binary, p.dir, reaching); outcome != Survived {
-				return outcome
+			if outcome, err := ask(s.Binary, p.dir, reaching); err != nil || outcome != Survived {
+				return outcome, err
 			}
 		}
 	}
@@ -178,11 +198,11 @@ func (p pkgRun) built(m Mutation, s *Schema, c *Coverage) Outcome {
 		if bin == "" {
 			continue
 		}
-		if outcome := ask(bin, dir, nil); outcome != Survived {
-			return outcome
+		if outcome, err := ask(bin, dir, nil); err != nil || outcome != Survived {
+			return outcome, err
 		}
 	}
-	return Survived
+	return Survived, nil
 }
 
 // builds is the run's one build at a time, and the importers' binaries it made, each once.
@@ -223,8 +243,8 @@ func (b *builds) importer(dir, importer, overlay string) (string, string) {
 }
 
 // runAlone builds the mutation in through an overlay under dir, and runs the package's tests that
-// reach its line and then its importers'. The file itself is never written.
-func runAlone(m Mutation, dir, timeout string, c *Coverage, importers []string, out io.Writer) (Outcome, error) {
+// reach its line and then its importers', in tree. The file itself is never written.
+func runAlone(m Mutation, dir, timeout string, c *Coverage, importers []string, tree *Tree, out io.Writer) (Outcome, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return 0, err
 	}
@@ -232,12 +252,15 @@ func runAlone(m Mutation, dir, timeout string, c *Coverage, importers []string, 
 	if err != nil {
 		return 0, err
 	}
-	asked := Asked{Overlay: overlay, Timeout: timeout, Importers: importers}
+	asked := Asked{Overlay: overlay, Timeout: timeout, Importers: importers, Tree: tree}
 	if c != nil {
 		asked.Reaching = c.Reaching(m.File, m.Line)
 	}
 	started := time.Now()
-	outcome, _ := Run(m, asked)
+	outcome, _, err := Run(m, asked)
+	if err != nil {
+		return 0, err
+	}
 	if took := time.Since(started); took > time.Minute {
 		_, _ = fmt.Fprintf(out, "  (%s took %s)\n", filepath.Dir(m.File), took.Round(time.Second))
 	}
@@ -249,7 +272,7 @@ type coverages struct {
 	mu      sync.Mutex
 	by      map[string]*coverage
 	timeout string
-	slots   chan struct{}
+	slots   chan *Tree
 }
 
 type coverage struct {

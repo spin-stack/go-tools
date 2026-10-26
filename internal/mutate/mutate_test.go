@@ -369,25 +369,25 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 func TestAPackageWithNoTestsIsSaidSoAndNotCountedAsASurvivor(t *testing.T) {
 	// Not this package: running its own tests from inside them is a test that runs forever. A
 	// command with no tests of its own: cmd/mutate has the site's example now.
-	outcome, _ := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "ctxlife", "main.go")}, mutate.Asked{Timeout: "1m"})
+	outcome, _ := runTests(t, mutate.Mutation{File: filepath.Join("..", "..", "cmd", "ctxlife", "main.go")}, mutate.Asked{Timeout: "1m"})
 	assert.Equal(t, mutate.Untested, outcome, "a package with no test files was asked anyway")
 
 	// And one that has tests is run: unmutated, they pass, which is what a survivor looks like.
-	outcome, _ = mutate.Run(mutate.Mutation{File: filepath.Join("..", "fetch", "fetch.go")}, mutate.Asked{Timeout: "2m"})
+	outcome, _ = runTests(t, mutate.Mutation{File: filepath.Join("..", "fetch", "fetch.go")}, mutate.Asked{Timeout: "2m"})
 	assert.Equal(t, mutate.Survived, outcome, "a package whose tests all pass was not run, or was misread")
 
 	// A package with no tests of its own whose importer has some is asked through the importer,
 	// not reported as untested: that is where its behaviour is held.
 	importersRan := func() int {
 		for _, c := range mutate.Costs() {
-			if c.What == "alone: build and run the importers' tests" {
+			if c.What == "alone: run the importers' tests" {
 				return c.N
 			}
 		}
 		return 0
 	}
 	before := importersRan()
-	outcome, out := mutate.Run(mutate.Mutation{File: filepath.Join("..", "..", "cmd", "ctxlife", "main.go")},
+	outcome, out := runTests(t, mutate.Mutation{File: filepath.Join("..", "..", "cmd", "ctxlife", "main.go")},
 		mutate.Asked{Timeout: "2m", Importers: []string{"../fetch"}})
 	assert.Equal(t, mutate.Survived, outcome, "the importer's tests were not run: %s", out)
 	assert.Contains(t, out, "internal/fetch", "the run does not say which package answered")
@@ -402,7 +402,7 @@ func TestAnEditATestRefusesIsCountedRefused(t *testing.T) {
 	m := doubling(t, dir)
 	overlay, err := mutate.Overlay(m, t.TempDir())
 	require.NoError(t, err)
-	outcome, out := mutate.Run(m, mutate.Asked{Overlay: overlay, Timeout: "2m"})
+	outcome, out := runTests(t, m, mutate.Asked{Overlay: overlay, Timeout: "2m"})
 	assert.Equal(t, mutate.Killed, outcome, "a package whose test fails was not counted as refusing: %s", out)
 	assert.Contains(t, out, "not doubled", "what refused it was not the package's own test")
 }
@@ -418,7 +418,7 @@ func TestAPackageWhoseTestsAreOfAnotherBuildIsUntested(t *testing.T) {
 	m := doubling(t, dir)
 	overlay, err := mutate.Overlay(m, t.TempDir())
 	require.NoError(t, err)
-	outcome, out := mutate.Run(m, mutate.Asked{Overlay: overlay, Timeout: "2m"})
+	outcome, out := runTests(t, m, mutate.Asked{Overlay: overlay, Timeout: "2m"})
 	assert.Equal(t, mutate.Untested, outcome, "tests of another build were counted as asked: %s", out)
 }
 
@@ -559,7 +559,7 @@ func G() int {
 // says which, per test.
 func TestAnEditIsPutToTheTestsThatReachIt(t *testing.T) {
 	dir := refuses(t)
-	c, err := mutate.Cover(dir, "2m", make(chan struct{}, 2))
+	c, err := mutate.Cover(dir, "2m", mutate.Slots(t.TempDir(), 2))
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	assert.Equal(t, []string{"TestDouble"}, c.Reaching(filepath.Join(dir, "code.go"), 4))
@@ -571,19 +571,19 @@ func TestAnEditIsPutToTheTestsThatReachIt(t *testing.T) {
 	require.NoError(t, err)
 	// Asked of the one test that reaches it, it is refused; of a test that does not, it survives:
 	// only the named test ran.
-	outcome, out := mutate.Run(m, mutate.Asked{Overlay: overlay, Timeout: "2m", Reaching: []string{"TestDouble"}})
+	outcome, out := runTests(t, m, mutate.Asked{Overlay: overlay, Timeout: "2m", Reaching: []string{"TestDouble"}})
 	assert.Equal(t, mutate.Killed, outcome, "the one test that reaches the edit was not run: %s", out)
-	outcome, out = mutate.Run(m, mutate.Asked{Overlay: overlay, Timeout: "2m", Reaching: []string{"TestHalf"}})
+	outcome, out = runTests(t, m, mutate.Asked{Overlay: overlay, Timeout: "2m", Reaching: []string{"TestHalf"}})
 	assert.Equal(t, mutate.Survived, outcome, "a test that was not named ran: %s", out)
 	// An edit that does not compile asks nothing.
 	broken := m
 	broken.With = "@"
 	overlay, err = mutate.Overlay(broken, t.TempDir())
 	require.NoError(t, err)
-	outcome, out = mutate.Run(broken, mutate.Asked{Overlay: overlay, Timeout: "2m"})
+	outcome, out = runTests(t, broken, mutate.Asked{Overlay: overlay, Timeout: "2m"})
 	assert.Equal(t, mutate.Unbuildable, outcome, "an edit that does not build was counted: %s", out)
 	// And reached by none, it is not run at all.
-	outcome, out = mutate.Run(m, mutate.Asked{Overlay: overlay, Timeout: "2m", Reaching: []string{}})
+	outcome, out = runTests(t, m, mutate.Asked{Overlay: overlay, Timeout: "2m", Reaching: []string{}})
 	assert.Equal(t, mutate.Survived, outcome)
 	assert.Empty(t, out, "the package's tests ran for a line none of them reaches")
 }

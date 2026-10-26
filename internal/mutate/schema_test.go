@@ -167,21 +167,21 @@ func TestAnEditInTheSchemaIsAnsweredAsItIsAlone(t *testing.T) {
 	assert.Equal(t, "6", wide(t, plan).With, "the literal alone is not what its edit says")
 	assert.Len(t, s.Built, len(plan)-len(s.Alone))
 
-	outcome, out := mutate.Ask(s.Binary, dir, 0, "2m", nil)
+	outcome, out := askTests(t, s.Binary, dir, 0, "2m", nil)
 	require.Equal(t, mutate.Survived, outcome, "with no edit on, the package failed its own tests: %s", out)
 
-	covered, err := mutate.Cover(dir, "2m", make(chan struct{}, 2))
+	covered, err := mutate.Cover(dir, "2m", mutate.Slots(t.TempDir(), 2))
 	require.NoError(t, err)
 	killed := 0
 	for _, m := range s.Built {
-		inSchema, said := mutate.Ask(s.Binary, dir, m.ID, "2m", nil)
-		reaching, _ := mutate.Ask(s.Binary, dir, m.ID, "2m", covered.Reaching(m.File, m.Line))
+		inSchema, said := askTests(t, s.Binary, dir, m.ID, "2m", nil)
+		reaching, _ := askTests(t, s.Binary, dir, m.ID, "2m", covered.Reaching(m.File, m.Line))
 		assert.Equal(t, inSchema, reaching, "%s: the tests that reach its line in the file answer otherwise in the schema", m)
-		nobody, _ := mutate.Ask(s.Binary, dir, m.ID, "2m", []string{"TestNothingIsCalledThis"})
+		nobody, _ := askTests(t, s.Binary, dir, m.ID, "2m", []string{"TestNothingIsCalledThis"})
 		assert.Equal(t, mutate.Survived, nobody, "%s: tests that were not named ran", m)
 		overlay, err := mutate.Overlay(m, t.TempDir())
 		require.NoError(t, err)
-		built, by := mutate.Run(m, mutate.Asked{Overlay: overlay, Timeout: "2m"})
+		built, by := runTests(t, m, mutate.Asked{Overlay: overlay, Timeout: "2m"})
 		assert.Equal(t, built, inSchema, "%s: alone %s, in the schema %s", m, by, said)
 		assert.Equal(t, firstFailure(by), firstFailure(said), "%s: another test refused it in the schema", m)
 		if inSchema == mutate.Killed {
@@ -278,7 +278,7 @@ func TestAnEditIsAskedInItsPackagesDirectory(t *testing.T) {
 	build.Dir = dir
 	out, err := build.CombinedOutput()
 	require.NoError(t, err, "%s", out)
-	outcome, said := mutate.Ask(bin, dir, 0, "2m", []string{"TestHalf"})
+	outcome, said := askTests(t, bin, dir, 0, "2m", []string{"TestHalf"})
 	assert.Equal(t, mutate.Survived, outcome, "TestHalf did not run beside code.go: %s", said)
 }
 

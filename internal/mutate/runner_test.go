@@ -88,6 +88,7 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 	assert.Contains(t, said.String(), bare+": 2 edit(s) in one binary, 1 built alone",
 		"Wide's int64 literal is built alone, and a run of one is what is timed")
 	assert.NotContains(t, said.String(), " took ", "a run under a minute was said to be slow")
+	assert.NotContains(t, said.String(), "in their copy of the module", "tests that wrote nothing were said to have")
 }
 
 // A test that fails with nothing broken refuses no edit: the coverage the run measures first says
@@ -158,4 +159,127 @@ func TestAnEditThatCannotBeAskedIsAnError(t *testing.T) {
 	gone := mutate.Mutation{ID: 1, File: filepath.Join(t.TempDir(), "gone.go"), Func: "F", What: "+ becomes -"}
 	_, err := mutate.RunAll([]mutate.Mutation{gone}, nil, "1m", 1, &strings.Builder{})
 	assert.Error(t, err)
+}
+
+// A test that writes into its directory writes into a copy of the module of its own, put back
+// after every run, and never into the source. Run in the package's directory, the note the
+// unmutated test leaves behind - while its coverage is measured - was there when each edit that
+// stops Save writing it was asked, so every one of them was let through; with edits asked side by
+// side, what one wrote was read by another's tests, a different set let through each run. And the
+// note stayed in the checkout. The copy is the whole module, so the test still reads testdata/
+// and ../doc.txt as it would in place.
+func TestATestThatWritesInItsDirectoryWritesInACopyOfItsOwn(t *testing.T) {
+	dir := notes(t)
+	pkg := filepath.Join(dir, "p")
+	plan, err := mutate.Plan(filepath.Join(pkg, "code.go"), map[int]bool{7: true})
+	require.NoError(t, err)
+	require.Len(t, plan, 2, "Save's comparison and its bound: %v", plan)
+	for i := range plan {
+		plan[i].ID = i + 1
+	}
+	var said strings.Builder
+	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
+	require.NoError(t, err)
+	assert.Equal(t, len(plan), tally.Killed, "an edit that stops Save writing the note was let through: %s", said.String())
+	assert.Empty(t, tally.Survived, said.String())
+	assert.NoFileExists(t, filepath.Join(pkg, "note"), "a test's file was written into the source")
+	assert.Equal(t, []string{filepath.Join(pkg, "note")}, tally.Wrote, "what the tests left is not said")
+	assert.Contains(t, said.String(), "in their copy of the module, and not in the source: "+filepath.Join(pkg, "note")+"\n",
+		"the report does not say what the tests left")
+}
+
+// The same of an edit built alone: its package's tests are built where the sources are, and run
+// in the copy. Asked after a run that left the note, it is refused, and the note is in no source.
+func TestAnEditBuiltAloneIsAskedInACopyOfItsOwn(t *testing.T) {
+	dir := notes(t)
+	code := filepath.Join(dir, "p", "code.go")
+	tree := mutate.NewTree(t.TempDir())
+	outcome, out, err := mutate.Run(mutate.Mutation{File: code}, mutate.Asked{Timeout: "2m", Tree: tree})
+	require.NoError(t, err)
+	require.Equal(t, mutate.Survived, outcome, "the package's test fails unmutated: %s", out)
+	assert.Contains(t, out, "ok  \texample.com/notes/p\n", "the package's answer is not named")
+
+	plan, err := mutate.Plan(code, map[int]bool{7: true})
+	require.NoError(t, err)
+	require.NotEmpty(t, plan)
+	overlay, err := mutate.Overlay(plan[0], t.TempDir())
+	require.NoError(t, err)
+	outcome, out, err = mutate.Run(plan[0], mutate.Asked{Overlay: overlay, Timeout: "2m", Tree: tree})
+	require.NoError(t, err)
+	assert.Equal(t, mutate.Killed, outcome, "%s was let through by the note a run before it left: %s", plan[0], out)
+	assert.Contains(t, out, "no note was written", "what refused it was not the package's own test")
+	assert.Contains(t, out, "FAIL\texample.com/notes/p\n", "the package's refusal is not named")
+	assert.NoFileExists(t, filepath.Join(dir, "p", "note"), "a test's file was written into the source")
+	assert.Equal(t, []string{filepath.Join(dir, "p", "note")}, tree.Wrote())
+}
+
+// notes is a module whose package p has Save, which writes a note into the directory it runs in,
+// and a test that reads what is around it and leaves the note behind, as many tests do.
+func notes(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod":            "module example.com/notes\n\ngo 1.24\n",
+		"doc.txt":           "read from the package as ../doc.txt\n",
+		"p/testdata/in.txt": "read from the package as testdata/in.txt\n",
+		"p/code.go": "package p\n\nimport \"os\"\n\n// Save writes the note when there is something to put in it.\nfunc Save(n int) error {\n" +
+			"\tif n > 0 {\n\t\treturn os.WriteFile(\"note\", []byte(\"noted\"), 0o600)\n\t}\n\treturn nil\n}\n",
+		"p/code_test.go": "package p\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestSaveWritesTheNote(t *testing.T) {\n" +
+			"\tfor _, path := range []string{\"testdata/in.txt\", \"../doc.txt\"} {\n\t\tif _, err := os.Stat(path); err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t}\n" +
+			"\tif err := Save(1); err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+			"\tif _, err := os.Stat(\"note\"); err != nil {\n\t\tt.Fatal(\"no note was written\")\n\t}\n}\n",
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	}
+	return dir
+}
+
+// An edit the package's own tests let through is asked of every importer in turn, until one
+// refuses it: lib's test calls Double and checks nothing, also's the same, and use's holds it. In
+// the package's binary and its importers', and built alone.
+func TestAnEditItsOwnTestsLetThroughIsAskedOfEachImporterInTurn(t *testing.T) {
+	layered(t)
+	importers := []string{"./also", "./use"}
+	plan, err := mutate.Plan(filepath.Join("lib", "lib.go"), map[int]bool{4: true})
+	require.NoError(t, err)
+	require.NotEmpty(t, plan)
+	for i := range plan {
+		plan[i].ID = i + 1
+	}
+	var said strings.Builder
+	tally, err := mutate.RunAll(plan, map[string][]string{"lib": importers}, "2m", 2, &said)
+	require.NoError(t, err)
+	assert.Equal(t, len(plan), tally.Killed, "Double's edits are refused by use, after lib and also let them through: %s", said.String())
+
+	overlay, err := mutate.Overlay(plan[0], t.TempDir())
+	require.NoError(t, err)
+	outcome, out := runTests(t, plan[0], mutate.Asked{Overlay: overlay, Timeout: "2m", Importers: importers})
+	assert.Equal(t, mutate.Killed, outcome, "built alone, %s was not refused by use: %s", plan[0], out)
+	// Each package is named as go test names it, with what it said.
+	for _, verdict := range []string{"ok  \texample.com/layered/lib\n", "ok  \texample.com/layered/also\n", "FAIL\texample.com/layered/use\n"} {
+		assert.Contains(t, out, verdict, "the packages asked are not each named with their answer")
+	}
+}
+
+// layered is a module, and the directory this runs from, whose lib's Double is called by the tests
+// of lib and of its importer also, which check nothing, and held by those of its importer use.
+func layered(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	runs := "\n\nimport (\n\t\"testing\"\n\n\t\"example.com/layered/lib\"\n)\n\nfunc TestRuns(t *testing.T) {\n\t_ = lib.Double(2)\n}\n"
+	for name, body := range map[string]string{
+		"go.mod":            "module example.com/layered\n\ngo 1.24\n",
+		"lib/lib.go":        "package lib\n\nfunc Double(n int) int {\n\treturn n + n\n}\n",
+		"lib/lib_test.go":   "package lib_test" + runs,
+		"also/also.go":      "package also\n",
+		"also/also_test.go": "package also_test" + runs,
+		"use/use.go":        "package use\n\nimport \"example.com/layered/lib\"\n\nfunc Four() int { return lib.Double(2) }\n",
+		"use/use_test.go":   "package use\n\nimport \"testing\"\n\nfunc TestFour(t *testing.T) {\n\tif Four() != 4 {\n\t\tt.Fatal(\"not four\")\n\t}\n}\n",
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, filepath.Dir(name)), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	t.Chdir(dir)
 }
