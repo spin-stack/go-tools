@@ -132,6 +132,9 @@ type evidence struct {
 	Commit string        `json:"commit"`
 	Runs   []evidenceRun `json:"runs"`
 	Tests  []evidenceOf  `json:"tests"`
+	// Measures is every number the jobs' tests logged for the record (proven.Measures): what
+	// a lane timed, on the machine the job names.
+	Measures []evidenceMeasure `json:"measures"`
 }
 
 // evidenceRun is one run that answers for the commit: the gate's, found by the commit's tree,
@@ -148,6 +151,17 @@ type evidenceRun struct {
 // evidenceOf is one test's answer in one job.
 type evidenceOf struct {
 	proven.Test
+	evidenceJob
+}
+
+// evidenceMeasure is one number a job's test logged, with the job that ran it.
+type evidenceMeasure struct {
+	proven.Measure
+	evidenceJob
+}
+
+// evidenceJob is where an answer or a measurement was logged.
+type evidenceJob struct {
 	Workflow string `json:"workflow"`
 	Run      int64  `json:"run"`
 	Job      string `json:"job"`
@@ -185,7 +199,7 @@ func tests(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workf
 			}
 		}
 	}
-	e := evidence{Commit: sha, Runs: answering, Tests: []evidenceOf{}}
+	e := evidence{Commit: sha, Runs: answering, Tests: []evidenceOf{}, Measures: []evidenceMeasure{}}
 	for _, r := range answering {
 		jobs, err := gh.Jobs(ctx, r.ID)
 		if err != nil {
@@ -199,8 +213,12 @@ func tests(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workf
 			if err != nil {
 				return fmt.Errorf("job %d of run %d: %w", j.ID, r.ID, err)
 			}
+			where := evidenceJob{Workflow: r.Workflow, Run: r.ID, Job: j.Name, JobURL: j.URL, Runner: j.Labels}
 			for _, test := range proven.Tests(log) {
-				e.Tests = append(e.Tests, evidenceOf{Test: test, Workflow: r.Workflow, Run: r.ID, Job: j.Name, JobURL: j.URL, Runner: j.Labels})
+				e.Tests = append(e.Tests, evidenceOf{Test: test, evidenceJob: where})
+			}
+			for _, m := range proven.Measures(log) {
+				e.Measures = append(e.Measures, evidenceMeasure{Measure: m, evidenceJob: where})
 			}
 		}
 	}

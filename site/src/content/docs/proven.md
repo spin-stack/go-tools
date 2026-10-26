@@ -106,7 +106,10 @@ the commit's tree, as `tree` finds it, and the newest finished run of `-also` on
 `release` reads it. `runs` is those runs - workflow, id, URL, conclusion and the commit each was
 of - and `tests` is each test's answer in each job: `name` (a Go test's, or a Playwright test's
 own title under its describe, with its `spec`), `passed`, `seconds`, and the `workflow`, `run`,
-`job` and `jobUrl` that ran it, with the labels the job asked of its `runner`. A job whose log
+`job` and `jobUrl` that ran it, with the labels the job asked of its `runner`. `measures` is
+every number a test logged for the record - a line `measure <name>=<value>`, the unit in the
+name, as a lane's measuring test prints what it timed - each with the same job and runner, so a
+figure is read beside the machine it was measured on. A job whose log
 the API no longer holds says nothing. The record is what a release publishes beside its files,
 for a reader with no access to the repository: which test ran, where, and what it answered -
 `-out` names the file, and without it the document is stdout.

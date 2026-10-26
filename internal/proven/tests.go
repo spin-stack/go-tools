@@ -30,6 +30,28 @@ var pwTest = regexp.MustCompile(`([✓✘])\s+\d+\s+(?:\[[^\]]+\] › )?([^\s›
 // lastTitle is the test's own title: what follows the last › of the titles.
 var lastTitle = regexp.MustCompile(`^(?:.* › )?(.+)$`)
 
+// Measure is one number a test logged for the record: "measure <name>=<value>", the unit in the
+// name (boot_to_running_ms), as a lane's measuring test prints what it timed on the machine it
+// ran on.
+type Measure struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
+}
+
+// measured is the line a test logs for a measurement; what the log puts before it - go test's
+// file and line, a timestamp - is let through.
+var measured = regexp.MustCompile(`\bmeasure ([a-z][a-z0-9_]*)=(-?[0-9]+(?:\.[0-9]+)?)\b`)
+
+// Measures is every measurement a log holds, in the order they were logged.
+func Measures(log string) []Measure {
+	var out []Measure
+	for _, m := range measured.FindAllStringSubmatch(log, -1) { // mutate-exempt: any n < 0 is every match
+		v, _ := strconv.ParseFloat(m[2], 64) // mutate-exempt: any bit size but 32 is 64; the expression matched a number
+		out = append(out, Measure{Name: m[1], Value: v})
+	}
+	return out
+}
+
 // Tests is every test a log says ended, in the order they did, each with whether it passed and
 // how long it took. A test run again on a retry is there once per answer.
 func Tests(log string) []Test {
