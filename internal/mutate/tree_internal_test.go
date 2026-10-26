@@ -18,7 +18,7 @@ func TestATreeIsTheModuleAsGitSeesItPutBackAfterEachRun(t *testing.T) {
 	var at string
 	ran := func(run func(at string)) {
 		t.Helper()
-		if err := tree.in(filepath.Join(root, "p"), run); err != nil {
+		if err := tree.in(filepath.Join(root, "p"), func(at, _ string) { run(at) }); err != nil {
 			t.Fatal(err)
 		}
 	}

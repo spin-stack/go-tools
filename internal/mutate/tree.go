@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// Tree is a private copy of the modules a run's tests are run in, held by one test process at a
-// time and put back as its source is after each. A test that writes into its directory - a
+// Tree is a private copy of the modules a run's tests are run in, with a temporary directory of its
+// own, held by one test process at a time and put back as its source is after each. A test that writes into its directory - a
 // Dockerfile it generates, a file it means to read back - writes into a copy no other run reads.
 // Run where the package's sources are, edits asked side by side shared one directory: what one
 // wrote, another's tests read, so an edit refused alone was let through beside another, and the
@@ -54,8 +54,12 @@ func (t *Tree) Wrote() []string {
 }
 
 // in calls run with where dir, a package's directory, is in the tree, copying its module the
-// first time, and puts the copy back as the source is once run returns.
-func (t *Tree) in(dir string, run func(at string)) error {
+// first time, and with an empty temporary directory, the process's TMPDIR; once run returns, the
+// copy is put back as the source is and the temporary directory removed. A test's temporary
+// directory is shared as its working directory was: a cache folder under os.TempDir() named by
+// the millisecond was one directory for two tests started at once, and each failed with nothing
+// broken - asked about no edit, so the edits only they reached were let through.
+func (t *Tree) in(dir string, run func(at, tmp string)) error {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -76,7 +80,14 @@ func (t *Tree) in(dir string, run func(at string)) error {
 	if err != nil {
 		return err
 	}
-	run(filepath.Join(c.dst, rel))
+	tmp := filepath.Join(t.dir, "tmp")
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		return err
+	}
+	run(filepath.Join(c.dst, rel), tmp)
+	if err := os.RemoveAll(tmp); err != nil {
+		return fmt.Errorf("mutate: removing the temporary directory of %s's tests: %w", root, err)
+	}
 	if err := c.reset(func(rel string) { t.wrote[filepath.Join(c.src, rel)] = true }); err != nil {
 		return fmt.Errorf("mutate: putting the copy of %s back after its tests: %w", root, err)
 	}

@@ -787,8 +787,8 @@ func runPackage(tree *Tree, path, pkgDir, dir, what string, only []string, timeo
 	run := exec.Command(bin, args...) //nolint:gosec // a test binary this run built
 	run.Env = testEnv()
 	var runErr error
-	if err := tree.in(pkgDir, func(at string) {
-		run.Dir = at
+	if err := tree.in(pkgDir, func(at, tmp string) {
+		run.Dir, run.Env = at, append(run.Env, "TMPDIR="+tmp)
 		out, exceeded, runErr = bounded("alone: run "+what, run)
 	}); err != nil {
 		return 0, err
