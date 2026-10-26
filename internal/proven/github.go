@@ -59,6 +59,9 @@ type Job struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
 	Conclusion string `json:"conclusion"` // success, failure, cancelled, skipped; empty until completed
+	URL        string `json:"html_url"`
+	// Labels is what the job asked of its runner: a fleet's label names the kind of machine it ran on.
+	Labels []string `json:"labels"`
 }
 
 // Artifact is one file a run kept: a lane's logs, when it failed.

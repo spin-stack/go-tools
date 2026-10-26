@@ -6,6 +6,7 @@
 //	go tool proven release   exits 1 unless the gate passed on the tree and the push lanes on the commit
 //	go tool proven times     times=<lines>: each test's seconds in the last gate that passed
 //	go tool proven flakes    which failed tests are flaky (passed on the same tree) and which were red
+//	go tool proven tests     every test the runs that answer for the commit logged, as JSON
 //
 // The repository is -repo or $GITHUB_REPOSITORY, the commit -sha or $GITHUB_SHA or HEAD, the token
 // $GH_TOKEN or $GITHUB_TOKEN, the API $GITHUB_API_URL or github.com's. The gate is -workflow,
@@ -14,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -33,7 +35,7 @@ func main() {
 	}
 }
 
-const usage = `usage: proven tree|base|release|times|flakes [flags]
+const usage = `usage: proven tree|base|release|times|flakes|tests [flags]
 
   tree     proven=true|false, whether the gate passed on the commit's tree
   base     what a run on main is of: proven=true, or base=<commit> for mutate's diff
@@ -42,6 +44,8 @@ const usage = `usage: proven tree|base|release|times|flakes [flags]
   flakes   every test that failed in the last -limit runs of -workflow and -also: flaky when it
            did not fail on another run of the same tree, intermittent when on and off along a
            branch, red when it failed on runs in a row, once when nothing else tells
+  tests    every test the runs that answer for the commit logged - the gate's by tree, -also's
+           by sha - each with its answer, its time and the job that ran it, as JSON to -out
 
 Each takes -repo, -sha, -workflow, -events; -h says the rest.
 `
@@ -74,6 +78,7 @@ func run(ctx context.Context, argv []string) error {
 	depth := fs.Int("depth", 200, "base: how far back in main's first-parent history a passed run is looked for") // mutate-exempt: a default, as deep as a day on main goes
 	also := fs.String("also", "kvm.yml", "release: the workflow that runs on every push to main, asked of the commit itself; empty is none")
 	jobs := fs.String("jobs", "e2e-verify", "times: the jobs whose logs hold the tests' times, by the start of their name")
+	out := fs.String("out", "", "tests: the file the JSON is written to; stdout when empty")
 	if err := fs.Parse(argv[1:]); err != nil {
 		return err
 	}
@@ -114,8 +119,102 @@ func run(ctx context.Context, argv []string) error {
 			workflows = append(workflows, *also)
 		}
 		return flakes(ctx, gh, trees, workflows, *limit)
+	case "tests":
+		return tests(ctx, gh, trees, *sha, *workflow, ev, *limit, *also, *out)
 	}
-	return fmt.Errorf("no command %q; one of tree, base, release, times, flakes", argv[0])
+	return fmt.Errorf("no command %q; one of tree, base, release, times, flakes, tests", argv[0])
+}
+
+// evidence is what the runs that answer for a commit logged of their tests: the record a
+// release publishes beside its files, so that a reader with no access to the repository can see
+// which test ran on which machine, when, and what it answered.
+type evidence struct {
+	Commit string        `json:"commit"`
+	Runs   []evidenceRun `json:"runs"`
+	Tests  []evidenceOf  `json:"tests"`
+}
+
+// evidenceRun is one run that answers for the commit: the gate's, found by the commit's tree,
+// or the push workflow's, found by the commit itself.
+type evidenceRun struct {
+	Workflow   string `json:"workflow"`
+	ID         int64  `json:"id"`
+	URL        string `json:"url"`
+	Conclusion string `json:"conclusion"`
+	// Head is the commit the run was of: the gate's may be another commit with the same tree.
+	Head string `json:"head"`
+}
+
+// evidenceOf is one test's answer in one job.
+type evidenceOf struct {
+	proven.Test
+	Workflow string `json:"workflow"`
+	Run      int64  `json:"run"`
+	Job      string `json:"job"`
+	JobURL   string `json:"jobUrl"`
+	// Runner is the labels the job asked of its runner; a fleet's names the machine it ran on.
+	Runner []string `json:"runner,omitempty"`
+}
+
+// tests is every test the answering runs logged, each with the job it ran in: the gate's run
+// on the commit's tree, as tree finds it, and the newest run of -also on the commit, as release
+// does. A job whose log the API no longer holds says nothing (proven.ErrGone); the runs are in
+// the record whether they logged any test or not, so a reader sees what answered.
+func tests(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, also, out string) error {
+	t, err := trees(ctx, sha)
+	if err != nil {
+		return err
+	}
+	runs, err := gh.Runs(ctx, workflow, completed, limit)
+	if err != nil {
+		return err
+	}
+	var answering []evidenceRun
+	if answer, found := proven.Answer(ctx, runs, sha, t, events, trees); found {
+		answering = append(answering, evidenceRun{Workflow: workflow, ID: answer.ID, URL: answer.URL, Conclusion: answer.Conclusion, Head: answer.HeadSHA})
+	}
+	if also != "" {
+		alsoRuns, err := gh.Runs(ctx, also, url.Values{"head_sha": {sha}}, limit)
+		if err != nil {
+			return err
+		}
+		for _, r := range alsoRuns {
+			if r.Status == "completed" && r.Conclusion != "cancelled" {
+				answering = append(answering, evidenceRun{Workflow: also, ID: r.ID, URL: r.URL, Conclusion: r.Conclusion, Head: r.HeadSHA})
+				break
+			}
+		}
+	}
+	e := evidence{Commit: sha, Runs: answering, Tests: []evidenceOf{}}
+	for _, r := range answering {
+		jobs, err := gh.Jobs(ctx, r.ID)
+		if err != nil {
+			return fmt.Errorf("run %d: %w", r.ID, err)
+		}
+		for _, j := range jobs {
+			log, err := gh.Log(ctx, j.ID)
+			if errors.Is(err, proven.ErrGone) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("job %d of run %d: %w", j.ID, r.ID, err)
+			}
+			for _, test := range proven.Tests(log) {
+				e.Tests = append(e.Tests, evidenceOf{Test: test, Workflow: r.Workflow, Run: r.ID, Job: j.Name, JobURL: j.URL, Runner: j.Labels})
+			}
+		}
+	}
+	b, err := json.MarshalIndent(e, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	fmt.Printf("%d runs answer for %s: %d tests logged\n", len(e.Runs), sha, len(e.Tests))
+	if out == "" {
+		_, err = os.Stdout.Write(b)
+		return err
+	}
+	return os.WriteFile(out, b, 0o600)
 }
 
 // tree answers whether the gate passed on the commit's tree, for a workflow that then runs only

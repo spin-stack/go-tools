@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/spin-stack/go-tools/internal/proven"
 )
 
 // stdout is what f printed to os.Stdout.
@@ -97,7 +99,9 @@ func setup(t *testing.T) *fixture {
 		case "/repos/o/r/actions/workflows/kvm.yml/runs":
 			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": f.kvm})
 		case "/repos/o/r/actions/runs/4/jobs":
-			_, _ = w.Write([]byte(`{"jobs": [{"id": 41, "name": "short"}, {"id": 42, "name": "e2e-verify:1/1"}]}`))
+			_, _ = w.Write([]byte(`{"jobs": [{"id": 41, "name": "short"}, {"id": 42, "name": "e2e-verify:1/1", "html_url": "j42", "labels": ["runs-on/fleet=kvm"]}]}`))
+		case "/repos/o/r/actions/runs/6/jobs":
+			_, _ = w.Write([]byte(`{"jobs": []}`))
 		case "/repos/o/r/actions/runs/3/jobs":
 			_, _ = w.Write([]byte(`{"jobs": [{"id": 31, "name": "e2e-verify:1/1"}]}`))
 		case "/repos/o/r/actions/jobs/42/logs":
@@ -276,6 +280,49 @@ func TestTimesAreTheLastGatesThatLoggedAny(t *testing.T) {
 	out = stdout(t, func() { err = run(t.Context(), []string{"times", "-jobs", "none"}) })
 	require.NoError(t, err)
 	assert.Equal(t, "run none: 0 tests' times\ntimes=\n", out)
+}
+
+// tests: main~1 is answered for by the pull request's run 4 (its tree) and kvm's run 30 (its
+// sha); every test their jobs logged is in the record with its job, a job whose log is gone says
+// nothing, and the record goes to -out or stdout.
+func TestTestsAreWhatTheAnsweringRunsLogged(t *testing.T) {
+	f := setup(t)
+	// A re-run still going is not an answer yet; the newest that finished is.
+	f.kvm = []ciRun{
+		{ID: 33, HeadSHA: f.main[1], HeadBranch: "main", Event: "push", Status: "in_progress", URL: "u33"},
+		{ID: 30, HeadSHA: f.main[1], HeadBranch: "main", Event: "push", Status: "completed", Conclusion: "failure", URL: "u30"},
+	}
+	out := filepath.Join(t.TempDir(), "tests.json")
+	var err error
+	said := stdout(t, func() { err = run(t.Context(), []string{"tests", "-sha", f.main[1], "-out", out}) })
+	require.NoError(t, err)
+	assert.Equal(t, "2 runs answer for "+f.main[1]+": 3 tests logged\n", said)
+	raw, err := os.ReadFile(out)
+	require.NoError(t, err)
+	var got evidence
+	require.NoError(t, json.Unmarshal(raw, &got))
+	assert.Equal(t, evidence{
+		Commit: f.main[1],
+		Runs: []evidenceRun{
+			{Workflow: "ci.yml", ID: 4, URL: "u4", Conclusion: "success", Head: f.pr},
+			{Workflow: "kvm.yml", ID: 30, URL: "u30", Conclusion: "failure", Head: f.main[1]},
+		},
+		Tests: []evidenceOf{
+			{Test: proven.Test{Name: "TestA", Passed: true, Seconds: 1.5}, Workflow: "ci.yml", Run: 4, Job: "e2e-verify:1/1", JobURL: "j42", Runner: []string{"runs-on/fleet=kvm"}},
+			{Test: proven.Test{Name: "TestA", Passed: true, Seconds: 1.4}, Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"},
+			{Test: proven.Test{Name: "TestB", Passed: false, Seconds: 2}, Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"},
+		},
+	}, got)
+	assert.Contains(t, f.asked, "/repos/o/r/actions/jobs/41/logs", "a job whose log is gone is asked, and says nothing")
+
+	// main's head: the gate's run 6 failed on its tree and logged nothing, and kvm never ran on
+	// it - a record of that run and no test, to stdout.
+	f.kvm = nil
+	said = stdout(t, func() { err = run(t.Context(), []string{"tests", "-sha", f.main[0]}) })
+	require.NoError(t, err)
+	want, err := json.MarshalIndent(evidence{Commit: f.main[0], Runs: []evidenceRun{{Workflow: "ci.yml", ID: 6, URL: "u6", Conclusion: "failure", Head: f.main[0]}}, Tests: []evidenceOf{}}, "", "  ")
+	require.NoError(t, err)
+	assert.Equal(t, "1 runs answer for "+f.main[0]+": 0 tests logged\n"+string(want)+"\n", said)
 }
 
 // flakes: run 6 failed TestA on main's tree, which no other run has - red; kvm's TestB failed on
