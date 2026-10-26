@@ -1,6 +1,6 @@
 ---
 title: proven
-description: Asks GitHub what CI already proved about a commit - which run answers for its tree, what a run on main is of, whether a release may be made, how long each test took, which failed tests are flaky - and writes the answer where the workflow reads it.
+description: Asks GitHub what CI already proved about a commit - which run answers for its tree, what a run on main is of, whether a release may be made, how long each test took, which failed tests are flaky, what every test answered - and writes the answer where the workflow reads it.
 ---
 
 A workflow that decides something from what GitHub says - which commit to diff against, whether
@@ -11,7 +11,7 @@ commits, the lane timed out, and nothing on main could pass again until somebody
 `proven` is those functions in Go, with their tables, and one small client for the API.
 
 ```sh
-go tool proven tree|base|release|times|flakes [flags]
+go tool proven tree|base|release|times|flakes|tests [flags]
 ```
 
 Every command takes the repository from `-repo` or `$GITHUB_REPOSITORY`, the commit from `-sha`
@@ -92,6 +92,24 @@ no run reached is released by dispatching the gate on main first.
 names start with `-jobs` (`e2e-verify`), from the newest run that passed and logged any - a run
 proven by another ran no lane. A split of the tests over machines reads it, so the shards are even
 by measured time rather than by count; with none, it splits by name.
+
+## tests
+
+```yaml title=".github/workflows/release.yml"
+- env:
+    GH_TOKEN: ${{ github.token }}
+  run: go tool task release:evidence   # go tool proven tests -out dist/evidence.json
+```
+
+Every test the runs that answer for the commit logged, as one JSON document: the gate's run on
+the commit's tree, as `tree` finds it, and the newest finished run of `-also` on the commit, as
+`release` reads it. `runs` is those runs - workflow, id, URL, conclusion and the commit each was
+of - and `tests` is each test's answer in each job: `name` (a Go test's, or a Playwright test's
+own title under its describe, with its `spec`), `passed`, `seconds`, and the `workflow`, `run`,
+`job` and `jobUrl` that ran it, with the labels the job asked of its `runner`. A job whose log
+the API no longer holds says nothing. The record is what a release publishes beside its files,
+for a reader with no access to the repository: which test ran, where, and what it answered -
+`-out` names the file, and without it the document is stdout.
 
 ## flakes
 
