@@ -185,6 +185,23 @@ It exits 0 when every edit was refused, 1 when one survived, and 2 when it could
 need besides the code, like a database, comes from that environment. spin runs `mutate` under its
 `hack/testpg`, which starts one PostgreSQL for every test process.
 
+### Tests that write files
+
+`go test` runs a package's tests in its source directory. `mutate` runs many edits at once, so it
+can't: one edit's tests would read the files another's wrote, and the verdict would depend on which
+edits ran side by side. Instead, every test process runs in a private copy of the module, one per
+`-j`, and the copy is reset after each run. Tests still read `testdata/` and paths like
+`../../docs` as they would in place, and nothing they write reaches your checkout.
+
+The copy holds what git sees: tracked files and files git doesn't ignore. Directories git ignores
+(`node_modules`, a build's output) and repositories nested in the module are linked rather than
+copied, so tests can read them, but those are shared. Outside a git work tree, the copy is every
+file under the module's root. Packages are still built from your checkout, and only their tests run
+in the copy.
+
+When the tests leave files behind, or change or remove one, the run's report lists them. Those
+are files the same tests would leave in your checkout under `go test`.
+
 ### Keeping a broken edit from taking the machine
 
 An edit can turn a loop into one that never ends or a slice into one that grows forever. Every

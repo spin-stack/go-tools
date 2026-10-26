@@ -65,7 +65,7 @@ func TestEveryTestProcessIsHeldToItsShare(t *testing.T) {
 	dir := oneProc(t)
 	share(t, 1<<20)
 
-	c, err := Cover(dir, "1m", make(chan struct{}, 1))
+	c, err := Cover(dir, "1m", Slots(t.TempDir(), 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,11 +79,11 @@ func TestEveryTestProcessIsHeldToItsShare(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if outcome, out := Ask(bin, dir, 0, "1m", nil); outcome != Survived {
+	if outcome, out := askTests(t, bin, dir, 0, "1m", nil); outcome != Survived {
 		t.Errorf("a schema binary was asked on every core: %s", out)
 	}
 
-	if outcome, out := Run(Mutation{File: filepath.Join(dir, "code.go")}, Asked{Timeout: "1m"}); outcome != Survived {
+	if outcome, out := runTests(t, Mutation{File: filepath.Join(dir, "code.go")}, Asked{Timeout: "1m"}); outcome != Survived {
 		t.Errorf("an edit built alone was asked on every core: %s", out)
 	}
 

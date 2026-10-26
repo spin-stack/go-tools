@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"bufio"
+	"cmp"
 	"fmt"
 	"os"
 	"os/exec"
@@ -55,12 +56,12 @@ func inAny(spans []span, line int) bool {
 }
 
 // Cover measures the package in dir: its test binary built once with coverage, then each of its
-// tests run alone into a profile of its own, each holding one of slots while it runs. The slots
+// tests run alone into a profile of its own, each in one of slots' trees while it runs. The slots
 // are the caller's whole budget of test processes, shared with the mutations it runs: a budget
 // of its own per package multiplied with theirs, and a database package's tests start a
 // PostgreSQL per process. Nil where the package has no tests, or they would not build - Run then
 // asks every test, as it would without this.
-func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
+func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
 	work, err := os.MkdirTemp("", "mutate-cover-")
 	if err != nil {
 		return nil, err
@@ -69,9 +70,9 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 	bin := filepath.Join(work, "pkg.test")
 	build := exec.Command("go", "test", "-c", "-cover", "-covermode=set", "-o", bin, ".")
 	build.Dir = dir
-	slots <- struct{}{}
+	tree := <-slots
 	out, err := combined("cover: build the package's tests", build)
-	<-slots
+	slots <- tree
 	if err != nil {
 		return nil, fmt.Errorf("mutate: building %s's tests with coverage: %w: %s", dir, err, out)
 	}
@@ -100,21 +101,34 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 	c := &Coverage{reached: map[string]map[string][]span{}, blocks: map[string][]span{}, failing: map[string]bool{}}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	var treeErr error
 	for i, test := range tests {
 		wg.Add(1)
-		slots <- struct{}{}
+		tree := <-slots
 		go func() {
 			defer wg.Done()
-			defer func() { <-slots }()
+			defer func() { slots <- tree }()
 			profile := filepath.Join(work, strconv.Itoa(i)+".cov")
 			run := exec.Command(bin, "-test.run", "^"+test+"$", "-test.count=1", //nolint:gosec // the binary this built
 				"-test.timeout", timeout, "-test.coverprofile", profile)
-			run.Dir = dir
 			run.Env = testEnv()
 			// A failure here is the package's own tests' to report, not this gate's; what this
 			// gate does with it is ask the test about no edit, since it fails whatever the edit -
 			// and say so, since an edit only it reaches then reads as one nothing holds.
-			said, exceeded, runErr := bounded("cover: run one test", run)
+			var (
+				said     []byte
+				exceeded bool
+				runErr   error
+			)
+			if err := tree.in(dir, func(at string) {
+				run.Dir = at
+				said, exceeded, runErr = bounded("cover: run one test", run)
+			}); err != nil {
+				mu.Lock()
+				treeErr = cmp.Or(treeErr, err)
+				mu.Unlock()
+				return
+			}
 			if exceeded {
 				runErr = fmt.Errorf("held over the %s a test process may, and stopped", bound())
 			}
@@ -147,6 +161,9 @@ func Cover(dir, timeout string, slots chan struct{}) (*Coverage, error) {
 		}()
 	}
 	wg.Wait()
+	if treeErr != nil {
+		return nil, treeErr
+	}
 	return c, nil
 }
 
