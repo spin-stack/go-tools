@@ -120,8 +120,8 @@ func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
 				exceeded bool
 				runErr   error
 			)
-			if err := tree.in(dir, func(at string) {
-				run.Dir = at
+			if err := tree.in(dir, func(at, tmp string) {
+				run.Dir, run.Env = at, append(run.Env, "TMPDIR="+tmp)
 				said, exceeded, runErr = bounded("cover: run one test", run)
 			}); err != nil {
 				mu.Lock()

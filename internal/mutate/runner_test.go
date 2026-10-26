@@ -283,3 +283,49 @@ func layered(t *testing.T) {
 	}
 	t.Chdir(dir)
 }
+
+// Each test process has a temporary directory of its own, emptied after it: the same tests run
+// in many processes at once here, which go test never does, and a path a test or the code makes
+// under os.TempDir() - a cache folder named by the millisecond - was one they all shared, so a
+// test failed beside another with nothing broken, was asked about no edit, and the edits only it
+// reached were let through. Here each test claims a file there and leaves it: shared, Half's edit,
+// which nothing checks, is refused by a claim another run made, not let through.
+func TestEachTestProcessHasATemporaryDirectoryOfItsOwn(t *testing.T) {
+	outer := t.TempDir()
+	t.Setenv("TMPDIR", outer)
+	dir := t.TempDir()
+	claim := "\tf, err := os.OpenFile(filepath.Join(os.TempDir(), \"claimed-\"+t.Name()), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)\n" +
+		"\tif err != nil {\n\t\tt.Fatal(\"the temporary directory is shared: \", err)\n\t}\n\t_ = f.Close()\n"
+	for name, body := range map[string]string{
+		"go.mod":  "module example.com/claims\n\ngo 1.24\n",
+		"code.go": "package claims\n\nfunc Double(n int) int {\n\treturn n + n\n}\n\nfunc Half(n int) int {\n\treturn n / 2\n}\n",
+		"code_test.go": "package claims\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n\t\"testing\"\n)\n\n" +
+			"func TestDouble(t *testing.T) {\n" + claim + "\tif Double(2) != 4 {\n\t\tt.Fatal(\"not doubled\")\n\t}\n}\n\n" +
+			"func TestHalf(t *testing.T) {\n" + claim + "\t_ = Half(4)\n}\n",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	plan, err := mutate.Plan(filepath.Join(dir, "code.go"), map[int]bool{4: true, 8: true})
+	require.NoError(t, err)
+	var double, half int
+	for i := range plan {
+		plan[i].ID = i + 1
+		if plan[i].Func == "Double" {
+			double++
+		} else {
+			half++
+		}
+	}
+	require.Positive(t, double)
+	require.Positive(t, half)
+	var said strings.Builder
+	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
+	require.NoError(t, err)
+	assert.Equal(t, double, tally.Killed, "only Double's edits are refused: %s", said.String())
+	assert.Len(t, tally.Survived, half, "Half's edits, which nothing checks, were refused by a claim another run made: %s", said.String())
+	left, err := os.ReadDir(outer)
+	require.NoError(t, err)
+	for _, e := range left {
+		assert.NotContains(t, e.Name(), "claimed-", "a test's temporary file was left in the temporary directory mutate was given")
+	}
+}

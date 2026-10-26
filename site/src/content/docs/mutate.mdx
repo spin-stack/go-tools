@@ -191,7 +191,11 @@ need besides the code, like a database, comes from that environment. spin runs `
 can't: one edit's tests would read the files another's wrote, and the verdict would depend on which
 edits ran side by side. Instead, every test process runs in a private copy of the module, one per
 `-j`, and the copy is reset after each run. Tests still read `testdata/` and paths like
-`../../docs` as they would in place, and nothing they write reaches your checkout.
+`../../docs` as they would in place, and nothing they write reaches your checkout. Each process
+also gets an empty temporary directory of its own as `TMPDIR`, removed after the run. Without it,
+two runs of the same tests could share a path under `os.TempDir()`, such as a cache folder named
+by the current time. One of them would fail with nothing broken, and the edits only that test
+reaches would be let through.
 
 The copy holds what git sees: tracked files and files git doesn't ignore. Directories git ignores
 (`node_modules`, a build's output) and repositories nested in the module are linked rather than

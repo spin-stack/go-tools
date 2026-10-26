@@ -384,8 +384,8 @@ func Ask(tree *Tree, bin, dir string, id int, timeout string, only []string) (Ou
 		exceeded bool
 		runErr   error
 	)
-	if err := tree.in(dir, func(at string) {
-		cmd.Dir = at
+	if err := tree.in(dir, func(at, tmp string) {
+		cmd.Dir, cmd.Env = at, append(cmd.Env, "TMPDIR="+tmp)
 		out, exceeded, runErr = bounded("schema: run one edit", cmd)
 	}); err != nil {
 		return 0, "", err
