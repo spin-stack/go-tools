@@ -105,7 +105,7 @@ func setup(t *testing.T) *fixture {
 		case "/repos/o/r/actions/runs/3/jobs":
 			_, _ = w.Write([]byte(`{"jobs": [{"id": 31, "name": "e2e-verify:1/1"}]}`))
 		case "/repos/o/r/actions/jobs/42/logs":
-			_, _ = w.Write([]byte("--- PASS: TestA (1.50s)\n"))
+			_, _ = w.Write([]byte("    measure_test.go:40: measure boot_to_running_ms=12345\n--- PASS: TestA (1.50s)\n"))
 		case "/repos/o/r/actions/jobs/31/logs":
 			_, _ = w.Write([]byte("--- PASS: TestA (1.40s)\n--- FAIL: TestB (2s)\n"))
 		default:
@@ -301,6 +301,7 @@ func TestTestsAreWhatTheAnsweringRunsLogged(t *testing.T) {
 	require.NoError(t, err)
 	var got evidence
 	require.NoError(t, json.Unmarshal(raw, &got))
+	fleet := evidenceJob{Workflow: "ci.yml", Run: 4, Job: "e2e-verify:1/1", JobURL: "j42", Runner: []string{"runs-on/fleet=kvm"}}
 	assert.Equal(t, evidence{
 		Commit: f.main[1],
 		Runs: []evidenceRun{
@@ -308,10 +309,12 @@ func TestTestsAreWhatTheAnsweringRunsLogged(t *testing.T) {
 			{Workflow: "kvm.yml", ID: 30, URL: "u30", Conclusion: "failure", Head: f.main[1]},
 		},
 		Tests: []evidenceOf{
-			{Test: proven.Test{Name: "TestA", Passed: true, Seconds: 1.5}, Workflow: "ci.yml", Run: 4, Job: "e2e-verify:1/1", JobURL: "j42", Runner: []string{"runs-on/fleet=kvm"}},
-			{Test: proven.Test{Name: "TestA", Passed: true, Seconds: 1.4}, Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"},
-			{Test: proven.Test{Name: "TestB", Passed: false, Seconds: 2}, Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"},
+			{Test: proven.Test{Name: "TestA", Passed: true, Seconds: 1.5}, evidenceJob: fleet},
+			{Test: proven.Test{Name: "TestA", Passed: true, Seconds: 1.4}, evidenceJob: evidenceJob{Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"}},
+			{Test: proven.Test{Name: "TestB", Passed: false, Seconds: 2}, evidenceJob: evidenceJob{Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"}},
 		},
+		// What job 42's test timed, beside the machine it ran on.
+		Measures: []evidenceMeasure{{Measure: proven.Measure{Name: "boot_to_running_ms", Value: 12345}, evidenceJob: fleet}},
 	}, got)
 	assert.Contains(t, f.asked, "/repos/o/r/actions/jobs/41/logs", "a job whose log is gone is asked, and says nothing")
 
@@ -320,7 +323,7 @@ func TestTestsAreWhatTheAnsweringRunsLogged(t *testing.T) {
 	f.kvm = nil
 	said = stdout(t, func() { err = run(t.Context(), []string{"tests", "-sha", f.main[0]}) })
 	require.NoError(t, err)
-	want, err := json.MarshalIndent(evidence{Commit: f.main[0], Runs: []evidenceRun{{Workflow: "ci.yml", ID: 6, URL: "u6", Conclusion: "failure", Head: f.main[0]}}, Tests: []evidenceOf{}}, "", "  ")
+	want, err := json.MarshalIndent(evidence{Commit: f.main[0], Runs: []evidenceRun{{Workflow: "ci.yml", ID: 6, URL: "u6", Conclusion: "failure", Head: f.main[0]}}, Tests: []evidenceOf{}, Measures: []evidenceMeasure{}}, "", "  ")
 	require.NoError(t, err)
 	assert.Equal(t, "1 runs answer for "+f.main[0]+": 0 tests logged\n"+string(want)+"\n", said)
 }

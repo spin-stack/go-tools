@@ -29,3 +29,18 @@ func TestEveryTestALogSaysEnded(t *testing.T) {
 	}, Tests(log))
 	assert.Empty(t, Tests("nothing ended here\n"))
 }
+
+// A measurement is a "measure <name>=<value>" line, however the log prefixes it; a name with a
+// capital or a value with letters is not one.
+func TestEveryMeasurementALogHolds(t *testing.T) {
+	log := "2026-10-26T13:00:01.0000000Z     measure_test.go:40: measure boot_to_running_ms=12345\n" +
+		"=== RUN TestX\n" +
+		"    measure_test.go:52: measure diff_etc_ms=0.5 measure snapshot_disk_ms=-1\n" +
+		"not a measure Boot_ms=3 nor measure disk=fast\n"
+	assert.Equal(t, []Measure{
+		{Name: "boot_to_running_ms", Value: 12345},
+		{Name: "diff_etc_ms", Value: 0.5},
+		{Name: "snapshot_disk_ms", Value: -1},
+	}, Measures(log))
+	assert.Empty(t, Measures("--- PASS: TestA (1.50s)\n"))
+}
