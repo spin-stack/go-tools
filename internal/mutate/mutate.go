@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
@@ -111,7 +112,9 @@ func Changed(base string) (map[string]map[int]bool, error) {
 // asked is whether a changed file is one this asks the tests about: Go that is not a test, in a
 // directory the go command builds. Under testdata, or a directory named with a leading . or _,
 // it is a fixture go never compiles into the package - one written to fail on purpose, as
-// cmd/mutate's example is.
+// cmd/mutate's example is. And a file this machine's build leaves out - a js/wasm program's,
+// behind its constraint or its _js.go name - is one no test run here compiles: asked, its
+// package is one go list does not find at all.
 func asked(path string) bool {
 	if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 		return false
@@ -121,7 +124,9 @@ func asked(path string) bool {
 			return false
 		}
 	}
-	return true
+	// A file that cannot be read is one a later step says so of; built, it is asked.
+	built, err := build.Default.MatchFile(pathpkg.Dir(path), pathpkg.Base(path))
+	return err != nil || built
 }
 
 // hunk is the range of the new file a hunk header names: @@ -old,n +new,m @@.

@@ -344,6 +344,11 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "fixture.go"), []byte("package fixture\n\nfunc F() int { return 1 }\n"), 0o600))
 	}
 	run("add", "testdata")
+	// And a browser's Go, new: behind its constraint, and by its name - what this machine never
+	// builds, so no test here could refuse an edit of it.
+	require.NoError(t, os.MkdirAll("term", 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join("term", "main.go"), []byte("//go:build js && wasm\n\npackage main\n\nfunc main() {}\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join("term", "page_js.go"), []byte("package main\n\nfunc page() int { return 1 }\n"), 0o600))
 	// A file that is not Go, changed in the same diff: its hunks are nobody's lines.
 	require.NoError(t, os.WriteFile("notes.txt", []byte("a\nb\n"), 0o600))
 	run("add", "notes.txt")
@@ -355,6 +360,9 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 	assert.NotContains(t, changed, "sample_test.go", "a mutation of a test is a question about nothing")
 	for _, fixture := range []string{"testdata/example/fixture.go", "_scratch/fixture.go", ".hidden/fixture.go"} {
 		assert.NotContains(t, changed, fixture, "a fixture the go command never builds was broken")
+	}
+	for _, browser := range []string{"term/main.go", "term/page_js.go"} {
+		assert.NotContains(t, changed, browser, "a file this machine's build leaves out was broken")
 	}
 	require.Contains(t, changed, "sample.go")
 	assert.Equal(t, map[int]bool{12: true, 33: true, 34: true}, changed["sample.go"], "the lines the change touched are not the lines reported")

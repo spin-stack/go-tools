@@ -100,6 +100,10 @@ conditions of branches that only log, generated code, and lines with a `mutate-e
 the last, these used to be answered with exemptions by hand, often enough that `mutate` now skips
 them itself.
 
+It also leaves out files the machine running it does not build: a `//go:build js && wasm`
+program, or a file named `_windows.go` on Linux. No test that runs there compiles them, so none
+could refuse an edit.
+
 ## How a run stays fast
 
 Mutation testing has a reputation for being slow, because the naive approach builds and tests the
