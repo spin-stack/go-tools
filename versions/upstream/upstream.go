@@ -50,7 +50,17 @@ func newest(ctx context.Context, e versions.Entry) (string, error) {
 	case "go":
 		return newestGo(ctx, e.Version)
 	case "kernel-stable":
-		return kernelStable(ctx, e.Version)
+		releases, err := kernelReleases(ctx)
+		if err != nil {
+			return "", err
+		}
+		return kernelStable(e.Version, releases)
+	case "kernel-mainline":
+		releases, err := kernelReleases(ctx)
+		if err != nil {
+			return "", err
+		}
+		return kernelMainline(releases)
 	case "digest", "branch":
 		return e.Version, nil
 	case "tags":
@@ -363,28 +373,60 @@ func newestGo(ctx context.Context, tag string) (string, error) {
 	return "", errors.New("versions: go.dev lists no stable Go")
 }
 
-// kernelStable is the newest release of version's series, 7.2 for 7.2.8.
-func kernelStable(ctx context.Context, version string) (string, error) {
-	parts := strings.SplitN(version, ".", 3)
-	if len(parts) < 2 {
-		return "", fmt.Errorf("versions: %q is not a kernel release", version)
-	}
-	series := parts[0] + "." + parts[1] + "."
+// kernelRelease is one row of kernel.org's releases.json.
+type kernelRelease struct {
+	Version string `json:"version"`
+	Moniker string `json:"moniker"`
+}
+
+func kernelReleases(ctx context.Context) ([]kernelRelease, error) {
 	var doc struct {
-		Releases []struct {
-			Version string `json:"version"`
-			Moniker string `json:"moniker"`
-		} `json:"releases"`
+		Releases []kernelRelease `json:"releases"`
 	}
 	if err := getJSON(ctx, "https://www.kernel.org/releases.json", &doc); err != nil {
-		return "", err
+		return nil, err
 	}
-	for _, r := range doc.Releases {
+	return doc.Releases, nil
+}
+
+// kernelStable is the newest release of version's series, 7.2 for 7.2.8.
+func kernelStable(version string, releases []kernelRelease) (string, error) {
+	major, rest, _ := strings.Cut(version, ".")
+	minor, _, _ := strings.Cut(rest, ".")
+	if minor == "" {
+		return "", fmt.Errorf("versions: %q is not a kernel release", version)
+	}
+	series := major + "." + minor + "."
+	for _, r := range releases {
 		if r.Moniker != "mainline" && strings.HasPrefix(r.Version, series) {
 			return r.Version, nil
 		}
 	}
 	return "", fmt.Errorf("versions: kernel.org lists no %sx: the series is over, and moving to another is a decision, not a bump", series)
+}
+
+// kernelMainline is the newest X.Y Linus released. While mainline is at a release candidate,
+// which has no tarball on cdn.kernel.org, that is the series stable carries: 7.3 for 7.4-rc2
+// beside 7.3.2.
+func kernelMainline(releases []kernelRelease) (string, error) {
+	var newest []int
+	for _, r := range releases {
+		if r.Moniker == "linux-next" {
+			continue
+		}
+		// An -rc is no number, and 7.3.2 is of 7.3: the series is the first two.
+		n, err := numbers(r.Version)
+		if err != nil || len(n) < 2 {
+			continue
+		}
+		if slices.Compare(n[:2], newest) > 0 {
+			newest = n[:2]
+		}
+	}
+	if newest == nil {
+		return "", errors.New("versions: kernel.org lists no released kernel")
+	}
+	return fmt.Sprintf("%d.%d", newest[0], newest[1]), nil
 }
 
 // Status is one entry as check finds it.
