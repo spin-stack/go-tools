@@ -1,8 +1,10 @@
 package upstream
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -181,6 +183,61 @@ func TestAPinnedDownloadIsOnlyThePinnedBytes(t *testing.T) {
 			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.wantErr)
 		case tc.wantErr == "" && (err != nil || string(got) != "the package"):
 			t.Errorf("%s: %q, %v", tc.name, got, err)
+		}
+	}
+}
+
+// Mainline is the newest X.Y Linus released: a release candidate has no tarball, so while one is
+// mainline the newest is the series stable carries, and linux-next is never one.
+func TestKernelMainlineIsTheNewestRelease(t *testing.T) {
+	for name, tc := range map[string]struct {
+		releases []kernelRelease
+		want     string // "" is an error
+	}{
+		"mainline released": {[]kernelRelease{{"7.3", "mainline"}, {"7.2.13", "stable"}, {"6.18.59", "longterm"}, {"next-20261029", "linux-next"}}, "7.3"},
+		"mainline at an rc": {[]kernelRelease{{"7.4-rc2", "mainline"}, {"7.3.2", "stable"}, {"7.2.14", "stable"}}, "7.3"},
+		"a later major":     {[]kernelRelease{{"8.0", "mainline"}, {"7.9.4", "stable"}}, "8.0"},
+		"nothing released":  {[]kernelRelease{{"8.0-rc1", "mainline"}, {"next-20261029", "linux-next"}}, ""},
+		"a bare major":      {[]kernelRelease{{"8", "mainline"}, {"7.9.4", "stable"}}, "7.9"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := kernelMainline(tc.releases)
+			if tc.want == "" && err == nil {
+				t.Fatalf("newest %q, want an error", got)
+			}
+			if tc.want != "" && (err != nil || got != tc.want) {
+				t.Errorf("newest %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// Stable is the newest of the pinned series past mainline: a series mainline alone lists, or none
+// does, is over.
+func TestKernelStableIsTheNewestOfTheSeries(t *testing.T) {
+	releases := []kernelRelease{{"7.3", "mainline"}, {"7.2.13", "stable"}, {"6.18.59", "longterm"}}
+	for version, want := range map[string]string{
+		"7.2.8": "7.2.13", "6.18": "6.18.59",
+		"7.3": "", "7.1.4": "", "7": "",
+	} {
+		got, err := kernelStable(version, releases)
+		if want == "" && err == nil {
+			t.Errorf("%s: newest %q, want an error", version, got)
+		}
+		if want != "" && (err != nil || got != want) {
+			t.Errorf("%s: newest %q, %v; want %q", version, got, err, want)
+		}
+	}
+}
+
+// Either kernel track says it could not read kernel.org, not that kernel.org lists nothing.
+func TestAKernelTrackSaysKernelOrgDidNotAnswer(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, track := range []string{"kernel-stable", "kernel-mainline"} {
+		_, err := newest(ctx, versions.Entry{Version: "7.2.8", Track: track})
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("%s: %v, want kernel.org's request's error", track, err)
 		}
 	}
 }
