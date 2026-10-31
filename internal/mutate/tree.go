@@ -80,8 +80,11 @@ func (t *Tree) in(dir string, run func(at, tmp string)) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(t.dir, "tmp")
-	if err := os.MkdirAll(tmp, 0o700); err != nil {
+	// Not under the tree's own directory: a test's t.TempDir() is its name and two levels more
+	// under this, and a socket there, from a test with a long name, was past the 108 bytes a unix
+	// socket's path may have - so the test failed with nothing broken, and its lines went unasked.
+	tmp, err := os.MkdirTemp("", "m")
+	if err != nil {
 		return err
 	}
 	run(filepath.Join(c.dst, rel), tmp)

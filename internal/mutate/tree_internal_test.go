@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,6 +60,43 @@ func TestATreeIsTheModuleAsGitSeesItPutBackAfterEachRun(t *testing.T) {
 	})
 	if got := tree.Wrote(); !slices.Equal(got, want) {
 		t.Errorf("a run that wrote nothing added to what was written: %v", got)
+	}
+}
+
+// A run's temporary directory is empty, its own and gone once it returns, and short enough that
+// a test with a long name binds a socket in its t.TempDir() there, however deep the tree is.
+func TestARunsTemporaryDirectoryTakesASocketFromATestWithALongName(t *testing.T) {
+	root := gitModule(t)
+	tree := NewTree(filepath.Join(t.TempDir(), "trees", "12", "a-tree-as-deep-as-a-runner-makes-it"))
+	var tmps []string
+	for range 2 {
+		err := tree.in(filepath.Join(root, "p"), func(_, tmp string) {
+			tmps = append(tmps, tmp)
+			if entries, err := os.ReadDir(tmp); err != nil || len(entries) != 0 {
+				t.Errorf("the run's temporary directory holds %v (%v), not nothing", entries, err)
+			}
+			// As t.TempDir() makes one: the test's name and a number, then a directory per call.
+			dir := filepath.Join(tmp, "TestTheKeepCommandHoldsALeaseForAsLongAsItsCommandRuns1008086323", "001")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			l, err := net.Listen("unix", filepath.Join(dir, "identity.sock"))
+			if err != nil {
+				t.Fatalf("a socket in a long-named test's directory: %v", err)
+			}
+			_ = l.Close() // only that it bound is asked
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tmps[0] == tmps[1] {
+		t.Errorf("two runs shared the temporary directory %s", tmps[0])
+	}
+	for _, tmp := range tmps {
+		if _, err := os.Stat(tmp); err == nil {
+			t.Errorf("%s outlived its run", tmp)
+		}
 	}
 }
 
