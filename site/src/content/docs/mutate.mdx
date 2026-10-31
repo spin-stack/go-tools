@@ -199,7 +199,9 @@ edits ran side by side. Instead, every test process runs in a private copy of th
 also gets an empty temporary directory of its own as `TMPDIR`, removed after the run. Without it,
 two runs of the same tests could share a path under `os.TempDir()`, such as a cache folder named
 by the current time. One of them would fail with nothing broken, and the edits only that test
-reaches would be let through.
+reaches would be let through. The directory is made directly under your own `TMPDIR`, not inside
+the copy: a test with a long name that binds a unix socket in its `t.TempDir()` stays under the
+108 bytes such a path may have.
 
 The copy holds what git sees: tracked files and files git doesn't ignore. Directories git ignores
 (`node_modules`, a build's output) and repositories nested in the module are linked rather than
