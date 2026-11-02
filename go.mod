@@ -10,7 +10,7 @@ require (
 	github.com/in-toto/attestation v1.2.0
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/stretchr/testify v1.12.1
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/tools v0.52.0
 	golang.org/x/vuln v1.9.0
 	google.golang.org/protobuf v1.36.12
