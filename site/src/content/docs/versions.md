@@ -23,7 +23,7 @@ date.
   source: https://cdn.kernel.org/pub/linux/kernel/v{major}.x/linux-{version}.tar.xz
   version: 7.2.8
   pin: 12e8d5a973d1...      # the file's sha256
-  track: kernel-stable
+  track: kernel
   note: what a bump has to be checked with.
 
 - name: debian

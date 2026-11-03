@@ -187,57 +187,38 @@ func TestAPinnedDownloadIsOnlyThePinnedBytes(t *testing.T) {
 	}
 }
 
-// Mainline is the newest X.Y Linus released: a release candidate has no tarball, so while one is
-// mainline the newest is the series stable carries, and linux-next is never one.
-func TestKernelMainlineIsTheNewestRelease(t *testing.T) {
-	for name, tc := range map[string]struct {
-		releases []kernelRelease
-		want     string // "" is an error
-	}{
-		"mainline released": {[]kernelRelease{{"7.3", "mainline"}, {"7.2.13", "stable"}, {"6.18.59", "longterm"}, {"next-20261029", "linux-next"}}, "7.3"},
-		"mainline at an rc": {[]kernelRelease{{"7.4-rc2", "mainline"}, {"7.3.2", "stable"}, {"7.2.14", "stable"}}, "7.3"},
-		"a later major":     {[]kernelRelease{{"8.0", "mainline"}, {"7.9.4", "stable"}}, "8.0"},
-		"nothing released":  {[]kernelRelease{{"8.0-rc1", "mainline"}, {"next-20261029", "linux-next"}}, ""},
-		"a bare major":      {[]kernelRelease{{"8", "mainline"}, {"7.9.4", "stable"}}, "7.9"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, err := kernelMainline(tc.releases)
-			if tc.want == "" && err == nil {
-				t.Fatalf("newest %q, want an error", got)
-			}
-			if tc.want != "" && (err != nil || got != tc.want) {
-				t.Errorf("newest %q, %v; want %q", got, err, tc.want)
-			}
-		})
-	}
-}
-
-// Stable is the newest of the pinned series past mainline: a series mainline alone lists, or none
-// does, is over.
-func TestKernelStableIsTheNewestOfTheSeries(t *testing.T) {
-	releases := []kernelRelease{{"7.3", "mainline"}, {"7.2.13", "stable"}, {"6.18.59", "longterm"}}
+// A kernel stays in the series it is pinned in, whatever else kernel.org has released, and a series
+// nothing lists is over rather than a failure to read kernel.org.
+func TestKernelStaysInItsSeries(t *testing.T) {
+	releases := []kernelRelease{{"7.4-rc1", "mainline"}, {"7.3.1", "stable"}, {"7.2.15", "stable"}, {"6.18.60", "longterm"}, {"next-20261029", "linux-next"}}
 	for version, want := range map[string]string{
-		"7.2.8": "7.2.13", "6.18": "6.18.59",
-		"7.3": "", "7.1.4": "", "7": "",
+		"7.3": "7.3.1", "7.3.1": "7.3.1", "7.2.8": "7.2.15", "6.18": "6.18.60",
 	} {
-		got, err := kernelStable(version, releases)
-		if want == "" && err == nil {
-			t.Errorf("%s: newest %q, want an error", version, got)
-		}
-		if want != "" && (err != nil || got != want) {
+		if got, err := kernelSeries(version, releases); err != nil || got != want {
 			t.Errorf("%s: newest %q, %v; want %q", version, got, err, want)
 		}
 	}
+	// Its first tarball, while mainline alone lists it.
+	if got, err := kernelSeries("7.4", []kernelRelease{{"7.4", "mainline"}, {"7.3.9", "stable"}}); err != nil || got != "7.4" {
+		t.Errorf("a first tarball: newest %q, %v", got, err)
+	}
+	// 7.4-rc1 is no release of 7.4, and 7.1 is none of 7.15's.
+	for _, version := range []string{"7.4", "7.1.4"} {
+		if got, err := kernelSeries(version, append(releases, kernelRelease{"7.15.2", "stable"})); !errors.Is(err, errSeriesOver) {
+			t.Errorf("%s: newest %q, %v; want the series over", version, got, err)
+		}
+	}
+	if _, err := kernelSeries("7", releases); err == nil || errors.Is(err, errSeriesOver) {
+		t.Errorf("a bare major: %v, want refused as no release", err)
+	}
 }
 
-// Either kernel track says it could not read kernel.org, not that kernel.org lists nothing.
-func TestAKernelTrackSaysKernelOrgDidNotAnswer(t *testing.T) {
+// A kernel says it could not read kernel.org, not that kernel.org lists nothing.
+func TestAKernelSaysKernelOrgDidNotAnswer(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	for _, track := range []string{"kernel-stable", "kernel-mainline"} {
-		_, err := newest(ctx, versions.Entry{Version: "7.2.8", Track: track})
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("%s: %v, want kernel.org's request's error", track, err)
-		}
+	_, err := newest(ctx, versions.Entry{Version: "7.2.8", Track: "kernel"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("%v, want kernel.org's request's error", err)
 	}
 }

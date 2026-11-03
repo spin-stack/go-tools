@@ -31,6 +31,10 @@ import (
 // errFollows is an entry whose newest version is another's to say: a person reads it there.
 var errFollows = errors.New("versions: follows another")
 
+// errSeriesOver is a kernel whose series kernel.org no longer lists: check says so, and a bump
+// leaves the pin where it is, so a refresh goes on with its other entries.
+var errSeriesOver = errors.New("the series is over: the pin stays until a person names another")
+
 // newest is the version check says e could be at: the same for an image tracked by its digest,
 // or a branch, whose pin is what moves.
 func newest(ctx context.Context, e versions.Entry) (string, error) {
@@ -49,18 +53,12 @@ func newest(ctx context.Context, e versions.Entry) (string, error) {
 		return tag, err
 	case "go":
 		return newestGo(ctx, e.Version)
-	case "kernel-stable":
+	case "kernel":
 		releases, err := kernelReleases(ctx)
 		if err != nil {
 			return "", err
 		}
-		return kernelStable(e.Version, releases)
-	case "kernel-mainline":
-		releases, err := kernelReleases(ctx)
-		if err != nil {
-			return "", err
-		}
-		return kernelMainline(releases)
+		return kernelSeries(e.Version, releases)
 	case "digest", "branch":
 		return e.Version, nil
 	case "tags":
@@ -147,7 +145,11 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 		return versions.Entry{}, nil, fmt.Errorf("versions: %s's archive is what a build's git writes of the commit, so it is bumped by hand: see its note", name)
 	}
 	if version == "" {
-		if version, err = newest(ctx, e); err != nil {
+		version, err = newest(ctx, e)
+		switch {
+		case errors.Is(err, errSeriesOver):
+			version = e.Version
+		case err != nil:
 			return versions.Entry{}, nil, fmt.Errorf("%w; name the version", err)
 		}
 	}
@@ -389,44 +391,21 @@ func kernelReleases(ctx context.Context) ([]kernelRelease, error) {
 	return doc.Releases, nil
 }
 
-// kernelStable is the newest release of version's series, 7.2 for 7.2.8.
-func kernelStable(version string, releases []kernelRelease) (string, error) {
+// kernelSeries is the newest release of version's series: 7.3.1 for 7.3, and the series itself
+// while its first tarball is all there is. An -rc of it has no tarball.
+func kernelSeries(version string, releases []kernelRelease) (string, error) {
 	major, rest, _ := strings.Cut(version, ".")
 	minor, _, _ := strings.Cut(rest, ".")
 	if minor == "" {
 		return "", fmt.Errorf("versions: %q is not a kernel release", version)
 	}
-	series := major + "." + minor + "."
+	series := major + "." + minor
 	for _, r := range releases {
-		if r.Moniker != "mainline" && strings.HasPrefix(r.Version, series) {
+		if r.Version == series || strings.HasPrefix(r.Version, series+".") {
 			return r.Version, nil
 		}
 	}
-	return "", fmt.Errorf("versions: kernel.org lists no %sx: the series is over, and moving to another is a decision, not a bump", series)
-}
-
-// kernelMainline is the newest X.Y Linus released. While mainline is at a release candidate,
-// which has no tarball on cdn.kernel.org, that is the series stable carries: 7.3 for 7.4-rc2
-// beside 7.3.2.
-func kernelMainline(releases []kernelRelease) (string, error) {
-	var newest []int
-	for _, r := range releases {
-		if r.Moniker == "linux-next" {
-			continue
-		}
-		// An -rc is no number, and 7.3.2 is of 7.3: the series is the first two.
-		n, err := numbers(r.Version)
-		if err != nil || len(n) < 2 {
-			continue
-		}
-		if slices.Compare(n[:2], newest) > 0 {
-			newest = n[:2]
-		}
-	}
-	if newest == nil {
-		return "", errors.New("versions: kernel.org lists no released kernel")
-	}
-	return fmt.Sprintf("%d.%d", newest[0], newest[1]), nil
+	return "", fmt.Errorf("versions: kernel.org lists no %s.x: %w", series, errSeriesOver)
 }
 
 // Status is one entry as check finds it.
