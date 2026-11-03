@@ -35,8 +35,7 @@ description: Every kind of entry versions.yaml takes, the build arguments each b
 | `tags <repo>` | the highest release-numbered tag of a git repository; for a download, the highest whose file is published |
 | `commit <repo> <branch>` | the commit a branch is at, for a download whose version is a commit: behind only when the file changed |
 | `go` | the newest stable Go, spelled as the tag is (`1.27.1-trixie`) |
-| `kernel-stable` | the newest release of the same stable series; a series that has ended is for a person to decide |
-| `kernel-mainline` | the newest series Linus released (`7.3`), its first tarball: no stable fixes, and while mainline is at an -rc, the series before it |
+| `kernel` | the newest release of the pinned series; moving to another series is naming it (`versions bump kernel 7.4.1`), and a series kernel.org no longer lists is reported and the pin stays |
 | `digest` | the same tag: behind when it names another image |
 | `branch` | the same branch: behind when it is at another commit |
 | `pypi` | the package's newest on PyPI |

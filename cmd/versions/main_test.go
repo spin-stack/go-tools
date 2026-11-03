@@ -39,7 +39,7 @@ func TestTheCommandsAnswerFromTheFile(t *testing.T) {
   source: https://cdn.kernel.org/pub/linux/kernel/v{major}.x/linux-{version}.tar.xz
   version: 7.2.8
   pin: 1111111111111111111111111111111111111111111111111111111111111111
-  track: kernel-stable
+  track: kernel
 `), 0o600))
 	for name, tc := range map[string]struct {
 		argv  []string
@@ -88,7 +88,7 @@ func TestOneEntrySaysWhatItsKindHas(t *testing.T) {
   source: https://git.kernel.org/torvalds/t/linux-{version}.tar.gz
   version: 7.3-rc5
   pin: 1111111111111111111111111111111111111111111111111111111111111111
-  track: kernel-stable
+  track: kernel
 - name: alpine
   kind: image
   source: alpine

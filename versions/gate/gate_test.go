@@ -39,7 +39,7 @@ func TestTheGateSaysWhereAPinIsNotVersionsYAMLs(t *testing.T) {
 	good := func() map[string]string {
 		return map[string]string{
 			versions.File: "- name: kernel\n  kind: download\n  source: https://x/{version}\n  version: '1'\n  pin: " + strings.Repeat("a", 64) +
-				"\n  track: kernel-stable\n- name: go\n  kind: image\n  source: golang\n  version: '1'\n  pin: sha256:" + strings.Repeat("b", 64) + "\n  track: go\n",
+				"\n  track: kernel\n- name: go\n  kind: image\n  source: golang\n  version: '1'\n  pin: sha256:" + strings.Repeat("b", 64) + "\n  track: go\n",
 			"Taskfile.yml":      "cmds:\n  - docker build $(go tool versions args kernel) .\n  - '{{.VERSIONS}} ref go'\n",
 			"kernel/Dockerfile": "ARG KERNEL_VERSION\nARG KERNEL_SHA256\nFROM scratch\n",
 			// Written by other tools, or by a build: not the gate's.
