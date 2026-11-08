@@ -1,6 +1,6 @@
 ---
 title: taskgate
-description: Fails on a workflow step that runs anything but one task, on a task that holds a program rather than a few commands, and on a script a task runs that decides anything - so what CI does is written once, and what decides is Go with a test.
+description: Fails on a workflow step that runs anything but one task or names one the Taskfile does not have, on a task that holds a program rather than a few commands, and on a script a task runs that decides anything - so what CI does is written once, and what decides is Go with a test.
 ---
 
 A workflow that runs its own shell is a second copy of the build. It drifts from the Taskfile,
@@ -16,7 +16,7 @@ lines, and the scripts a task calls to being scripts - a program that *decides* 
 what it reads has an answer a test could hold, and belongs in Go.
 
 ```sh
-go tool taskgate [-allow file] [-max-lines n] [-max-script-lines n] [dir]
+go tool taskgate [-allow file] [-task path] [-max-lines n] [-max-script-lines n] [dir]
 ```
 
 ## What a step looks like
@@ -46,6 +46,29 @@ only CI does.
 A step passes when its `run:` is a single `task ...` or `go tool task ...` line, with whatever
 arguments and variables it is given. It fails on a second line, on `&&`, `||`, `;` or `|` after the
 task, and on output redirected with `>`.
+
+## The task is one the Taskfile has
+
+A step that is one task must name a task the Taskfile has. actionlint resolves a job's `needs:`
+and knows nothing of what its `run:` does, so a task renamed or deleted is otherwise a red run the
+next time the job runs - forty seconds into a job that was meant to prove something else, and on
+a schedule, perhaps days later.
+
+The names are Task's own answer: `taskgate` runs `task --list-all --json` in the directory and
+looks each name up among the tasks and their aliases, so includes, namespaces and aliases resolve
+as Task resolves them, and an `internal: true` task - which a workflow may not call - is missing.
+`-task` is the binary that answers; give it the one the Taskfile runs under, so the version that
+resolves a name is the one the workflow runs:
+
+```yaml title="Taskfile.yml"
+lint:workflows:
+  cmds:
+    - go tool taskgate -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
+```
+
+Every word after `task` is a name, up to a `--`, except a flag, a `VAR=value`, and what only a run
+knows: a `${{ }}` expression or a shell `$VARIABLE`. Words are split as a shell splits them, so
+`TITLE="unit (hermetic)"` is one variable.
 
 ## What a task looks like
 
@@ -97,7 +120,8 @@ hack/deadcode.sh  # 134 lines; owed to Go, with the allowlist it reads
 ```
 
 A step is `<file>/<job>/<step>`, the step by its `name`, else its `id`, else `#n`, its place in the
-job counting from 1; a composite action's has no job. A task's block is `<file>:<task>`, the
+job counting from 1; a composite action's has no job. A task a step names that the Taskfile has
+not is the step's key and the name, `<file>/<job>/<step>/<task>`. A task's block is `<file>:<task>`, the
 file's own `vars:` as `vars`. A script is its path. An exemption that matches nothing fails too,
 so the list only shrinks - and a block or a script listed is work owed with its reason, not a
 decision that it belongs where it is.

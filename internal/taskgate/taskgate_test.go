@@ -70,7 +70,7 @@ jobs:
 	require.NoError(t, err, "%s", out)
 	require.NoError(t, os.Remove(filepath.Join(repo, ".github/workflows/staged.yml")))
 
-	findings, err := taskgate.Check(repo, taskgate.Limits{})
+	findings, err := taskgate.Check(repo, taskgate.Limits{}, nil)
 	require.NoError(t, err)
 	type step struct {
 		key  string
@@ -93,4 +93,80 @@ jobs:
 		{".github/actions/setup/action.yml/Go", 5, "go version"},
 	}, got)
 	assert.Contains(t, findings[0].String(), "one `task <name>`")
+}
+
+// A step that is one task names tasks the Taskfile must have: each word after task that is not a
+// flag, a VAR=value or what follows `--`. A name the Taskfile lacks is Missing, keyed by its step
+// and the name; a ${{ }} only a run fills in is not looked up; and nil asks nothing of the names.
+func TestAStepRunsATaskTheTaskfileHas(t *testing.T) {
+	root := repo(t, map[string]string{
+		".github/workflows/ci.yml": `on: push
+jobs:
+  gate:
+    steps:
+      - run: task lint
+      - name: Test
+        run: go tool task test -v SHARD=1 TITLE="a (b) c" -- gone
+      - run: task build gone:too "$SHARD"
+      - run: task ${{ matrix.task }} VERSION=1
+      - run: task l
+`,
+		".github/actions/setup/action.yml": "runs:\n  using: composite\n  steps:\n    - name: Setup\n      run: task setup\n      shell: bash\n",
+	})
+	known := map[string]bool{"lint": true, "test": true, "build": true, "l": true}
+
+	findings, err := taskgate.Check(root, taskgate.Limits{}, known)
+	require.NoError(t, err)
+	var got []string
+	for _, f := range findings {
+		m, ok := f.(taskgate.Missing)
+		require.True(t, ok, "%v", f)
+		got = append(got, m.Key())
+	}
+	assert.ElementsMatch(t, []string{
+		".github/workflows/ci.yml/gate/#3/gone:too",
+		".github/actions/setup/action.yml/Setup/setup",
+	}, got)
+	require.NotEmpty(t, findings)
+	assert.Contains(t, findings[0].String(), "has no task")
+
+	none, err := taskgate.Check(root, taskgate.Limits{}, nil)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}
+
+// The names are Task's own answer: each task's name and its aliases as the binary given lists them
+// for the directory, asked not to write the checksums a listing otherwise leaves. A Task that
+// fails, or lists nothing, is an error rather than every step Missing.
+func TestTheNamesAreWhatTaskLists(t *testing.T) {
+	bin := t.TempDir()
+	stub := func(name, body string) string {
+		p := filepath.Join(bin, name)
+		require.NoError(t, os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o700)) //nolint:gosec // a stub run by the test
+		return p
+	}
+	args := filepath.Join(bin, "args")
+	lists := stub("task", `echo "$@" > `+args+`
+echo '{"tasks":[{"name":"lint","aliases":["l"]},{"name":"e2e:up","aliases":[]}]}'
+`)
+	got, err := taskgate.Tasks(lists, "/repo")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"lint": true, "l": true, "e2e:up": true}, got)
+	said, err := os.ReadFile(args) //nolint:gosec // the stub's own file
+	require.NoError(t, err)
+	assert.Equal(t, "--dir /repo --list-all --json --no-status\n", string(said))
+
+	for name, body := range map[string]string{
+		"fails": "echo 'no Taskfile found' >&2; exit 200\n",
+		"empty": `echo '{"tasks":[]}'` + "\n",
+		"prose": "echo hello\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := taskgate.Tasks(stub(name, body), "/repo")
+			require.Error(t, err)
+			if name == "fails" {
+				assert.Contains(t, err.Error(), "no Taskfile found")
+			}
+		})
+	}
 }

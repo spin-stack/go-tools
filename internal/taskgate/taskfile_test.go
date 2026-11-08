@@ -91,7 +91,7 @@ tasks:
           echo {{.ITEM}} three
 `,
 	})
-	findings, err := taskgate.Check(root, taskgate.Limits{Block: 2})
+	findings, err := taskgate.Check(root, taskgate.Limits{Block: 2}, nil)
 	require.NoError(t, err)
 	var got []taskgate.Block
 	for _, f := range findings {
@@ -108,7 +108,7 @@ tasks:
 	assert.Equal(t, "Taskfile.yml:over", got[1].Key())
 	assert.Equal(t, "Taskfile.yml:32: task over holds 3 lines of shell (limit 2): a task says which commands run, in what order; a program goes in a script it calls, or in Go when it decides anything", got[1].String())
 
-	findings, err = taskgate.Check(root, taskgate.Limits{})
+	findings, err = taskgate.Check(root, taskgate.Limits{}, nil)
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }
@@ -131,7 +131,7 @@ func TestEveryTaskfileIsRead(t *testing.T) {
 		"taskfiles/unincluded.yml": "tasks:\n  loose:\n    " + long,
 		"docs/taskfile.md":         "tasks:\n  prose:\n    " + long,
 	})
-	findings, err := taskgate.Check(root, taskgate.Limits{Block: 1})
+	findings, err := taskgate.Check(root, taskgate.Limits{Block: 1}, nil)
 	require.NoError(t, err)
 	var keys []string
 	for _, f := range findings {
@@ -190,7 +190,7 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 	out, err := exec.Command("git", "-C", root, "add", "hack/staged.sh").CombinedOutput()
 	require.NoError(t, err, "%s", out)
 	require.NoError(t, os.Remove(filepath.Join(root, "hack/staged.sh")))
-	findings, err := taskgate.Check(root, taskgate.Limits{Script: 2})
+	findings, err := taskgate.Check(root, taskgate.Limits{Script: 2}, nil)
 	require.NoError(t, err)
 	var got []taskgate.Script
 	for _, f := range findings {
@@ -222,7 +222,7 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 	}
 
 	// The limit is a count: one line over it is over.
-	findings, err = taskgate.Check(root, taskgate.Limits{Script: 1})
+	findings, err = taskgate.Check(root, taskgate.Limits{Script: 1}, nil)
 	require.NoError(t, err)
 	var files []string
 	for _, f := range findings {
@@ -243,7 +243,7 @@ func TestASubmoduleATaskNamesIsNoScript(t *testing.T) {
 	out, err := exec.Command("git", "-C", root, "update-index", "--add", "--cacheinfo",
 		"160000,5dc7533314b5ba7ec3875c30143dfe1aec644870,reference").CombinedOutput()
 	require.NoError(t, err, "%s", out)
-	findings, err := taskgate.Check(root, taskgate.Limits{Block: 12, Script: 40})
+	findings, err := taskgate.Check(root, taskgate.Limits{Block: 12, Script: 40}, nil)
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }

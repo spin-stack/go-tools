@@ -35,3 +35,41 @@ func Lines(text string, first int) []Line {
 	}
 	return out
 }
+
+// Words is a line's words as a shell splits them: on blanks outside quotes, each word with its
+// quotes taken off. What a shell expands - $VAR, $(...) - stays as written; a caller that cares
+// knows a word by its $.
+func Words(line string) []string {
+	var out []string
+	var cur strings.Builder
+	word, quote := false, rune(0)
+	escaped := false
+	for _, r := range line {
+		switch {
+		case escaped:
+			cur.WriteRune(r)
+			escaped = false
+		case r == '\\' && quote != '\'':
+			escaped, word = true, true
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote != 0:
+			cur.WriteRune(r)
+		case r == '\'' || r == '"':
+			quote, word = r, true
+		case r == ' ' || r == '\t':
+			if word {
+				out = append(out, cur.String())
+				cur.Reset()
+				word = false
+			}
+		default:
+			cur.WriteRune(r)
+			word = true
+		}
+	}
+	if word {
+		out = append(out, cur.String())
+	}
+	return out
+}

@@ -56,7 +56,7 @@ tasks:
       - go run ./cmd/refs
       - go run ./cmd/mutate -stale-exempts
       - go run ./cmd/sfw check
-      - go run ./cmd/taskgate -allow .github/taskgate-allow.txt
+      - go run ./cmd/taskgate -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
       # A vulnerability the code calls and that has a fix fails, the standard library's too: the
       # answer is the upgrade. It asks vuln.go.dev, so lint needs the network.
       - go run ./cmd/vulngate ./...
