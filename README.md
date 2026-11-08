@@ -20,6 +20,7 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`deadgate`](https://spin-stack.github.io/go-tools/deadgate/) | a function the binaries link and never call, or a package none imports, that neither the allowlist nor the pending list explains - and an entry in either that explains nothing |
 | [`proven`](https://spin-stack.github.io/go-tools/proven/) | what CI already proved about a commit, by its tree: the run that answers for it, what a run on main is of, whether it may be released, each test's time, which failed tests are flaky |
 | [`exposure`](https://spin-stack.github.io/go-tools/exposure/) | what a repository would show if made public: secrets and private values in every ref's commits, pull request heads included, and in its issues, comments and releases |
+| [`gencache`](https://spin-stack.github.io/go-tools/gencache/) | not a check: `go generate` with each mockgen directive answered from a cache when nothing its mock is made from has changed |
 | [`provenance`, `sbom`, `attestgate`, `trustroot`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM |
 
 ```sh
