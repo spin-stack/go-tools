@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -55,6 +56,23 @@ func (s Step) String() string {
 		s.File, s.Line, s.Step, s.Run)
 }
 
+// Missing is a step that is one task, naming a task the Taskfile does not have - or has as
+// internal, which a workflow may not call either. actionlint resolves a job's needs and knows
+// nothing of what its run line does, so a task renamed or deleted is otherwise a red run the next
+// time the job runs, forty seconds into a job that was meant to prove something else.
+type Missing struct {
+	Step
+	Task string
+}
+
+// Key is the step's, then the task it names: <file>/<job>/<step>/<task>.
+func (m Missing) Key() string { return m.Step.Key() + "/" + m.Task }
+
+func (m Missing) String() string {
+	return fmt.Sprintf("%s:%d: step %q runs task %s, and the Taskfile has no task %s a workflow may call",
+		m.File, m.Line, m.Step.Step, m.Task, m.Task)
+}
+
 // Limits is how much shell a task may hold before it is a program: Block lines in a Taskfile's
 // own cmd or sh, Script lines in a script a task runs. Lines a shell runs, as shell.Lines counts
 // them: comments and blank lines are not among them. Zero is no limit.
@@ -64,8 +82,10 @@ type Limits struct {
 }
 
 // Check is every finding under root: in the workflows and composite actions, the Taskfiles and
-// the scripts their tasks run - what git lists, tracked or untracked and not ignored.
-func Check(root string, limits Limits) ([]Finding, error) {
+// the scripts their tasks run - what git lists, tracked or untracked and not ignored. known is
+// every name the root's Taskfile answers to (Tasks); a step naming another is Missing. Nil asks
+// nothing of the names.
+func Check(root string, limits Limits, known map[string]bool) ([]Finding, error) {
 	out, err := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
 	if err != nil {
 		return nil, fmt.Errorf("taskgate: listing %s: %w", root, err)
@@ -87,12 +107,17 @@ func Check(root string, limits Limits) ([]Finding, error) {
 		if err != nil {
 			return nil, err
 		}
-		found, err := steps(rel, raw)
+		found, calls, err := steps(rel, raw)
 		if err != nil {
 			return nil, fmt.Errorf("taskgate: %s: %w", rel, err)
 		}
 		for _, f := range found {
 			findings = append(findings, f)
+		}
+		for _, c := range calls {
+			if known != nil && !known[c.Task] {
+				findings = append(findings, c)
+			}
 		}
 	}
 	found, err := tasks(root, taskfiles, listed, limits)
@@ -122,22 +147,26 @@ func workflow(rel string) bool {
 	return yml && (path.Dir(rel) == ".github/workflows" || strings.HasPrefix(rel, ".github/actions/") && name == "action")
 }
 
-// steps is the findings of one file: a workflow's jobs' steps, or a composite action's.
-func steps(rel string, raw []byte) ([]Step, error) {
+// steps is the findings of one file - a workflow's jobs' steps, or a composite action's - and
+// each task a step that is one task names, for Check to look up.
+func steps(rel string, raw []byte) ([]Step, []Missing, error) {
 	top, err := document(raw)
 	if err != nil || top == nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []Step
+	var calls []Missing
 	if runs := field(top, "runs"); runs != nil {
-		out = append(out, judge(rel, "", field(runs, "steps"))...)
+		found, named := judge(rel, "", field(runs, "steps"))
+		out, calls = append(out, found...), append(calls, named...)
 	}
 	if jobs := field(top, "jobs"); jobs != nil && jobs.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(jobs.Content); i += 2 {
-			out = append(out, judge(rel, jobs.Content[i].Value, field(jobs.Content[i+1], "steps"))...)
+			found, named := judge(rel, jobs.Content[i].Value, field(jobs.Content[i+1], "steps"))
+			out, calls = append(out, found...), append(calls, named...)
 		}
 	}
-	return out, nil
+	return out, calls, nil
 }
 
 // document is the top node of a YAML file, or nil for an empty one, which holds nothing.
@@ -155,19 +184,16 @@ func document(raw []byte) (*yaml.Node, error) {
 	return doc.Content[0], nil
 }
 
-// judge is the findings of one job's steps.
-func judge(rel, job string, steps *yaml.Node) []Step {
+// judge is the findings of one job's steps, and the tasks its steps that are one task name.
+func judge(rel, job string, steps *yaml.Node) ([]Step, []Missing) {
 	if steps == nil || steps.Kind != yaml.SequenceNode {
-		return nil
+		return nil, nil
 	}
 	var out []Step
+	var calls []Missing
 	for i, step := range steps.Content {
 		run := field(step, "run")
 		if run == nil {
-			continue
-		}
-		lines := shell.Lines(run.Value, firstLine(run))
-		if len(lines) == 1 && isTask(lines[0].Text) {
 			continue
 		}
 		name := "#" + strconv.Itoa(i+1)
@@ -177,14 +203,44 @@ func judge(rel, job string, steps *yaml.Node) []Step {
 		if n := field(step, "name"); n != nil {
 			name = n.Value
 		}
-		said := strings.TrimSpace(run.Value)
+		at := Step{File: rel, Job: job, Step: name, Line: firstLine(run)}
+		lines := shell.Lines(run.Value, firstLine(run))
+		if len(lines) == 1 && isTask(lines[0].Text) {
+			at.Run = lines[0].Text
+			for _, t := range taskNames(lines[0].Text) {
+				calls = append(calls, Missing{Step: at, Task: t})
+			}
+			continue
+		}
+		at.Run = strings.TrimSpace(run.Value)
 		if len(lines) > 0 {
-			said = lines[0].Text
+			at.Run = lines[0].Text
 			if len(lines) > 1 {
-				said += " ..."
+				at.Run += " ..."
 			}
 		}
-		out = append(out, Step{File: rel, Job: job, Step: name, Line: firstLine(run), Run: said})
+		out = append(out, at)
+	}
+	return out, calls
+}
+
+// expression is what GitHub fills in before the shell sees it, one word however it is spaced.
+var expression = regexp.MustCompile(`\$\{\{.*?\}\}`)
+
+// taskNames is the tasks a line isTask accepted runs: its words after task, up to a `--`, that are
+// not a flag, not a VAR=value, and not what the workflow or the shell fills in - a ${{ }}, a $X.
+func taskNames(line string) []string {
+	// An expression becomes $, which the shell would expand too: either way only a run knows it.
+	words := shell.Words(expression.ReplaceAllString(strings.TrimPrefix(line, "go tool "), "$"))[1:]
+	var out []string
+	for _, w := range words {
+		if w == "--" {
+			break
+		}
+		if strings.HasPrefix(w, "-") || strings.Contains(w, "=") || strings.HasPrefix(w, "$") {
+			continue
+		}
+		out = append(out, w)
 	}
 	return out
 }

@@ -3,11 +3,15 @@
 // CI does is written once, in the Taskfile, a developer runs the same thing, and what decides
 // anything is Go with a test:
 //
-//	go tool taskgate [-allow file] [-max-lines n] [-max-script-lines n] [dir]
+//	go tool taskgate [-allow file] [-task path] [-max-lines n] [-max-script-lines n] [dir]
 //
 // -allow names what is allowed on purpose, one `<key>  # why` a line: a step as
 // `<file>/<job>/<step>` (a composite action's without the job), a Taskfile's block as
-// `<file>:<task>`, a script by its path. A line that matches nothing fails too.
+// `<file>:<task>`, a script by its path, a task a step names that the Taskfile has not as
+// `<file>/<job>/<step>/<task>`. A line that matches nothing fails too.
+//
+// -task is the Task binary that resolves the names a step runs: the one the Taskfile runs under,
+// {{.TASK_EXE}}, so the version that answers is the one a workflow runs.
 package main
 
 import (
@@ -21,6 +25,7 @@ import (
 
 func main() {
 	allowPath := flag.String("allow", "", "what is allowed on purpose, `<key>  # why` a line (none by default)")
+	task := flag.String("task", "task", "the Task binary that lists the Taskfile's tasks")
 	maxLines := flag.Int("max-lines", 12, "lines of shell a task's own cmd or sh may hold; 0 is any")
 	maxScript := flag.Int("max-script-lines", 40, "lines of shell a script a task runs may hold; 0 is any")
 	flag.Parse()
@@ -33,7 +38,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "taskgate: %v\n", err)
 		os.Exit(2)
 	}
-	findings, err := taskgate.Check(root, taskgate.Limits{Block: *maxLines, Script: *maxScript})
+	known, err := taskgate.Tasks(*task, root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	findings, err := taskgate.Check(root, taskgate.Limits{Block: *maxLines, Script: *maxScript}, known)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -49,5 +59,5 @@ func main() {
 		fmt.Printf("taskgate: %d finding(s), %d stale exemption(s)\n", len(unexplained), len(stale))
 		os.Exit(1)
 	}
-	fmt.Printf("OK: every workflow step runs a task, and every task is commands (%d exempt).\n", len(allowed))
+	fmt.Printf("OK: every workflow step runs a task the Taskfile has, and every task is commands (%d exempt).\n", len(allowed))
 }
