@@ -98,19 +98,7 @@ func run(ctx context.Context, argv []string) error {
 	case "version", "ref", "url":
 		return one(os.Stdout, v, cmd, names)
 	case "fetch":
-		if len(names) != 2 {
-			return errors.New("fetch: <name> <dir>")
-		}
-		e, err := v.Get(names[0])
-		if err != nil {
-			return err
-		}
-		file, err := upstream.PinnedFile(ctx, e, names[1])
-		if err != nil {
-			return err
-		}
-		fmt.Println(file)
-		return nil
+		return fetch(ctx, os.Stdout, v, names)
 	case "newer":
 		return newer(os.Stdout, v, names)
 	case "check":
@@ -147,6 +135,23 @@ func one(w io.Writer, v *versions.Versions, cmd string, names []string) error {
 		return fmt.Errorf("%s: %s is a %s", cmd, e.Name, e.Kind)
 	}
 	_, err = fmt.Fprintln(w, out)
+	return err
+}
+
+// fetch puts an entry's download in a directory, only as the bytes it pins, and prints its path.
+func fetch(ctx context.Context, w io.Writer, v *versions.Versions, names []string) error {
+	if len(names) != 2 {
+		return errors.New("fetch: <name> <dir>")
+	}
+	e, err := v.Get(names[0])
+	if err != nil {
+		return err
+	}
+	file, err := upstream.PinnedFile(ctx, e, names[1])
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, file)
 	return err
 }
 
