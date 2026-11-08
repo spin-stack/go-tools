@@ -24,4 +24,5 @@ export const sidebar = [
 			{ label: 'exposure', slug: 'exposure' },
 		],
 	},
+	{ label: 'Doing less work', items: [{ label: 'gencache', slug: 'gencache' }] },
 ];
