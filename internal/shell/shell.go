@@ -51,10 +51,12 @@ func Words(line string) []string {
 			escaped = false
 		case r == '\\' && quote != '\'':
 			escaped, word = true, true
-		case quote != 0 && r == quote:
-			quote = 0
 		case quote != 0:
-			cur.WriteRune(r)
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
 		case r == '\'' || r == '"':
 			quote, word = r, true
 		case r == ' ' || r == '\t':
