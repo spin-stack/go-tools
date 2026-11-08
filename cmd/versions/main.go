@@ -1,6 +1,6 @@
 // Command versions reads and moves what versions.yaml pins: it hands the Dockerfiles their
 // build arguments, tells the Taskfiles a version or an image's reference, says what is behind,
-// and rewrites one entry for a bump.
+// fetches a download as the bytes it pins, and rewrites one entry for a bump.
 //
 // A repository runs it as a Go tool (`tool github.com/spin-stack/go-tools/cmd/versions` in its
 // go.mod, `go tool versions ...`): at build time, from a checkout, at the version its go.mod
@@ -46,6 +46,7 @@ Usage:
   versions version <name>             one entry's version
   versions ref     <name>             an image's reference, by its digest
   versions url     <name>             a download's URL, at its version
+  versions fetch   <name> <dir>       a download in dir, only as the bytes it pins, and its path
   versions newer   <name> <version>   <version> when it is newer than the pin, nothing when not
   versions check                      what is behind its upstream; exits 1 when anything is
   versions bump    <name> [version]   pin an entry at a version, the newest by default
@@ -96,6 +97,20 @@ func run(ctx context.Context, argv []string) error {
 		return nil
 	case "version", "ref", "url":
 		return one(os.Stdout, v, cmd, names)
+	case "fetch":
+		if len(names) != 2 {
+			return errors.New("fetch: <name> <dir>")
+		}
+		e, err := v.Get(names[0])
+		if err != nil {
+			return err
+		}
+		file, err := upstream.PinnedFile(ctx, e, names[1])
+		if err != nil {
+			return err
+		}
+		fmt.Println(file)
+		return nil
 	case "newer":
 		return newer(os.Stdout, v, names)
 	case "check":
