@@ -13,8 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -179,6 +181,72 @@ func Pinned(ctx context.Context, e versions.Entry, limit int64) ([]byte, error) 
 	return raw, nil
 }
 
+// PinnedFile is e's download as a file in dir, named as its URL names it, and its path: the file
+// already there when its SHA-256 is e's pin, and otherwise downloaded again and kept only when it
+// is. A file there is checked every time, not only after a download, since a cached file is the
+// one that can have been replaced since - and one that is not the pin is replaced, not trusted
+// or left for a person to remove. What is downloaded goes to a file of its own beside it and is
+// renamed into place once it is the pin, so a download cut short is never the file.
+func PinnedFile(ctx context.Context, e versions.Entry, dir string) (string, error) {
+	if e.Kind != versions.Download {
+		return "", fmt.Errorf("versions: %s is a %s, not a download", e.Name, e.Kind)
+	}
+	file := filepath.Join(dir, path.Base(e.URL()))
+	if got, err := fileSum(file); err == nil && got == e.Pin {
+		return file, nil
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", fmt.Errorf("versions: %w", err)
+	}
+	part, err := os.CreateTemp(dir, path.Base(file)+".*.part")
+	if err != nil {
+		return "", fmt.Errorf("versions: %w", err)
+	}
+	defer func() { _ = os.Remove(part.Name()) }() // gone once renamed; otherwise what was cut short
+	got, err := download(ctx, e.URL(), part)
+	if cerr := part.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", fmt.Errorf("versions: %s: %w", e.Name, err)
+	}
+	if got != e.Pin {
+		return "", fmt.Errorf("versions: %s is not what versions.yaml pins: %s's SHA-256 is %s", e.Name, e.URL(), got)
+	}
+	if err := os.Rename(part.Name(), file); err != nil {
+		return "", fmt.Errorf("versions: %w", err)
+	}
+	return file, nil
+}
+
+// download writes url's body to w and answers its SHA-256.
+func download(ctx context.Context, url string, w io.Writer) (string, error) {
+	body, err := fetch.Get(ctx, url)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = body.Close() }() // read-only
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(w, h), body); err != nil {
+		return "", fmt.Errorf("reading %s: %w", url, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// fileSum is the SHA-256 of the file at p.
+func fileSum(p string) (string, error) {
+	f, err := os.Open(p) //nolint:gosec // the cache's own file
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }() // read-only
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 func run(ctx context.Context, name string, args ...string) (string, error) {
 	var stderr strings.Builder
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -200,16 +268,11 @@ func getJSON(ctx context.Context, url string, into any) error {
 }
 
 func sha256Of(ctx context.Context, url string) (string, error) {
-	body, err := fetch.Get(ctx, url)
+	sum, err := download(ctx, url, io.Discard)
 	if err != nil {
 		return "", fmt.Errorf("versions: %w", err)
 	}
-	defer func() { _ = body.Close() }() // read-only
-	h := sha256.New()
-	if _, err := io.Copy(h, body); err != nil {
-		return "", fmt.Errorf("versions: reading %s: %w", url, err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return sum, nil
 }
 
 func githubRelease(ctx context.Context, repo string) (string, error) {

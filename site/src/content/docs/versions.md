@@ -49,6 +49,7 @@ go tool versions args debian kernel   # --build-arg DEBIAN_IMAGE=... --build-arg
 go tool versions env  debian kernel   # the same, as KEY=value lines
 go tool versions ref  debian          # debian:trixie@sha256:...
 go tool versions url  kernel          # the download's URL at its version
+go tool versions fetch kernel _cache  # _cache/linux-7.2.8.tar.xz, only as the bytes it pins
 go tool versions version kernel       # 7.2.8
 go tool versions newer kernel 7.2.9   # 7.2.9: newer than the pin; nothing when not, an error when not of its form
 ```
@@ -70,6 +71,21 @@ tasks:
     cmds:
       - docker build $({{.VERSIONS}} args debian kernel) .
 ```
+
+A download a task unpacks is `fetch`'s: it puts the file in the directory, named as its URL names
+it, and prints the path. A file already there is checked every time and kept when it is the pin;
+one that is not - cut short, or replaced since - is downloaded again, and a download that is not
+the pin is refused and leaves nothing behind. So a cache directory needs no rule of its own:
+
+```yaml title="Taskfile.yml"
+tasks:
+  kernel:
+    cmds:
+      - tar -xJf "$({{.VERSIONS}} fetch kernel _cache)" -C _build
+```
+
+Inside `$( )` a refusal is only the command's: in a script, `set -e` sees it when the path is
+assigned on a line of its own, `file=$(go tool versions fetch kernel _cache)`.
 
 ## Keeping up
 

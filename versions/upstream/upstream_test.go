@@ -7,11 +7,17 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/spin-stack/go-tools/versions"
 )
@@ -221,4 +227,68 @@ func TestAKernelSaysKernelOrgDidNotAnswer(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("%v, want kernel.org's request's error", err)
 	}
+}
+
+// A pinned file is the URL's file in the directory, kept only as the bytes its entry pins: one
+// already there and pinned is answered without a download, one there and not pinned is downloaded
+// again, and a download that is not the pin leaves neither the file nor what it was written to.
+func TestAPinnedFileIsOnlyThePinnedBytes(t *testing.T) {
+	var served atomic.Int32
+	body := "the package"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		served.Add(1)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	sumOf := func(s string) string {
+		sum := sha256.Sum256([]byte(s))
+		return hex.EncodeToString(sum[:])
+	}
+	for _, tc := range []struct {
+		name      string
+		there     string // what the directory holds before, if anything
+		pin       string
+		downloads int32
+		wantErr   string
+	}{
+		{name: "fresh", pin: sumOf(body), downloads: 1},
+		{name: "cached", there: body, pin: sumOf(body), downloads: 0},
+		{name: "replaced", there: "something else", pin: sumOf(body), downloads: 1},
+		{name: "unpinned", pin: sumOf("another package"), downloads: 1, wantErr: "unpinned is not what versions.yaml pins"},
+		{name: "unpinned-there", there: "another package", pin: sumOf("a third"), downloads: 1, wantErr: "is not what versions.yaml pins"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "cache")
+			file := filepath.Join(dir, "pkg-1.2.3.tgz")
+			if tc.there != "" {
+				require.NoError(t, os.MkdirAll(dir, 0o750))
+				require.NoError(t, os.WriteFile(file, []byte(tc.there), 0o600))
+			}
+			served.Store(0)
+			e := versions.Entry{Name: tc.name, Kind: versions.Download, Source: srv.URL + "/pkg-{version}.tgz", Version: "1.2.3", Pin: tc.pin}
+
+			got, err := PinnedFile(t.Context(), e, dir)
+			assert.Equal(t, tc.downloads, served.Load(), "downloads")
+			left, _ := filepath.Glob(filepath.Join(dir, "*.part"))
+			assert.Empty(t, left, "a download's own file outlives it")
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				raw, rerr := os.ReadFile(file) //nolint:gosec // the test's own file
+				if tc.there == "" {
+					assert.ErrorIs(t, rerr, os.ErrNotExist, "a refused download is the file")
+				} else {
+					assert.Equal(t, tc.there, string(raw), "a refused download replaced the file")
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, file, got)
+			raw, err := os.ReadFile(got) //nolint:gosec // the test's own file
+			require.NoError(t, err)
+			assert.Equal(t, body, string(raw))
+		})
+	}
+
+	_, err := PinnedFile(t.Context(), versions.Entry{Name: "go", Kind: versions.Image}, t.TempDir())
+	require.ErrorContains(t, err, "go is a image, not a download")
 }
