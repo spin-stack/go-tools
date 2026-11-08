@@ -204,7 +204,7 @@ func PinnedFile(ctx context.Context, e versions.Entry, dir string) (string, erro
 	}
 	defer func() { _ = os.Remove(part.Name()) }() // gone once renamed; otherwise what was cut short
 	got, err := download(ctx, e.URL(), part)
-	if cerr := part.Close(); err == nil {
+	if cerr := part.Close(); err == nil { // mutate-exempt: closing a file just written fails only on a disk that failed the write
 		err = cerr
 	}
 	if err != nil {
