@@ -1,0 +1,64 @@
+# The gate on every change, as the site's CI page shows it: the tasks a developer runs, one a step.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    # A ceiling: a test that deadlocks would otherwise hold the runner for six hours.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # mutate diffs against the branch point, which a shallow clone does not have.
+          fetch-depth: 0
+
+      # Go's module and build caches. Task is a tool of go.mod's, so it comes with them.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # gencache's mocks and golangci-lint's analysis, each keyed by content inside, so any older
+      # copy is safe to start from: saved under the commit, restored from the newest - main's for
+      # a pull request.
+      - name: Mocks and lint findings, from the last run
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-tools/gencache
+            _output/golangci-lint
+          key: answers-${{ github.sha }}
+          restore-keys: answers-
+
+      # The edits mutate saw refused, for this pull request's next run only (task mutate says why).
+      - name: Refused edits, from this pull request's last run
+        if: github.event_name == 'pull_request'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: _output/mutate
+          key: mutate-${{ github.head_ref }}-${{ github.sha }}
+          restore-keys: mutate-${{ github.head_ref }}-
+
+      - name: Generated code
+        run: go tool task generate
+
+      - name: Lint
+        run: go tool task lint
+
+      - name: Test
+        run: go tool task test
+
+      # After the tests are green, what they would have refused.
+      - name: What this change broke, and whether a test noticed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: go tool task mutate
