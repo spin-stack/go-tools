@@ -3,8 +3,10 @@ package gencache
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -97,8 +99,19 @@ func main() {
 // keyed is how many of the fixture's directives, without tags, gencache keys.
 const keyed = 4
 
+// mockgenFetched puts mockgen's modules in the module cache, through this module's own go.mod
+// and whatever proxy the machine uses: building this module's tests fetches none of a tool's,
+// and the fixtures run with the proxy off. A warm cache makes it a no-op.
+var mockgenFetched = sync.OnceValues(func() ([]byte, error) {
+	cmd := exec.Command("go", "tool", "-n", "mockgen")
+	cmd.Dir = filepath.Join("..", "..")
+	return cmd.CombinedOutput()
+})
+
 func newModule(t *testing.T, extra map[string]string) string {
 	t.Helper()
+	out, err := mockgenFetched()
+	require.NoError(t, err, string(out))
 	dir := t.TempDir()
 	mod, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
 	require.NoError(t, err)
