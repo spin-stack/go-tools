@@ -206,7 +206,6 @@ func judge(rel, job string, steps *yaml.Node) ([]Step, []Missing) {
 		at := Step{File: rel, Job: job, Step: name, Line: firstLine(run)}
 		lines := shell.Lines(run.Value, firstLine(run))
 		if len(lines) == 1 && isTask(lines[0].Text) {
-			at.Run = lines[0].Text
 			for _, t := range taskNames(lines[0].Text) {
 				calls = append(calls, Missing{Step: at, Task: t})
 			}

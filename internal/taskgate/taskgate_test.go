@@ -50,6 +50,7 @@ jobs:
       - run: |
           # the pages
           make html
+      - run: "# a comment and nothing else"
 `)
 	write(".github/workflows/release.yaml", "on: workflow_call\njobs:\n  publish:\n    steps:\n      - name: Push\n        run: >\n          docker push x\n")
 	write(".github/workflows/empty.yml", "")
@@ -89,6 +90,8 @@ jobs:
 		{".github/workflows/ci.yml/gate/#9", 20, "task mutate > out.txt"},
 		{".github/workflows/ci.yml/gate/#10", 21, "go vet ./..."},
 		{".github/workflows/ci.yml/docs/#1", 27, "make html"},
+		// Nothing a shell runs: the finding says what the step holds, as written.
+		{".github/workflows/ci.yml/docs/#2", 29, "# a comment and nothing else"},
 		{".github/workflows/release.yaml/publish/Push", 7, "docker push x"},
 		{".github/actions/setup/action.yml/Go", 5, "go version"},
 	}, got)
