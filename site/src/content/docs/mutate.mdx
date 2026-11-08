@@ -143,33 +143,9 @@ Add it to the repository's `go.mod` as a tool:
 go get -tool github.com/spin-stack/go-tools/cmd/mutate
 ```
 
-A Taskfile entry, and the step in CI that runs it after the tests pass. On a pull request it diffs
-against the target branch, and on a push against the commit before it (this is go-tools' own
-workflow):
-
-```yaml title="Taskfile.yml"
-mutate:
-  vars:
-    BASE: '{{.BASE | default "origin/main"}}'
-  cmds:
-    - go tool mutate -base {{.BASE}} -max 200
-```
-
-```yaml title=".github/workflows/ci.yml"
-- uses: actions/checkout@...
-  with:
-    fetch-depth: 0 # the diff needs the branch point
-
-- name: What this change broke, and whether a test noticed
-  env:
-    EVENT: ${{ github.event_name }}
-    BASE_REF: ${{ github.base_ref }}
-    BEFORE: ${{ github.event.before }}
-  run: |
-    if [ "$EVENT" = "pull_request" ]; then base="origin/$BASE_REF"; else base="$BEFORE"; fi
-    git rev-parse --verify "$base^{commit}" >/dev/null 2>&1 || base=HEAD~1
-    task mutate BASE="$base"
-```
+In CI it runs after the tests pass, against what a pull request merges into or, on a push, what
+the branch was before it. [GitHub Actions](../github-actions/) has the task and the step, and the
+cache that keeps a pull request's refused edits for its next run.
 
 | flag | default | |
 |---|---|---|

@@ -70,9 +70,11 @@ tasks:
       # -shellcheck= because actionlint runs whatever shellcheck is on PATH: a runner has one and
       # a laptop may not, and a gate whose answer depends on the machine is not a gate.
       - go run github.com/rhysd/actionlint/cmd/actionlint@$({{.VERSIONS}} version actionlint) -shellcheck=
+      # The site's CI page shows this workflow for a repository to copy.
+      - go run github.com/rhysd/actionlint/cmd/actionlint@$({{.VERSIONS}} version actionlint) -shellcheck= site/examples/github/.github/workflows/*.yml
       # A tag is whatever its owner points it at; the comment is the version Dependabot moves.
       - cmd: |
-          if grep -rnE '^\s*(- )?uses: [^./][^ ]*@' .github | grep -vE '@[0-9a-f]{40} # v[0-9]'; then
+          if grep -rnE '^\s*(- )?uses: [^./][^ ]*@' .github site/examples/github/.github | grep -vE '@[0-9a-f]{40} # v[0-9]'; then
             echo "an action above is used by a tag its owner can move: pin it by commit SHA, with '# vX.Y.Z' after it"
             exit 1
           fi

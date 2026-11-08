@@ -27,7 +27,8 @@ updates:
 
   # The workflows' `uses:`, each pinned by commit with its version in a comment for this to move.
   - package-ecosystem: github-actions
-    directory: /
+    # The site's CI example too, so what it tells a repository to pin is current.
+    directories: [/, /site/examples/github]
     schedule:
       interval: weekly
       day: monday

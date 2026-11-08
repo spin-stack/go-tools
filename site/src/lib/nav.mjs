@@ -1,6 +1,12 @@
 // The sidebar: a page not listed here is reachable only by its address.
 export const sidebar = [
-	{ label: 'Start here', items: [{ label: 'Getting started', slug: 'start' }] },
+	{
+		label: 'Start here',
+		items: [
+			{ label: 'Getting started', slug: 'start' },
+			{ label: 'GitHub Actions', slug: 'github-actions' },
+		],
+	},
 	{
 		label: 'Gates for tests and code',
 		items: [

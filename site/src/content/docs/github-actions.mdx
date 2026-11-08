@@ -1,0 +1,66 @@
+---
+title: GitHub Actions
+description: One workflow that runs every go-tools gate as a task, keeps what each one already answered between runs, and asks mutate about the change.
+---
+
+import { Code } from '@astrojs/starlight/components';
+import taskfile from '../../../examples/github/Taskfile.yml?raw';
+import workflow from '../../../examples/github/.github/workflows/ci.yml?raw';
+
+A repository that takes go-tools from its `go.mod` needs one job in CI: the tasks a developer
+runs, one a step, so what CI does and what a laptop does are the same commands. The two files
+below are that repository's. They are files in go-tools, not copies: a test fails when
+[taskgate](../taskgate/) would refuse them, actionlint reads the workflow on every change, and
+Dependabot keeps its pins current.
+
+<Code code={taskfile} lang="yaml" title="Taskfile.yml" />
+
+<Code code={workflow} lang="yaml" title=".github/workflows/ci.yml" />
+
+Add the tools it runs, Task among them:
+
+```sh
+go get -tool github.com/go-task/task/v3/cmd/task
+for t in ctxlife gencache mutate refs sfw taskgate testquality versions vulngate; do
+  go get -tool github.com/spin-stack/go-tools/cmd/$t
+done
+```
+
+## Why each part is there
+
+**The whole history** (`fetch-depth: 0`). [mutate](../mutate/) breaks what the change touched,
+and finds it by diffing against the branch point, which a shallow clone does not have.
+
+**Task from `go.mod`.** `go tool task` is the version the module pins, built from Go's caches,
+which setup-go restores. Nothing else is installed.
+
+**What a run already answered.** A runner starts empty, and setup-go keeps only Go's module and
+build caches, so without the cache steps every run redoes work no change asked for:
+
+- [gencache](../gencache/) keys each mock by what it is made from, and golangci-lint each
+  package's analysis by its content. An entry that no longer matches is never used, so any older
+  copy is safe: they are saved under the commit and restored from the newest, which for a pull
+  request is main's.
+- mutate's `-cache` keeps the edits the tests refused. Its key does not cover a file a test
+  reads from outside its package, so it is only for the same change asked again: the Taskfile
+  passes it on a pull request alone, and the workflow keeps it under that pull request's branch.
+
+**Generated code first.** gencache writes back a cached mock whose file differs, so
+`git diff --exit-code` after it still fails on generated code nobody regenerated.
+
+**Lint, then the tests, then mutate.** Lint is the quick gates: [ctxlife](../ctxlife/),
+[testquality](../testquality/), [refs](../refs/), mutate's `-stale-exempts`, [sfw](../sfw/),
+[taskgate](../taskgate/) and [vulngate](../vulngate/). mutate asks the tests about the change,
+so it runs once they pass. Its base is what a pull request merges into, or on a push what the
+branch was before it (`BEFORE`), or the commit before when that is not in the clone, a branch's
+first push.
+
+## What else goes in CI
+
+- **A release**: provenance and an SBOM for what it publishes, and a gate that fails on a
+  workflow publishing without them. [Provenance and SBOMs](../supply-chain/) says what each
+  writes and what attestgate refuses.
+- **A commit CI already answered**: [proven](../proven/) finds the run that passed for the same
+  tree, so a rebase that changed nothing is not run again.
+- **Pins**: [versions](../versions/) says which are behind; its test fails on a pin written
+  outside `versions.yaml`.

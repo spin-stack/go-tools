@@ -1,0 +1,54 @@
+# A repository that runs go-tools from its go.mod, as the site's CI page shows it. CI runs these
+# tasks and nothing else, so a developer runs exactly what CI does. TestTheSitesCIExamplePasses
+# holds it to taskgate, and task lint:workflows its workflow to actionlint.
+version: '3'
+
+tasks:
+  generate:
+    desc: The generated code, and a failure when what is committed is not it.
+    cmds:
+      # go generate, with each mockgen directive answered from gencache's cache when nothing its
+      # mock is made from changed.
+      - go tool gencache ./...
+      - git diff --exit-code
+
+  lint:
+    desc: golangci-lint at the version versions.yaml pins, and go-tools' gates.
+    cmds:
+      # Its cache in the tree, where CI's actions/cache can keep it.
+      - mkdir -p _output/golangci-lint
+      - >-
+        docker run --rm -u "$(id -u):$(id -g)" -v {{.ROOT_DIR}}:/work -w /work
+        -v "$(go env GOMODCACHE)":/go/pkg/mod -v "$(go env GOCACHE)":/cache/go-build
+        -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/cache/go-build -e GOLANGCI_LINT_CACHE=/work/_output/golangci-lint
+        -e HOME=/tmp -e GOTOOLCHAIN=local
+        $(go tool versions ref golangci-lint) golangci-lint run ./...
+      - go tool ctxlife
+      - go tool testquality ./...
+      - go tool refs
+      - go tool mutate -stale-exempts
+      - go tool sfw check
+      - go tool taskgate
+      - go tool vulngate ./...
+
+  test:
+    desc: The tests, under the race detector, with their coverage in coverage.out.
+    cmds:
+      - go test -race -coverprofile=coverage.out ./...
+
+  mutate:
+    desc: Break what the change touched and fail on an edit no test refuses (BASE=origin/main by hand).
+    cmds:
+      # A pull request against what it merges into; a push against what the branch was before it,
+      # or the commit before when that is not in the clone. Only a pull request keeps the edits
+      # already refused (-cache), for its own next run: the cache's key does not cover a file a
+      # test reads from outside its package, so a run from scratch asks everything.
+      - |
+        base="{{.BASE}}" cache=""
+        if [ -z "$base" ] && [ "${GITHUB_EVENT_NAME:-}" = pull_request ]; then
+          base="origin/$GITHUB_BASE_REF" cache="-cache _output/mutate"
+        elif [ -z "$base" ] && [ -n "${GITHUB_ACTIONS:-}" ]; then
+          base="${BEFORE:-}"
+          git rev-parse --verify -q "$base^{commit}" >/dev/null || base=HEAD~1
+        fi
+        go tool mutate -base "${base:-origin/main}" -max 200 $cache

@@ -25,40 +25,9 @@ go get github.com/spin-stack/go-tools@<commit>
 ## Run them where developers already run checks
 
 The spin-stack repositories put the quick gates in `task lint` and the test-driven ones after
-`task test`, so CI runs exactly what a developer runs locally:
-
-```yaml title="Taskfile.yml"
-tasks:
-  lint:
-    cmds:
-      - golangci-lint run ./...
-      - go tool ctxlife
-      - go tool testquality ./...
-      - go tool refs
-      - go tool mutate -stale-exempts
-      - go tool sfw check
-      - go tool taskgate
-      - go tool vulngate ./...
-
-  mutate:
-    vars:
-      BASE: '{{.BASE | default "origin/main"}}'
-    cmds:
-      - go tool mutate -base {{.BASE}} -max 200
-```
-
-```yaml title=".github/workflows/ci.yml"
-steps:
-  - uses: actions/checkout@...
-    with:
-      fetch-depth: 0 # mutate diffs against the branch point
-  - run: task lint
-  - run: task test
-  - run: task mutate BASE="origin/${{ github.base_ref }}"
-```
-
-The [mutate page](../mutate/#running-it) has the full CI step, which also handles pushes
-to `main`.
+`task test`, so CI runs exactly what a developer runs locally. [GitHub Actions](../github-actions/)
+has a repository's whole Taskfile and workflow: every gate, the caches that keep what a run
+already answered, and mutate's base on a pull request and on a push.
 
 ## Which tool for which problem
 
