@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,6 +73,9 @@ func TestTheCommandsAnswerFromTheFile(t *testing.T) {
 		"bump of nothing": {argv: []string{"bump", "-file", file}, fails: true},
 		"bump of three":   {argv: []string{"bump", "-file", file, "a", "b", "c"}, fails: true},
 		"bump of none":    {argv: []string{"bump", "-file", file, "qemu"}, fails: true},
+		"fetch of one":    {argv: []string{"fetch", "-file", file, "kernel"}, fails: true},
+		"fetch of three":  {argv: []string{"fetch", "-file", file, "kernel", "a", "b"}, fails: true},
+		"fetch of none":   {argv: []string{"fetch", "-file", file, "qemu", t.TempDir()}, fails: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var err error
@@ -120,4 +127,45 @@ func TestOneEntrySaysWhatItsKindHas(t *testing.T) {
 	}
 	require.Error(t, one(&bytes.Buffer{}, v, "version", nil))
 	require.Error(t, one(&bytes.Buffer{}, v, "version", []string{"kernel", "alpine"}))
+}
+
+// fetch puts the entry's download in the directory it is given and prints where; a download that
+// is not the pin prints nothing and fails.
+func TestFetchPrintsWhereThePinnedFileIs(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("the package"))
+	}))
+	t.Cleanup(srv.Close)
+	was := http.DefaultClient
+	http.DefaultClient = srv.Client()
+	t.Cleanup(func() { http.DefaultClient = was })
+	sum := sha256.Sum256([]byte("the package"))
+	file := filepath.Join(t.TempDir(), "versions.yaml")
+	require.NoError(t, os.WriteFile(file, []byte(`
+- name: pkg
+  kind: download
+  source: `+srv.URL+`/pkg-{version}.tgz
+  version: 1.2.3
+  pin: `+hex.EncodeToString(sum[:])+`
+  track: none
+- name: other
+  kind: download
+  source: `+srv.URL+`/other-{version}.tgz
+  version: 1.2.3
+  pin: 1111111111111111111111111111111111111111111111111111111111111111
+  track: none
+`), 0o600))
+	dir := t.TempDir()
+
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"fetch", "-file", file, "pkg", dir}) })
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "pkg-1.2.3.tgz")+"\n", out)
+	raw, err := os.ReadFile(filepath.Join(dir, "pkg-1.2.3.tgz")) //nolint:gosec // the test's own file
+	require.NoError(t, err)
+	assert.Equal(t, "the package", string(raw))
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"fetch", "-file", file, "other", dir}) })
+	require.ErrorContains(t, err, "other is not what versions.yaml pins")
+	assert.Empty(t, out)
 }
