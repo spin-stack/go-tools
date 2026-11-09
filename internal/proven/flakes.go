@@ -30,12 +30,16 @@ func Failed(log string) []string {
 	return out
 }
 
-// FailedIn is every top-level test the text files of a zip archive say failed - a lane's logs,
-// kept as a run's artifact when it fails.
+// FailedIn is every top-level test the text files of an artifact say failed - a lane's logs, kept
+// as a run's artifact when it fails. An artifact is a zip of its files, or the one file itself
+// when it was uploaded unarchived (upload-artifact's archive: false, as a run's trace is).
 func FailedIn(archive []byte) ([]string, error) {
+	if !bytes.HasPrefix(archive, []byte("PK\x03\x04")) {
+		return Failed(string(archive)), nil
+	}
 	r, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
-		return nil, fmt.Errorf("the artifact is not a zip: %w", err)
+		return nil, fmt.Errorf("the artifact is a broken zip: %w", err)
 	}
 	var out []string
 	seen := map[string]bool{}
