@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} run {{.Run}}</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --line: #d8dee4; --row: #f6f8fa;
+  --job: #4c8bf5; --crit: #d9480f; --step: #8fa3bf; --span: #1f9e89; --fail: #cf222e;
+  --queue: #c9d1d9; --link: #0969da;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --row: #161b22;
+    --job: #4c8bf5; --crit: #f0883e; --step: #6e7f99; --span: #2bb69e; --fail: #f85149;
+    --queue: #3d444d; --link: #4493f8;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--link); }
+h1 { font-size: 18px; margin: 0 0 4px; }
+h1 a { color: inherit; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 8px 0 12px; color: var(--muted); }
+.stats b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.bar-tools { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+button { font: inherit; color: var(--fg); background: var(--row); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.legend { display: flex; gap: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.wf { --name: min(340px, 40vw); border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: var(--name) 64px 1fr; align-items: center;
+  min-height: 22px; border-bottom: 1px solid var(--line); }
+.row:hover { background: var(--row); }
+.row.lane { font-weight: 600; }
+.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+.name a { color: inherit; text-decoration: none; }
+.name a:hover { text-decoration: underline; }
+.tog { display: inline-block; width: 14px; color: var(--muted); cursor: pointer; user-select: none; }
+.dur { text-align: right; padding-right: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 22px; }
+.b { position: absolute; top: 5px; height: 12px; min-width: 2px; border-radius: 2px; }
+.b.job { background: var(--job); }
+.b.job.crit { background: var(--crit); }
+.b.step { background: var(--step); }
+.b.span { background: var(--span); }
+.b.queue { background: repeating-linear-gradient(45deg, var(--queue) 0 3px, transparent 3px 6px); }
+.b.fail { outline: 2px solid var(--fail); outline-offset: -1px; }
+.axis { position: sticky; top: 0; z-index: 1; background: var(--bg); }
+.axis .track { height: 20px; }
+.tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line);
+  padding-left: 3px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.grid { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--line); pointer-events: none; }
+.crit-mark { color: var(--crit); }
+.fail-mark { color: var(--fail); }
+.foot { margin-top: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1><a href="{{.URL}}">{{.Title}}</a> · run {{.Run}}</h1>
+<div class="stats">
+  <span>wall <b>{{.Wall}}</b></span>
+  <span>on runners <b>{{.Runner}}</b> ({{.Minutes}} job-minutes rounded up)</span>
+  <span>waiting for runners <b>{{.Queued}}</b></span>
+  <span>longest wait <b>{{.Worst}}</b></span>
+</div>
+<div class="bar-tools">
+  <button id="open">Expand all</button><button id="close">Collapse all</button>
+  <span class="legend">
+    <span><i style="background:var(--crit)"></i>critical path</span>
+    <span><i style="background:var(--job)"></i>job</span>
+    <span><i style="background:var(--step)"></i>step</span>
+    <span><i style="background:var(--span)"></i>span</span>
+    <span><i style="background:repeating-linear-gradient(45deg,var(--queue) 0 3px,transparent 3px 6px)"></i>waiting for a runner</span>
+  </span>
+</div>
+<div class="wf" id="wf"></div>
+{{if .Skipped}}<p class="foot">Did not run: {{.Skipped}}.</p>{{end}}
+<p class="foot">The same run in detail: open trace.json at <a href="https://ui.perfetto.dev">ui.perfetto.dev</a>.</p>
+<script>
+const data = {{.Data}};
+const wall = Math.max(data.wall, 1);
+const pct = ms => (100 * ms / wall) + '%';
+const wf = document.getElementById('wf');
+
+function fmt(ms) {
+  const s = Math.round(ms / 1000);
+  if (ms > 0 && ms < 1000) return ms + 'ms';
+  if (s >= 3600) return Math.floor(s / 3600) + 'h' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm';
+  if (s >= 60) return Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's';
+  return s + 's';
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function bar(track, s, kind, extra) {
+  const b = el('div', 'b ' + kind + (s.f ? ' fail' : '') + (extra || ''));
+  b.style.left = pct(s.s);
+  b.style.width = pct(s.e - s.s);
+  b.title = s.n + ' · ' + fmt(s.e - s.s) + ' · from ' + fmt(s.s) + ' to ' + fmt(s.e);
+  track.appendChild(b);
+}
+
+// Each row is a job, a step or a span; a row's children are hidden until it is opened.
+function row(node, depth, lane) {
+  const r = el('div', 'row' + (lane ? ' lane' : ''));
+  const name = el('div', 'name');
+  name.style.paddingLeft = (depth * 14) + 'px';
+  const tog = el('span', 'tog', node.c && node.c.length ? '▸' : '');
+  name.appendChild(tog);
+  if (lane && lane.url) {
+    const a = el('a', '', node.n);
+    a.href = lane.url;
+    name.appendChild(a);
+  } else {
+    name.appendChild(document.createTextNode(node.n));
+  }
+  if (lane && lane.critical) name.appendChild(el('span', 'crit-mark', ' ●'));
+  if (node.f) name.appendChild(el('span', 'fail-mark', ' ✗'));
+  name.title = node.n + (lane ? ' · ' + lane.runner + ' · ' + (lane.labels || []).join(', ') : '');
+  r.appendChild(name);
+  r.appendChild(el('div', 'dur', fmt(node.e - node.s)));
+  const track = el('div', 'track');
+  if (lane && lane.queue.e > lane.queue.s) bar(track, lane.queue, 'queue');
+  bar(track, node, node.k, lane && lane.critical ? ' crit' : '');
+  r.appendChild(track);
+  wf.appendChild(r);
+  const kids = [];
+  for (const c of node.c || []) kids.push(...row(c, depth + 1));
+  for (const k of kids) k.hidden = true;
+  r.open = false;
+  r.kids = kids;
+  r.direct = kids.filter(k => k.depth === depth + 1);
+  r.depth = depth;
+  tog.onclick = () => toggle(r, !r.open);
+  return [r, ...kids];
+}
+
+function toggle(r, open) {
+  r.open = open;
+  r.querySelector('.tog').textContent = r.kids.length ? (open ? '▾' : '▸') : '';
+  for (const k of r.direct) {
+    k.hidden = !open;
+    if (!open && k.open) toggle(k, false);
+  }
+}
+
+const axis = el('div', 'row axis');
+axis.appendChild(el('div', 'name', 'job / step / span'));
+axis.appendChild(el('div', 'dur', 'took'));
+const at = el('div', 'track');
+const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600].map(s => s * 1000);
+const step = steps.find(s => wall / s <= 10) || 3600000;
+for (let t = 0; t <= wall; t += step) {
+  const tk = el('div', 'tick', t % 60000 === 0 && t > 0 ? fmt(t).replace(/m00s$/, 'm').replace(/h00m$/, 'h') : fmt(t));
+  tk.style.left = pct(t);
+  at.appendChild(tk);
+}
+axis.appendChild(at);
+wf.appendChild(axis);
+
+const lanes = data.lanes.map(l => row(l.job, 0, l)[0]);
+document.getElementById('open').onclick = () => {
+  const all = [...wf.querySelectorAll('.row')].filter(r => r.kids);
+  for (const r of all) toggle(r, true);
+};
+document.getElementById('close').onclick = () => lanes.forEach(r => toggle(r, false));
+</script>
+</body>
+</html>

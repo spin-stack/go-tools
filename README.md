@@ -21,6 +21,7 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`proven`](https://spin-stack.github.io/go-tools/proven/) | what CI already proved about a commit, by its tree: the run that answers for it, what a run on main is of, whether it may be released, each test's time, which failed tests are flaky |
 | [`exposure`](https://spin-stack.github.io/go-tools/exposure/) | what a repository would show if made public: secrets and private values in every ref's commits, pull request heads included, and in its issues, comments and releases |
 | [`gencache`](https://spin-stack.github.io/go-tools/gencache/) | not a check: `go generate` with each mockgen directive answered from a cache when nothing its mock is made from has changed |
+| [`ghatrace`](https://spin-stack.github.io/go-tools/ghatrace/) | not a check: where a GitHub Actions run's time went - the critical path, each job's wait for a runner, its steps and the spans inside them - as the run's summary, an HTML page and a Perfetto trace, with nothing hosted |
 | [`provenance`, `sbom`, `attestgate`, `trustroot`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM |
 
 ```sh

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // GitHub reads one repository's runs, jobs, logs and commits.
@@ -62,6 +63,26 @@ type Job struct {
 	URL        string `json:"html_url"`
 	// Labels is what the job asked of its runner: a fleet's label names the kind of machine it ran on.
 	Labels []string `json:"labels"`
+	Status string   `json:"status"` // queued, in_progress, completed
+	// Workflow is the name of the workflow the job's run is of.
+	Workflow string `json:"workflow_name"`
+	// CreatedAt is when the job was queued: when the last job it needs finished. Zero values are
+	// a job that never started or never finished.
+	CreatedAt   time.Time `json:"created_at"`
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
+	Runner      string    `json:"runner_name"`
+	Steps       []Step    `json:"steps"`
+}
+
+// Step is one step of a job, timed to the second.
+type Step struct {
+	Name        string    `json:"name"`
+	Number      int       `json:"number"`
+	Status      string    `json:"status"`
+	Conclusion  string    `json:"conclusion"`
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
 }
 
 // Artifact is one file a run kept: a lane's logs, when it failed.
