@@ -23,6 +23,10 @@ type Span struct {
 	Exit   int       `json:"exit"`
 	Runner string    `json:"runner"`
 	Job    string    `json:"job"`
+	// Parent is the name of the span this one is part of, when spans ran side by side: by the time
+	// alone, a part of one is inside the other too. Empty, the span goes under the innermost span
+	// whose time contains it.
+	Parent string `json:"parent,omitempty"`
 }
 
 // File is where spans are recorded: $GHATRACE_SPANS, or a file of the runner's own on one
