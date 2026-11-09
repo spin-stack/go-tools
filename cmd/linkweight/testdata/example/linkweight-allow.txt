@@ -1,0 +1,7 @@
+# What the shop's binaries may reach, each with the reason.
+cmd/api capability dial                # net/http's client comes with its server
+cmd/api capability http-server         # it is the shop's web server
+cmd/api capability listen              # it is the shop's web server
+cmd/api capability reflect-call        # text/template calls what a page names
+cmd/api reflect-method text/template   # the front page is a template; a renderer without one is owed
+cmd/worker capability exec             # the nightly job is a shell command

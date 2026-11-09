@@ -1,0 +1,27 @@
+cmd/api: 7.4 MB shipped, 2 modules, 160 packages (0.5 MB in no package: strings, funcdata)
+  method elimination: OFF - every exported method of every reachable type is linked, because of:
+    text/template                cmd/api > internal/page > text/template
+  capabilities:
+    dial                         cmd/api > net/http > net
+    http-server                  cmd/api > net/http
+    listen                       cmd/api > net/http > net  (through a kept method: may go when elimination is back on)
+    reflect-call                 cmd/api > internal/page > text/template > reflect
+  heaviest modules:
+       6.3 MB  std
+       0.0 MB  example.com/shop
+  imports whose cut drops the most (package-level estimate):
+       3.8 MB  cmd/api > net/http
+       0.2 MB  cmd/api > internal/page
+       0.2 MB  internal/page > text/template
+
+cmd/worker: 1.6 MB shipped, 2 modules, 43 packages (0.1 MB in no package: strings, funcdata)
+  method elimination: on
+  capabilities:
+    exec                         cmd/worker > os/exec > os
+  heaviest modules:
+       1.4 MB  std
+       0.0 MB  example.com/shop
+  imports whose cut drops the most (package-level estimate):
+       0.1 MB  cmd/worker > os/exec
+
+OK: every capability and every method-elimination breaker has a reason, and every reason still applies.

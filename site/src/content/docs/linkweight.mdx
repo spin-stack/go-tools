@@ -1,0 +1,116 @@
+---
+title: linkweight
+description: What each binary links and why - the bytes every module puts in it, whether the linker could drop the methods nothing calls, which import a refactor would cut, and what the binary can reach (exec, listen, mount, setuid). With an allowlist, a gate on the last two.
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import report from '../../../../cmd/linkweight/testdata/example/report.txt?raw';
+import allowList from '../../../../cmd/linkweight/testdata/example/linkweight-allow.txt?raw';
+import page from '../../../../cmd/linkweight/testdata/example/internal/page/page.go?raw';
+
+A binary is larger than its code and can do more than its code says: every dependency brings its
+own dependencies, and a single call into a library can keep thousands of functions alive. `linkweight`
+builds each binary of the repository and reads the answer from the linker itself.
+
+```sh
+go tool linkweight -roots ./cmd/...
+```
+
+For each main package it says four things:
+
+- **Weight.** The bytes each module puts in the binary, its code and its share of the runtime's
+  per-function table (`.gopclntab`, a third of a large Go binary and in no symbol). Memory reserved
+  at run time (`.bss`) is not counted: it is not in the file.
+- **Method elimination.** Whether the linker could drop the methods nothing calls, and if not, what
+  stopped it and through which imports.
+- **Cuts.** For each import a package of the repository makes, how much the binary would stop
+  linking without it, the largest first: where a refactor pays.
+- **Capabilities.** What the binary can reach - `exec`, `exec-replace`, `listen`, `dial`,
+  `http-server`, `mount`, `setuid`, `namespaces`, `ptrace`, `reboot`, `kernel-module`, `plugin`,
+  `reflect-call`, `cgo` - each with the imports that bring it in.
+
+## An example
+
+A shop has two binaries: `cmd/api` serves a front page rendered by `internal/page`, and
+`cmd/worker` runs a nightly shell command. The page is a template:
+
+<Code code={page} lang="go" title="internal/page/page.go" />
+
+<Code code={report} lang="text" title="go tool linkweight -top 4 -allow linkweight-allow.txt" />
+
+`cmd/api` has method elimination off, and the chain says why: `cmd/api` imports `internal/page`,
+which imports `text/template`. `cmd/worker` keeps it on, and its one capability is `exec`.
+
+## Method elimination
+
+The linker drops a method nothing calls - unless a reachable function calls
+`reflect.Value.Method` or `MethodByName` with a name it cannot see. Then any exported method could
+be called by name, so the linker keeps **every exported method of every reachable type**. One such
+call anywhere in the binary is enough, and `text/template` makes it for every template it runs.
+
+The cost is the size of the libraries with large types. An AWS SDK client is a type with a method
+per operation: `service/ec2`'s has 2,433 of them. In spin's control plane, which calls a handful,
+elimination being off kept all of them. Measured on spin's binaries, with the three templates
+replaced and grpc built with `-tags grpcnotrace` (its `golang.org/x/net/trace` imports `html/template`):
+
+| binary | before | after |
+|---|---|---|
+| controlplane | 102.7 MB | 51.6 MB |
+| runner | 84.2 MB | 34.6 MB |
+| boot | 74.0 MB | 24.8 MB |
+| cli | 43.0 MB | 28.0 MB |
+| supervisor | 24.6 MB | 20.0 MB |
+
+A function listed under *linked as a method its type keeps* is marked by the linker too, but it
+is in the binary only as a method of a type the linker kept. It may be there only because
+elimination is already off, and it goes with the others: `encoding/json/v2` and `godbus/dbus`
+did, in spin. Remove the first group first.
+
+## Cuts
+
+A cut is one edge of the import graph: `internal/installation/provider/aws > github.com/aws/aws-sdk-go-v2/service/ec2`.
+Its size is the bytes of every package the main package no longer reaches without that edge, and
+`(-N modules)` the modules it no longer links at all. A chain of cuts with the same size is one
+path with no other way in - the first cut of the chain is the cheapest refactor that removes it.
+
+The size is an estimate at the package level, in both directions: a smaller import graph can let
+the linker drop more than the packages it no longer reaches, and a refactor that moves the code a
+binary needs elsewhere drops less. Cuts under 64 KiB are not listed.
+
+## The gate
+
+With `-allow`, every capability and every function that turns elimination off has to be explained
+by a line of the list, the reason after `#`:
+
+<Code code={allowList} lang="text" title="linkweight-allow.txt" />
+
+It fails on a finding no line explains - surface nobody decided the binary has - and on a line no
+finding matches: a binary that lost a capability or got elimination back has its list shortened in
+the same commit, so the list stays the binary's description and not its history. The weights and
+the cuts are a report, not a gate: a pinned size would let each deletion pay for the next addition.
+
+## What it cannot see
+
+- The answer is for the GOOS, GOARCH, build tags and `CGO_ENABLED` it runs with: run it as the
+  release builds (`CGO_ENABLED=0 go tool linkweight -tags ...`). It reads ELF, so Linux binaries.
+- A capability is a function of the standard library or `golang.org/x/sys/unix` the binary links.
+  A raw `syscall.Syscall` with a number of its own is not one of them.
+- A chain is the shortest path the linker took. When the compiler inlined a call, the imports in
+  between are filled in from the package graph.
+
+<Aside type="tip" title="Comparing two revisions">
+`-json report.json` writes everything the text says, sizes in bytes, for a diff between a branch
+and main.
+</Aside>
+
+## In a Taskfile
+
+```yaml title="Taskfile.yml"
+tasks:
+  linkweight:
+    desc: What each binary links and why; fails on a capability nobody wrote down.
+    env:
+      CGO_ENABLED: 0
+    cmds:
+      - go tool linkweight -roots ./cmd/... -allow hack/linkweight-allow.txt -json _output/linkweight.json
+```
