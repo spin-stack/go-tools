@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,16 +44,15 @@ func newest(ctx context.Context, e versions.Entry) (string, error) {
 	kind, arg, _ := strings.Cut(e.Track, " ")
 	switch kind {
 	case "github-release":
-		repo := e.Source
-		if arg != "" {
-			repo = arg
+		repo, prefix, _ := strings.Cut(arg, " ")
+		if repo == "" {
+			repo = e.Source
 		}
 		tag, err := githubRelease(ctx, repo)
-		// Spelled as the pin is: a download's URL may add the v its tags have.
-		if !strings.HasPrefix(e.Version, "v") {
-			tag = strings.TrimPrefix(tag, "v")
+		if err != nil {
+			return "", err
 		}
-		return tag, err
+		return releaseVersion(tag, prefix, strings.HasPrefix(e.Version, "v"))
 	case "go":
 		return newestGo(ctx, e.Version)
 	case "kernel":
@@ -155,6 +155,9 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 			return versions.Entry{}, nil, fmt.Errorf("%w; name the version", err)
 		}
 	}
+	if len(e.Pins) > 0 {
+		return bumpPins(ctx, v, e, version)
+	}
 	pin, err := resolve(ctx, e, version)
 	if err != nil {
 		return versions.Entry{}, nil, err
@@ -167,9 +170,37 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 	return e, out, nil
 }
 
+// bumpPins is Bump for a download pinned per platform: each platform's file at version, hashed.
+// One the release does not have refuses the bump whole, since a pin left at the old version beside
+// new ones would be a file of another release.
+func bumpPins(ctx context.Context, v *versions.Versions, e versions.Entry, version string) (versions.Entry, []byte, error) {
+	e.Version = version
+	pins := map[string]string{}
+	for p := range e.Pins {
+		goos, goarch, _ := strings.Cut(p, "/")
+		one, err := e.For(goos, goarch)
+		if err != nil { // mutate-exempt: p is one of e's own platforms, which For always has
+			return versions.Entry{}, nil, err
+		}
+		if pins[p], err = sha256Of(ctx, one.URL()); err != nil {
+			return versions.Entry{}, nil, fmt.Errorf("versions: %s for %s: %w", e.Name, p, err)
+		}
+	}
+	out, err := v.SetPins(e.Name, version, pins)
+	if err != nil {
+		return versions.Entry{}, nil, err
+	}
+	e.Pins = pins
+	return e, out, nil
+}
+
 // Pinned is e's download, refused past limit bytes, and unless its SHA-256 is e's pin: the check
-// beside the resolve that wrote the pin.
+// beside the resolve that wrote the pin. A download pinned per platform is this platform's file.
 func Pinned(ctx context.Context, e versions.Entry, limit int64) ([]byte, error) {
+	e, err := e.For(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return nil, err
+	}
 	raw, err := fetch.Bytes(ctx, e.URL(), limit)
 	if err != nil {
 		return nil, err
@@ -190,6 +221,10 @@ func Pinned(ctx context.Context, e versions.Entry, limit int64) ([]byte, error) 
 func PinnedFile(ctx context.Context, e versions.Entry, dir string) (string, error) {
 	if e.Kind != versions.Download {
 		return "", fmt.Errorf("versions: %s is a %s, not a download", e.Name, e.Kind)
+	}
+	e, err := e.For(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return "", err
 	}
 	file := filepath.Join(dir, path.Base(e.URL()))
 	if got, err := fileSum(file); err == nil && got == e.Pin {
@@ -271,6 +306,21 @@ func sha256Of(ctx context.Context, url string) (string, error) {
 		return "", fmt.Errorf("versions: %w", err)
 	}
 	return sum, nil
+}
+
+// releaseVersion is a release's tag as the pin spells a version: prefix taken off, for a
+// repository whose releases are named prefix<version> (go-tools' bin-20261109.193146), and the v
+// its tags have only when the pin has one, since a download's URL may add it. A tag that does not
+// start with prefix is no release of the kind the entry pins.
+func releaseVersion(tag, prefix string, withV bool) (string, error) {
+	version, ok := strings.CutPrefix(tag, prefix)
+	if !ok {
+		return "", fmt.Errorf("versions: the newest release, %s, is not %s<version>", tag, prefix)
+	}
+	if !withV {
+		version = strings.TrimPrefix(version, "v")
+	}
+	return version, nil
 }
 
 func githubRelease(ctx context.Context, repo string) (string, error) {

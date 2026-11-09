@@ -12,6 +12,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -48,6 +49,9 @@ type Entry struct {
 	Source  string `yaml:"source,omitempty"`
 	Version string `yaml:"version"`
 	Pin     string `yaml:"pin,omitempty"`
+	// Pins is a download's sha256 for each platform, by os/arch as Go names them, when the file is
+	// one per platform: its source then says {os} and {arch}, and For is the entry for one of them.
+	Pins map[string]string `yaml:"pins,omitempty"`
 	// Archive is a git entry's second check: the sha256 of what `git archive` writes for the
 	// commit, for a build that compiles those bytes and has to know they are the ones that were
 	// measured. Only a build can compute it, since it depends on the git that writes it.
@@ -57,10 +61,11 @@ type Entry struct {
 }
 
 var (
-	name   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	digest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	commit = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	sum    = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	name     = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	platform = regexp.MustCompile(`^[a-z0-9]+/[a-z0-9]+$`)
+	digest   = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	commit   = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	sum      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 // validate is the entry whole and its pin in its kind's form.
@@ -75,6 +80,7 @@ func (e Entry) validate() error {
 	check(e.Version != "", "no version")
 	check(e.Track != "", "no track: how check finds the newest")
 	check(e.Archive == "" || e.Kind == Git, "only a git entry has an archive")
+	check(len(e.Pins) == 0 || e.Kind == Download, "only a download has a pin per platform")
 	switch e.Kind {
 	case Image:
 		check(e.Source != "", "an image with no repository")
@@ -86,7 +92,19 @@ func (e Entry) validate() error {
 	case Download:
 		check(strings.HasPrefix(e.Source, "https://") && strings.Contains(e.Source, "{version}"),
 			"a download whose source is not an https URL with {version} in it")
-		check(sum.MatchString(e.Pin), "the pin %q is not a sha256", e.Pin)
+		perPlatform := strings.Contains(e.Source, "{os}") && strings.Contains(e.Source, "{arch}")
+		if len(e.Pins) == 0 {
+			check(!strings.Contains(e.Source, "{os}") && !strings.Contains(e.Source, "{arch}"),
+				"a source that says {os} or {arch} is a file per platform, pinned by pins")
+			check(sum.MatchString(e.Pin), "the pin %q is not a sha256", e.Pin)
+			break
+		}
+		check(e.Pin == "", "a pin and pins: one file, or one per platform")
+		check(perPlatform, "pins with a source that does not say both {os} and {arch}")
+		for _, p := range slices.Sorted(maps.Keys(e.Pins)) {
+			check(platform.MatchString(p), "the platform %q is not os/arch", p)
+			check(sum.MatchString(e.Pins[p]), "%s's pin %q is not a sha256", p, e.Pins[p])
+		}
 	case Date:
 		check(e.Pin == "", "a date has no pin")
 	case Module:
@@ -102,8 +120,31 @@ func (e Entry) validate() error {
 	return errors.Join(errs...)
 }
 
+// equal is whether two entries say the same thing; an entry with pins is no comparable value.
+func (e Entry) equal(o Entry) bool {
+	return e.Name == o.Name && e.Kind == o.Kind && e.Source == o.Source && e.Version == o.Version &&
+		e.Pin == o.Pin && maps.Equal(e.Pins, o.Pins) && e.Archive == o.Archive && e.Track == o.Track && e.Note == o.Note
+}
+
 // Ref is an image's reference, by its digest: what `docker run` and FROM are given.
 func (e Entry) Ref() string { return e.Source + ":" + e.Version + "@" + e.Pin }
+
+// For is the entry as one platform has it: a download pinned per platform becomes the file for
+// goos/goarch and its pin, which is how everything that fetches one reads it. An entry pinned once
+// is itself, for every platform; one that pins others but not this one is an error, not the file
+// of another.
+func (e Entry) For(goos, goarch string) (Entry, error) {
+	if len(e.Pins) == 0 {
+		return e, nil
+	}
+	pin, ok := e.Pins[goos+"/"+goarch]
+	if !ok {
+		return Entry{}, fmt.Errorf("versions: %s pins no file for %s/%s", e.Name, goos, goarch)
+	}
+	e.Source = strings.NewReplacer("{os}", goos, "{arch}", goarch).Replace(e.Source)
+	e.Pin, e.Pins = pin, nil
+	return e, nil
+}
 
 // URL is a download's, for its version.
 func (e Entry) URL() string {
@@ -126,7 +167,15 @@ func (e Entry) Args() map[string]string {
 		}
 		return args
 	case Download:
-		return map[string]string{prefix + "_VERSION": e.Version, prefix + "_SHA256": e.Pin}
+		args := map[string]string{prefix + "_VERSION": e.Version}
+		if len(e.Pins) == 0 {
+			args[prefix+"_SHA256"] = e.Pin
+		}
+		// Each platform's as TASK_SHA256_LINUX_AMD64, for a Dockerfile that builds for several.
+		for p, pin := range e.Pins {
+			args[prefix+"_SHA256_"+strings.ToUpper(strings.ReplaceAll(p, "/", "_"))] = pin
+		}
+		return args
 	case PyPI, Module:
 		return map[string]string{prefix + "_VERSION": e.Version}
 	default:
@@ -192,11 +241,32 @@ func (v *Versions) Get(name string) (Entry, error) {
 // blank lines, quotes - is as it was. v is left as it is; the file Set answers is what a Load of
 // it would read, and a value Set cannot write in place is refused rather than written otherwise.
 func (v *Versions) Set(name, version, pin string) ([]byte, error) {
+	return v.set(name, version, pin, nil)
+}
+
+// SetPins is Set for a download pinned per platform: version, and each platform's pin. The
+// platforms are the ones the file has, every one of them; adding or dropping one is a person's
+// edit, not a bump's.
+func (v *Versions) SetPins(name, version string, pins map[string]string) ([]byte, error) {
+	e, err := v.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Equal(slices.Sorted(maps.Keys(e.Pins)), slices.Sorted(maps.Keys(pins))) {
+		return nil, fmt.Errorf("versions: %s pins %v, not the platforms given", name, slices.Sorted(maps.Keys(e.Pins)))
+	}
+	return v.set(name, version, "", pins)
+}
+
+func (v *Versions) set(name, version, pin string, pins map[string]string) ([]byte, error) {
 	e, err := v.Get(name)
 	if err != nil {
 		return nil, err
 	}
 	e.Version, e.Pin = version, pin
+	if pins != nil {
+		e.Pins = maps.Clone(pins)
+	}
 	if err := e.validate(); err != nil {
 		return nil, err
 	}
@@ -210,16 +280,26 @@ func (v *Versions) Set(name, version, pin string) ([]byte, error) {
 		if n := field(item, "name"); n == nil || n.Value != name {
 			continue
 		}
-		for _, kv := range [][2]string{{"version", version}, {"pin", pin}} { // mutate-exempt: the pair's length; nothing reads past kv[1]
-			n := field(item, kv[0])
-			if n == nil {
+		type value struct {
+			what string
+			n    *yaml.Node
+			to   string
+		}
+		values := []value{{"version", field(item, "version"), version}, {"pin", field(item, "pin"), pin}}
+		if m := field(item, "pins"); m != nil {
+			for i := 0; i+1 < len(m.Content); i += 2 {
+				values = append(values, value{"pins " + m.Content[i].Value, m.Content[i+1], e.Pins[m.Content[i].Value]})
+			}
+		}
+		for _, val := range values {
+			if val.n == nil {
 				continue
 			}
-			start, end, err := span(lines[n.Line-1], n)
+			start, end, err := span(lines[val.n.Line-1], val.n)
 			if err != nil {
-				return nil, fmt.Errorf("versions: %s's %s: %w", name, kv[0], err)
+				return nil, fmt.Errorf("versions: %s's %s: %w", name, val.what, err)
 			}
-			edits = append(edits, edit{n.Line - 1, start, end, render(n.Style, kv[1])})
+			edits = append(edits, edit{val.n.Line - 1, start, end, render(val.n.Style, val.to)})
 		}
 	}
 	// Right to left, so an edit does not move the next one on a line that has both.
@@ -240,7 +320,7 @@ func (v *Versions) Set(name, version, pin string) ([]byte, error) {
 			want[i] = e
 		}
 	}
-	if !slices.Equal(reread.Entries, want) {
+	if !slices.EqualFunc(reread.Entries, want, Entry.equal) {
 		return nil, fmt.Errorf("versions: %s could not be rewritten in place", name)
 	}
 	return out, nil

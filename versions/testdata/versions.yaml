@@ -50,3 +50,12 @@
   source: google-crc32c
   version: "1.7.1"
   track: pypi
+
+- name: task
+  kind: download
+  source: https://github.com/go-task/task/releases/download/v{version}/task_{os}_{arch}.tar.gz
+  version: 3.54.0
+  pins:
+    linux/amd64: 680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb # the runners'
+    darwin/arm64: "1111111111111111111111111111111111111111111111111111111111111111"
+  track: github-release https://github.com/go-task/task
