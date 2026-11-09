@@ -109,8 +109,11 @@ and main.
 tasks:
   linkweight:
     desc: What each binary links and why; fails on a capability nobody wrote down.
-    env:
-      CGO_ENABLED: 0
     cmds:
-      - go tool linkweight -roots ./cmd/... -allow hack/linkweight-allow.txt -json _output/linkweight.json
+      - CGO_ENABLED=0 go tool linkweight -roots ./cmd/... -allow hack/linkweight-allow.txt -json _output/linkweight.json
 ```
+
+`CGO_ENABLED=0` on the command, not in the task's `env:`: a variable the caller's environment
+already sets wins over a task's `env:`, and a CI job that sets `CGO_ENABLED=1` for its race
+detector would have the gate answer for a binary no release ships - every one of them reported
+with `cgo`.
