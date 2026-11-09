@@ -201,6 +201,8 @@ func TestParsePackagesReadsGoListsStream(t *testing.T) {
 
 // A breaker is named by the smallest of its package's marked functions, whatever order the linker
 // printed them in: the same build says the same thing.
+//
+//nolint:dupword // a linker graph names a symbol on both sides of its edges
 func TestABreakerIsItsPackagesSmallestFunction(t *testing.T) {
 	g := parse(t, `_ -> main.main
 main.main -> b.Z <ReflectMethod>
