@@ -8,4 +8,4 @@
 # would be in the module graph of every repository that imports it.
 .github/workflows/ci.yml/gate/Task's pin  # read before Task is installed
 .github/workflows/pages.yml/build/Task's pin  # read before Task is installed
-.github/workflows/ci.yml/release/Task's pin  # read before Task is installed
+.github/workflows/release.yml/release/Task's pin  # read before Task is installed

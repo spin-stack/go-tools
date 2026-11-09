@@ -309,7 +309,7 @@ func sha256Of(ctx context.Context, url string) (string, error) {
 }
 
 // releaseVersion is a release's tag as the pin spells a version: prefix taken off, for a
-// repository whose releases are named prefix<version> (go-tools' bin-20261109.193146), and the v
+// repository whose releases are named prefix<version> (cli-1.4.2 beside a library's tags), and the v
 // its tags have only when the pin has one, since a download's URL may add it. A tag that does not
 // start with prefix is no release of the kind the entry pins.
 func releaseVersion(tag, prefix string, withV bool) (string, error) {

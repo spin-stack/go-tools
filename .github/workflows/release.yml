@@ -1,0 +1,78 @@
+# go-tools' release, named as spin-stack names releases: v<YYYYMMDD>.<NN>, the day in UTC and which
+# release of that day (internal/release). Made of main each time CI passes on it - the commit that
+# passed, not whatever main is when this starts - and published last: a release is its files, built
+# and attested here, then the tag. What a repository's `go tool task` (cmd/task) runs is the latest.
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+# One at a time: a release is named at the start and tagged at the end, so two at once would name
+# the same one.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  release:
+    name: Release
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          # Every tag, which the next release's name is counted from.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Task's pin
+        run: go run ./cmd/versions env task >> "$GITHUB_ENV"
+
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          checksum: ${{ env.TASK_SHA256 }}
+
+      # The release this commit is: the one already tagged at it when CI was run again, the next
+      # name today otherwise.
+      - name: Its name
+        id: name
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: task release:name
+
+      - name: The binaries
+        if: steps.name.outputs.new == 'true'
+        run: task release:build
+
+      - name: Their provenance
+        if: steps.name.outputs.new == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: _output/release/*.tar.gz
+
+      - name: The release
+        if: steps.name.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          VERSION: ${{ steps.name.outputs.version }}
+        run: task release:publish

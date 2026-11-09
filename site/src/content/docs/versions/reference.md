@@ -33,7 +33,7 @@ description: Every kind of entry versions.yaml takes, the build arguments each b
 
 | track | the newest is |
 |---|---|
-| `github-release [repo] [prefix]` | the repository's latest release (`source`'s by default), with a `v` only when the version has one; with a prefix, a release is `<prefix><version>` (go-tools' `bin-20261109.193146`) |
+| `github-release [repo] [prefix]` | the repository's latest release (`source`'s by default), with a `v` only when the version has one; with a prefix, a release is `<prefix><version>` |
 | `tags <repo>` | the highest release-numbered tag of a git repository; for a download, the highest whose file is published |
 | `commit <repo> <branch>` | the commit a branch is at, for a download whose version is a commit: behind only when the file changed |
 | `go` | the newest stable Go, spelled as the tag is (`1.27.1-trixie`) |

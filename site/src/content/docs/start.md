@@ -3,10 +3,10 @@ title: Getting started
 description: Add go-tools to a repository as Go tools, run the gates from a Taskfile, and wire them into CI.
 ---
 
-Every tool here is a command under `cmd/`, released as binaries for main's head each time the gate
-passes on a push to it (`bin-<the commit's UTC time>`), and a
-repository runs them through Task at the versions its `versions.yaml` pins. There is nothing to
-install globally, and nothing to compile.
+Every tool here is a command under `cmd/`, released as binaries of main each time its gate passes
+(`v<YYYYMMDD>.<NN>`, named as spin-stack names its releases, and attested as built by
+`release.yml`). A repository runs the latest of them through Task, at the version its
+`versions.yaml` pins. There is nothing to install globally, and nothing to compile.
 
 ## Take Task and the tools
 
@@ -16,7 +16,7 @@ One command in `go.mod`:
 go get -tool github.com/spin-stack/go-tools/cmd/task
 ```
 
-and two entries in `versions.yaml`, each pinned by the sha256 of every platform's archive:
+and Task in `versions.yaml`, pinned by the sha256 of every platform's archive:
 
 ```yaml title="versions.yaml"
 - name: task
@@ -25,33 +25,20 @@ and two entries in `versions.yaml`, each pinned by the sha256 of every platform'
   version: 3.54.0
   pins:
     linux/amd64: 680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb
-    darwin/arm64: ...
+    darwin/arm64: 12a69fcf37bb8d5bc9150c44f9a936775b73e59ff044c2c245232f198c135637
   track: github-release https://github.com/go-task/task
-- name: go-tools
-  kind: download
-  source: https://github.com/spin-stack/go-tools/releases/download/bin-{version}/go-tools_{os}_{arch}.tar.gz
-  version: "20261109.193146"
-  pins:
-    linux/amd64: ...
-  track: github-release https://github.com/spin-stack/go-tools bin-
 ```
 
-`go tool task lint` then downloads both for this machine, checks them against the pins, unpacks
-them once into the user's cache, and runs Task with every go-tools command on its `PATH`: a
-Taskfile says `mutate -base origin/main`. The first run on a machine takes a second or two; Task's
-and the tools' own modules - about 450 for Task and the tools together - are in no `go.mod` and no
-CI cache.
+`go tool task lint` then puts that Task and go-tools' latest release for this machine in the
+user's cache - Task held to its pin, the tools to the sha256 their release's `checksums.txt` gives
+- unpacks each once, and runs Task with every go-tools command on its `PATH`: a Taskfile says
+`mutate -base origin/main`. The first run on a machine takes a second or two. Which release is the
+latest is asked at most every ten minutes, and a machine that cannot ask goes on with the one it
+has. Task's and the tools' own modules - about 450 together - are in no `go.mod` and no CI cache.
 
-Moving to a newer go-tools is a bump of both halves to the same commit, which `versions/gate`
-checks: the packages a repository imports from `go.mod`, the commands from `versions.yaml`.
-
-```sh
-go get github.com/spin-stack/go-tools@<commit>
-versions bump go-tools <the commit's UTC time, as its release names it: 20261109.193146>
-```
-
-`versions` is one of the commands on Task's `PATH`, so the second line is a task's: the
-spin-stack repositories have `task bump NAME=go-tools VERSION=...`.
+No repository bumps the tools: a release of go-tools is in every repository's next run. What a
+repository imports of go-tools as a library - `versions`, `provenance` - is `go.mod`'s, moved by
+`go get github.com/spin-stack/go-tools@<commit>` as any dependency is.
 
 ## Run them where developers already run checks
 
