@@ -1,0 +1,675 @@
+{
+	"end": "2026-11-09T18:20:58.612Z",
+	"lanes": [
+		{
+			"id": 0,
+			"name": "Gate",
+			"url": "https://github.com/spin-stack/go-tools/actions/runs/42672797946/job/129349569338",
+			"runner": "GitHub Actions 1000006653",
+			"labels": [
+				"ubuntu-latest"
+			],
+			"conclusion": "success",
+			"queue": {
+				"name": "waiting for a runner",
+				"kind": "queue",
+				"start": "2026-11-09T18:17:00Z",
+				"end": "2026-11-09T18:17:02Z"
+			},
+			"job": {
+				"name": "Gate",
+				"kind": "job",
+				"start": "2026-11-09T18:17:02Z",
+				"end": "2026-11-09T18:20:58.612Z",
+				"children": [
+					{
+						"name": "Set up job",
+						"kind": "step",
+						"start": "2026-11-09T18:17:03Z",
+						"end": "2026-11-09T18:17:04Z"
+					},
+					{
+						"name": "Run actions/checkout",
+						"kind": "step",
+						"start": "2026-11-09T18:17:04Z",
+						"end": "2026-11-09T18:17:05Z"
+					},
+					{
+						"name": "Run actions/setup-go",
+						"kind": "step",
+						"start": "2026-11-09T18:17:05Z",
+						"end": "2026-11-09T18:17:13Z"
+					},
+					{
+						"name": "Task's pin",
+						"kind": "step",
+						"start": "2026-11-09T18:17:13Z",
+						"end": "2026-11-09T18:17:14Z"
+					},
+					{
+						"name": "Run go-task/setup-task",
+						"kind": "step",
+						"start": "2026-11-09T18:17:14Z",
+						"end": "2026-11-09T18:17:14Z"
+					},
+					{
+						"name": "Lint findings, from the last run",
+						"kind": "step",
+						"start": "2026-11-09T18:17:14Z",
+						"end": "2026-11-09T18:17:15Z"
+					},
+					{
+						"name": "Lint",
+						"kind": "step",
+						"start": "2026-11-09T18:17:15Z",
+						"end": "2026-11-09T18:18:57Z",
+						"children": [
+							{
+								"name": "golangci-lint",
+								"kind": "span",
+								"start": "2026-11-09T18:17:16.831Z",
+								"end": "2026-11-09T18:18:13.324Z"
+							}
+						]
+					},
+					{
+						"name": "Test",
+						"kind": "step",
+						"start": "2026-11-09T18:18:57Z",
+						"end": "2026-11-09T18:20:48Z",
+						"children": [
+							{
+								"name": "go test",
+								"kind": "span",
+								"start": "2026-11-09T18:18:57.188Z",
+								"end": "2026-11-09T18:20:47.907Z",
+								"children": [
+									{
+										"name": "attestgate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:25.936Z",
+										"end": "2026-11-09T18:19:27.068Z"
+									},
+									{
+										"name": "cmd/attestgate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:26.025Z",
+										"end": "2026-11-09T18:19:27.055Z"
+									},
+									{
+										"name": "cmd/ctxlife",
+										"kind": "span",
+										"start": "2026-11-09T18:19:26.353Z",
+										"end": "2026-11-09T18:19:27.384Z"
+									},
+									{
+										"name": "cmd/deadgate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:26.816Z",
+										"end": "2026-11-09T18:19:30.329Z",
+										"children": [
+											{
+												"name": "TestTheGateReadsTheRootsAndTheTwoLists",
+												"kind": "span",
+												"start": "2026-11-09T18:19:26.825Z",
+												"end": "2026-11-09T18:19:29.319Z"
+											}
+										]
+									},
+									{
+										"name": "cmd/exposure",
+										"kind": "span",
+										"start": "2026-11-09T18:19:27.057Z",
+										"end": "2026-11-09T18:19:27.449Z"
+									},
+									{
+										"name": "cmd/gencache",
+										"kind": "span",
+										"start": "2026-11-09T18:19:27.07Z",
+										"end": "2026-11-09T18:19:27.448Z"
+									},
+									{
+										"name": "cmd/ghatrace",
+										"kind": "span",
+										"start": "2026-11-09T18:19:27.485Z",
+										"end": "2026-11-09T18:19:31.31Z",
+										"children": [
+											{
+												"name": "TestGoTestSpanThatCannotBeRecordedSaysSo",
+												"kind": "span",
+												"start": "2026-11-09T18:19:27.569Z",
+												"end": "2026-11-09T18:19:29.811Z"
+											}
+										]
+									},
+									{
+										"name": "cmd/mutate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:28.813Z",
+										"end": "2026-11-09T18:19:32.457Z",
+										"children": [
+											{
+												"name": "TestTheExampleTheSiteShows",
+												"kind": "span",
+												"start": "2026-11-09T18:19:28.827Z",
+												"end": "2026-11-09T18:19:31.45Z"
+											}
+										]
+									},
+									{
+										"name": "cmd/proven",
+										"kind": "span",
+										"start": "2026-11-09T18:19:29.285Z",
+										"end": "2026-11-09T18:19:31.225Z"
+									},
+									{
+										"name": "cmd/provenance",
+										"kind": "span",
+										"start": "2026-11-09T18:19:30.877Z",
+										"end": "2026-11-09T18:19:31.9Z"
+									},
+									{
+										"name": "cmd/refs",
+										"kind": "span",
+										"start": "2026-11-09T18:19:31.226Z",
+										"end": "2026-11-09T18:19:31.375Z"
+									},
+									{
+										"name": "cmd/sbom",
+										"kind": "span",
+										"start": "2026-11-09T18:19:31.998Z",
+										"end": "2026-11-09T18:19:33.219Z"
+									},
+									{
+										"name": "cmd/sfw",
+										"kind": "span",
+										"start": "2026-11-09T18:19:32.72Z",
+										"end": "2026-11-09T18:19:32.898Z"
+									},
+									{
+										"name": "cmd/taskgate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:32.771Z",
+										"end": "2026-11-09T18:19:32.943Z"
+									},
+									{
+										"name": "cmd/testquality",
+										"kind": "span",
+										"start": "2026-11-09T18:19:34.997Z",
+										"end": "2026-11-09T18:19:35.259Z"
+									},
+									{
+										"name": "cmd/trustroot",
+										"kind": "span",
+										"start": "2026-11-09T18:19:45.19Z",
+										"end": "2026-11-09T18:19:46.227Z"
+									},
+									{
+										"name": "cmd/versions",
+										"kind": "span",
+										"start": "2026-11-09T18:19:45.293Z",
+										"end": "2026-11-09T18:19:46.352Z"
+									},
+									{
+										"name": "cmd/vulngate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:45.316Z",
+										"end": "2026-11-09T18:19:46.433Z"
+									},
+									{
+										"name": "ghatrace",
+										"kind": "span",
+										"start": "2026-11-09T18:19:45.577Z",
+										"end": "2026-11-09T18:19:46.592Z"
+									},
+									{
+										"name": "internal/allow",
+										"kind": "span",
+										"start": "2026-11-09T18:19:46.228Z",
+										"end": "2026-11-09T18:19:47.242Z"
+									},
+									{
+										"name": "internal/ctxlife",
+										"kind": "span",
+										"start": "2026-11-09T18:19:46.353Z",
+										"end": "2026-11-09T18:19:47.38Z"
+									},
+									{
+										"name": "internal/deadgate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:46.434Z",
+										"end": "2026-11-09T18:19:47.449Z"
+									},
+									{
+										"name": "internal/exposure",
+										"kind": "span",
+										"start": "2026-11-09T18:19:46.594Z",
+										"end": "2026-11-09T18:19:47.695Z"
+									},
+									{
+										"name": "internal/fetch",
+										"kind": "span",
+										"start": "2026-11-09T18:19:47.243Z",
+										"end": "2026-11-09T18:19:49.101Z"
+									},
+									{
+										"name": "internal/gencache",
+										"kind": "span",
+										"start": "2026-11-09T18:19:47.381Z",
+										"end": "2026-11-09T18:20:22.29Z",
+										"children": [
+											{
+												"name": "TestFirstRunRunsEveryDirectiveAndTheSecondRunsOnlyWhatIsNotKeyed",
+												"kind": "span",
+												"start": "2026-11-09T18:19:47.398Z",
+												"end": "2026-11-09T18:19:50.539Z"
+											},
+											{
+												"name": "TestAChangeRunsTheMocksThatReadItAndOnlyThose",
+												"kind": "span",
+												"start": "2026-11-09T18:19:50.539Z",
+												"end": "2026-11-09T18:19:59.365Z",
+												"children": [
+													{
+														"name": "TestAChangeRunsTheMocksThatReadItAndOnlyThose/the_mocked_interface",
+														"kind": "span",
+														"start": "2026-11-09T18:19:50.539Z",
+														"end": "2026-11-09T18:19:51.954Z"
+													},
+													{
+														"name": "TestAChangeRunsTheMocksThatReadItAndOnlyThose/a_source-mode_file",
+														"kind": "span",
+														"start": "2026-11-09T18:19:51.954Z",
+														"end": "2026-11-09T18:19:53.772Z"
+													},
+													{
+														"name": "TestAChangeRunsTheMocksThatReadItAndOnlyThose/a_package_no_mock_reads",
+														"kind": "span",
+														"start": "2026-11-09T18:19:53.775Z",
+														"end": "2026-11-09T18:19:55.517Z"
+													},
+													{
+														"name": "TestAChangeRunsTheMocksThatReadItAndOnlyThose/a_package_beside_the_mock",
+														"kind": "span",
+														"start": "2026-11-09T18:19:55.517Z",
+														"end": "2026-11-09T18:19:57.196Z"
+													},
+													{
+														"name": "TestAChangeRunsTheMocksThatReadItAndOnlyThose/the_module's_go_line",
+														"kind": "span",
+														"start": "2026-11-09T18:19:57.196Z",
+														"end": "2026-11-09T18:19:59.365Z"
+													}
+												]
+											},
+											{
+												"name": "TestWhatNoMockReadsIsNotInTheKey",
+												"kind": "span",
+												"start": "2026-11-09T18:19:59.365Z",
+												"end": "2026-11-09T18:20:02.896Z",
+												"children": [
+													{
+														"name": "TestWhatNoMockReadsIsNotInTheKey/a_file_that_is_not_Go",
+														"kind": "span",
+														"start": "2026-11-09T18:19:59.365Z",
+														"end": "2026-11-09T18:20:00.375Z"
+													},
+													{
+														"name": "TestWhatNoMockReadsIsNotInTheKey/a_test_of_a_package_only_package_mode_reads",
+														"kind": "span",
+														"start": "2026-11-09T18:20:00.375Z",
+														"end": "2026-11-09T18:20:01.608Z"
+													},
+													{
+														"name": "TestWhatNoMockReadsIsNotInTheKey/a_directory_inside_the_package's",
+														"kind": "span",
+														"start": "2026-11-09T18:20:01.608Z",
+														"end": "2026-11-09T18:20:02.894Z"
+													}
+												]
+											},
+											{
+												"name": "TestTheBuildConfigurationIsInTheKey",
+												"kind": "span",
+												"start": "2026-11-09T18:20:02.896Z",
+												"end": "2026-11-09T18:20:05.511Z"
+											},
+											{
+												"name": "TestKeysDoNotDependOnWhereTheCheckoutIs",
+												"kind": "span",
+												"start": "2026-11-09T18:20:05.511Z",
+												"end": "2026-11-09T18:20:07.249Z"
+											},
+											{
+												"name": "TestAMockThatIsNotWhatTheCacheHasIsWrittenBack",
+												"kind": "span",
+												"start": "2026-11-09T18:20:07.249Z",
+												"end": "2026-11-09T18:20:10.438Z",
+												"children": [
+													{
+														"name": "TestAMockThatIsNotWhatTheCacheHasIsWrittenBack/deleted",
+														"kind": "span",
+														"start": "2026-11-09T18:20:07.249Z",
+														"end": "2026-11-09T18:20:08.801Z"
+													},
+													{
+														"name": "TestAMockThatIsNotWhatTheCacheHasIsWrittenBack/edited_by_hand",
+														"kind": "span",
+														"start": "2026-11-09T18:20:08.801Z",
+														"end": "2026-11-09T18:20:10.438Z"
+													}
+												]
+											},
+											{
+												"name": "TestAMockBesideWhatItMocksIsNotPartOfItsOwnKey",
+												"kind": "span",
+												"start": "2026-11-09T18:20:10.438Z",
+												"end": "2026-11-09T18:20:12.065Z"
+											},
+											{
+												"name": "TestTagsChooseTheFilesWhoseDirectivesRun",
+												"kind": "span",
+												"start": "2026-11-09T18:20:12.065Z",
+												"end": "2026-11-09T18:20:13.875Z"
+											},
+											{
+												"name": "TestAMockReadAfterAGeneratorItCannotKeyReadsWhatTheGeneratorWrote",
+												"kind": "span",
+												"start": "2026-11-09T18:20:13.875Z",
+												"end": "2026-11-09T18:20:16.142Z"
+											},
+											{
+												"name": "TestADirectiveItCannotKeyFailsAsGoGenerateFails",
+												"kind": "span",
+												"start": "2026-11-09T18:20:16.142Z",
+												"end": "2026-11-09T18:20:21.161Z",
+												"children": [
+													{
+														"name": "TestADirectiveItCannotKeyFailsAsGoGenerateFails/a_tool_go.mod_does_not_have",
+														"kind": "span",
+														"start": "2026-11-09T18:20:17.05Z",
+														"end": "2026-11-09T18:20:18.292Z"
+													},
+													{
+														"name": "TestADirectiveItCannotKeyFailsAsGoGenerateFails/a_package_that_is_not_there",
+														"kind": "span",
+														"start": "2026-11-09T18:20:18.292Z",
+														"end": "2026-11-09T18:20:19.673Z"
+													},
+													{
+														"name": "TestADirectiveItCannotKeyFailsAsGoGenerateFails/a_package_whose_import_is_not_there",
+														"kind": "span",
+														"start": "2026-11-09T18:20:19.673Z",
+														"end": "2026-11-09T18:20:21.161Z"
+													}
+												]
+											}
+										]
+									},
+									{
+										"name": "internal/gotest",
+										"kind": "span",
+										"start": "2026-11-09T18:19:47.45Z",
+										"end": "2026-11-09T18:19:48.475Z"
+									},
+									{
+										"name": "internal/mutate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:47.705Z",
+										"end": "2026-11-09T18:20:45.771Z",
+										"children": [
+											{
+												"name": "TestATestProcessIsHeldByItsCgroup",
+												"kind": "span",
+												"start": "2026-11-09T18:19:47.728Z",
+												"end": "2026-11-09T18:19:50.138Z"
+											},
+											{
+												"name": "TestAnEditThatAllocatesForEverIsStoppedAndRefused",
+												"kind": "span",
+												"start": "2026-11-09T18:19:50.853Z",
+												"end": "2026-11-09T18:19:58.083Z"
+											},
+											{
+												"name": "TestEveryTestProcessIsHeldToItsShare",
+												"kind": "span",
+												"start": "2026-11-09T18:19:58.086Z",
+												"end": "2026-11-09T18:20:00.095Z"
+											},
+											{
+												"name": "TestARefusalIsKeptForTheCodeItWasAskedOf",
+												"kind": "span",
+												"start": "2026-11-09T18:20:00.134Z",
+												"end": "2026-11-09T18:20:03.945Z"
+											},
+											{
+												"name": "TestARefusalIsKeptForThePackagesItsTestsAreBuiltFrom",
+												"kind": "span",
+												"start": "2026-11-09T18:20:03.945Z",
+												"end": "2026-11-09T18:20:08.636Z"
+											},
+											{
+												"name": "TestAPackageWithNoTestsIsSaidSoAndNotCountedAsASurvivor",
+												"kind": "span",
+												"start": "2026-11-09T18:20:08.741Z",
+												"end": "2026-11-09T18:20:16.572Z"
+											},
+											{
+												"name": "TestAnEditIsPutToTheTestsThatReachIt",
+												"kind": "span",
+												"start": "2026-11-09T18:20:17.184Z",
+												"end": "2026-11-09T18:20:20.129Z"
+											},
+											{
+												"name": "TestEveryEditIsCountedAsTheTestsAnswered",
+												"kind": "span",
+												"start": "2026-11-09T18:20:20.573Z",
+												"end": "2026-11-09T18:20:22.021Z"
+											},
+											{
+												"name": "TestATestThatAlwaysFailsRefusesNothing",
+												"kind": "span",
+												"start": "2026-11-09T18:20:22.021Z",
+												"end": "2026-11-09T18:20:23.299Z"
+											},
+											{
+												"name": "TestAPackageWithNoTestsIsAskedThroughItsImporters",
+												"kind": "span",
+												"start": "2026-11-09T18:20:23.299Z",
+												"end": "2026-11-09T18:20:24.357Z"
+											},
+											{
+												"name": "TestATestThatWritesInItsDirectoryWritesInACopyOfItsOwn",
+												"kind": "span",
+												"start": "2026-11-09T18:20:24.383Z",
+												"end": "2026-11-09T18:20:25.961Z"
+											},
+											{
+												"name": "TestAnEditBuiltAloneIsAskedInACopyOfItsOwn",
+												"kind": "span",
+												"start": "2026-11-09T18:20:25.961Z",
+												"end": "2026-11-09T18:20:27.374Z"
+											},
+											{
+												"name": "TestAnEditItsOwnTestsLetThroughIsAskedOfEachImporterInTurn",
+												"kind": "span",
+												"start": "2026-11-09T18:20:27.374Z",
+												"end": "2026-11-09T18:20:31.292Z"
+											},
+											{
+												"name": "TestEachTestProcessHasATemporaryDirectoryOfItsOwn",
+												"kind": "span",
+												"start": "2026-11-09T18:20:31.292Z",
+												"end": "2026-11-09T18:20:32.483Z"
+											},
+											{
+												"name": "TestAnEditInTheSchemaIsAnsweredAsItIsAlone",
+												"kind": "span",
+												"start": "2026-11-09T18:20:32.483Z",
+												"end": "2026-11-09T18:20:41.478Z"
+											},
+											{
+												"name": "TestAnImportersTestsAreBuiltFromTheModulesRoot",
+												"kind": "span",
+												"start": "2026-11-09T18:20:42.766Z",
+												"end": "2026-11-09T18:20:44.535Z"
+											}
+										]
+									},
+									{
+										"name": "internal/proven",
+										"kind": "span",
+										"start": "2026-11-09T18:19:48.478Z",
+										"end": "2026-11-09T18:19:49.637Z"
+									},
+									{
+										"name": "internal/refs",
+										"kind": "span",
+										"start": "2026-11-09T18:19:49.103Z",
+										"end": "2026-11-09T18:20:00.357Z",
+										"children": [
+											{
+												"name": "TestTasksAreAskedOfTheTaskGoModPins",
+												"kind": "span",
+												"start": "2026-11-09T18:19:49.159Z",
+												"end": "2026-11-09T18:19:59.337Z"
+											}
+										]
+									},
+									{
+										"name": "internal/runtrace",
+										"kind": "span",
+										"start": "2026-11-09T18:19:49.651Z",
+										"end": "2026-11-09T18:19:50.784Z"
+									},
+									{
+										"name": "internal/sfw",
+										"kind": "span",
+										"start": "2026-11-09T18:19:50.786Z",
+										"end": "2026-11-09T18:19:51.891Z"
+									},
+									{
+										"name": "internal/shell",
+										"kind": "span",
+										"start": "2026-11-09T18:19:51.935Z",
+										"end": "2026-11-09T18:19:52.963Z"
+									},
+									{
+										"name": "internal/taskgate",
+										"kind": "span",
+										"start": "2026-11-09T18:19:55.15Z",
+										"end": "2026-11-09T18:19:56.48Z"
+									},
+									{
+										"name": "internal/testquality",
+										"kind": "span",
+										"start": "2026-11-09T18:20:02.714Z",
+										"end": "2026-11-09T18:20:31.009Z",
+										"children": [
+											{
+												"name": "TestTestsThatCannotFailAreFlagged",
+												"kind": "span",
+												"start": "2026-11-09T18:20:02.731Z",
+												"end": "2026-11-09T18:20:08.286Z"
+											},
+											{
+												"name": "TestTestsThatCanFailAreNotFlagged",
+												"kind": "span",
+												"start": "2026-11-09T18:20:08.286Z",
+												"end": "2026-11-09T18:20:13.965Z"
+											},
+											{
+												"name": "TestLongSleepsInATestAreFlagged",
+												"kind": "span",
+												"start": "2026-11-09T18:20:13.965Z",
+												"end": "2026-11-09T18:20:20.13Z"
+											},
+											{
+												"name": "TestTestsThatNeverRunAreFlagged",
+												"kind": "span",
+												"start": "2026-11-09T18:20:20.13Z",
+												"end": "2026-11-09T18:20:25.274Z"
+											},
+											{
+												"name": "TestFindingsAreKeyedByThePackageAPersonWrites",
+												"kind": "span",
+												"start": "2026-11-09T18:20:25.274Z",
+												"end": "2026-11-09T18:20:29.752Z"
+											}
+										]
+									},
+									{
+										"name": "internal/vulngate",
+										"kind": "span",
+										"start": "2026-11-09T18:20:02.847Z",
+										"end": "2026-11-09T18:20:03.879Z"
+									},
+									{
+										"name": "provenance",
+										"kind": "span",
+										"start": "2026-11-09T18:20:05.695Z",
+										"end": "2026-11-09T18:20:06.736Z"
+									},
+									{
+										"name": "sbom",
+										"kind": "span",
+										"start": "2026-11-09T18:20:08.87Z",
+										"end": "2026-11-09T18:20:10.507Z"
+									},
+									{
+										"name": "trustroot",
+										"kind": "span",
+										"start": "2026-11-09T18:20:43.986Z",
+										"end": "2026-11-09T18:20:45.318Z"
+									},
+									{
+										"name": "versions",
+										"kind": "span",
+										"start": "2026-11-09T18:20:44.543Z",
+										"end": "2026-11-09T18:20:45.619Z"
+									},
+									{
+										"name": "versions/gate",
+										"kind": "span",
+										"start": "2026-11-09T18:20:44.576Z",
+										"end": "2026-11-09T18:20:46.085Z"
+									},
+									{
+										"name": "versions/upstream",
+										"kind": "span",
+										"start": "2026-11-09T18:20:46.416Z",
+										"end": "2026-11-09T18:20:47.691Z"
+									}
+								]
+							}
+						]
+					},
+					{
+						"name": "Coverage summary",
+						"kind": "step",
+						"start": "2026-11-09T18:20:48Z",
+						"end": "2026-11-09T18:20:48Z"
+					},
+					{
+						"name": "Upload Go coverage HTML",
+						"kind": "step",
+						"start": "2026-11-09T18:20:48Z",
+						"end": "2026-11-09T18:20:49Z"
+					},
+					{
+						"name": "What this change broke, and whether a test noticed",
+						"kind": "step",
+						"start": "2026-11-09T18:20:49Z",
+						"end": "2026-11-09T18:20:58.612Z"
+					}
+				]
+			},
+			"critical": true
+		}
+	],
+	"run": 42672797946,
+	"skipped": null,
+	"start": "2026-11-09T18:17:00Z",
+	"title": "CI",
+	"url": "https://github.com/spin-stack/go-tools/actions/runs/42672797946"
+}

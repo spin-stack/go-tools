@@ -67,7 +67,7 @@ button { font: inherit; color: var(--fg); background: var(--row); border: 1px so
   <span>longest wait <b>{{.Worst}}</b></span>
 </div>
 <div class="bar-tools">
-  <button id="open">Expand all</button><button id="close">Collapse all</button>
+  <button id="expand">Expand all</button><button id="collapse">Collapse all</button>
   <span class="legend">
     <span><i style="background:var(--crit)"></i>critical path</span>
     <span><i style="background:var(--job)"></i>job</span>
@@ -167,11 +167,14 @@ axis.appendChild(at);
 wf.appendChild(axis);
 
 const lanes = data.lanes.map(l => row(l.job, 0, l)[0]);
-document.getElementById('open').onclick = () => {
+document.getElementById('expand').onclick = () => {
   const all = [...wf.querySelectorAll('.row')].filter(r => r.kids);
   for (const r of all) toggle(r, true);
 };
-document.getElementById('close').onclick = () => lanes.forEach(r => toggle(r, false));
+document.getElementById('collapse').onclick = () => lanes.forEach(r => toggle(r, false));
+// trace.html#open opens with everything expanded: a link that shows what it points at. No element
+// has that id, so the page does not scroll to one.
+if (location.hash === '#open') document.getElementById('expand').click();
 </script>
 </body>
 </html>
