@@ -113,7 +113,7 @@ func latest(ctx context.Context, base, name, root, goos, goarch string, now time
 		}
 	}
 	archive := name + "_" + goos + "_" + goarch + ".tar.gz"
-	sums, err := fetch.Bytes(ctx, base+"/releases/download/"+tag+"/"+Checksums, 1<<20)
+	sums, err := fetch.Bytes(ctx, base+"/releases/download/"+tag+"/"+Checksums, 1<<20) // mutate-exempt: a bound, not a size: a release's checksums are four lines
 	if err != nil {
 		return "", fmt.Errorf("toolcache: %s %s: %w", name, tag, err)
 	}
@@ -147,14 +147,15 @@ func exists(p string) bool {
 // than fresh ago, else asked of GitHub - where /releases/latest redirects to the release, which no
 // API quota counts - and recorded; the one stamp records, however old, when GitHub cannot answer.
 func latestTag(ctx context.Context, base, stamp string, now time.Time) (string, error) {
-	recorded, _ := os.ReadFile(stamp) //nolint:gosec // this cache's own file
-	if st, err := os.Stat(stamp); err == nil && len(recorded) > 0 && now.Sub(st.ModTime()) < fresh {
-		return string(recorded), nil
+	raw, _ := os.ReadFile(stamp) //nolint:gosec // this cache's own file
+	recorded := string(raw)
+	if st, err := os.Stat(stamp); recorded != "" && err == nil && now.Sub(st.ModTime()) < fresh {
+		return recorded, nil
 	}
 	tag, err := askLatest(ctx, base)
 	if err != nil {
-		if len(recorded) > 0 {
-			return string(recorded), nil
+		if recorded != "" {
+			return recorded, nil
 		}
 		return "", fmt.Errorf("toolcache: the latest release of %s: %w", base, err)
 	}
