@@ -19,11 +19,8 @@ func place(lanes []Lane, spans []ghatrace.Span) {
 		}
 		slice := Slice{Name: s.Name, Kind: "span", Start: s.Start, End: s.End, Failed: s.Exit != 0}
 		parent := &l.Job
-		// Steps are timed to the second, floored: the step a span ran in is the last to start by then.
-		for i := range l.Job.Children {
-			if !l.Job.Children[i].Start.After(s.Start) {
-				parent = &l.Job.Children[i]
-			}
+		if step := stepAt(&l.Job, s.Start); step != nil {
+			parent = step
 		}
 		// Spans that ran side by side in one step overlap, and the time alone puts a part of one
 		// inside the other: a span that names its parent goes under it.
