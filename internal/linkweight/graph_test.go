@@ -71,6 +71,10 @@ func TestChainIsAShortestPathFromTheRoot(t *testing.T) {
 	if !slices.Equal(c, want) || via {
 		t.Errorf("Chain = %v via a method %v, want %v by calls", c, via, want)
 	}
+	// A type's own chain ends at the type: no method is entered.
+	if c, via := g.Chain("type:example.com/m/lib.Value"); via || !slices.Equal(c, []string{"_", "_rt0_amd64_linux", "runtime.main", "main.main", "type:example.com/m/lib.Value"}) {
+		t.Errorf("the type's chain = %v via a method %v", c, via)
+	}
 	if c, _ := g.Chain("nothing.Links"); c != nil {
 		t.Errorf("a symbol the binary does not link has the chain %v", c)
 	}

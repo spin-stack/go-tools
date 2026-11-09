@@ -53,6 +53,10 @@ func TestTheExampleTheSiteShows(t *testing.T) {
 	if err := json.Unmarshal(raw, &bins); err != nil {
 		t.Fatal(err)
 	}
+	// Without a list it is a report, and a report is exit 0 whatever it says.
+	if code := run([]string{"-roots", "./cmd/worker"}, &out, &errs); code != 0 {
+		t.Errorf("a report without -allow: exit %d, %s", code, errs.String())
+	}
 	// A report it cannot write is no answer.
 	if code := run([]string{"-json", filepath.Join(t.TempDir(), "none", "report.json")}, &out, &errs); code != 2 || !strings.Contains(errs.String(), "no such file") {
 		t.Errorf("a -json it cannot write: exit %d, %s", code, errs.String())
