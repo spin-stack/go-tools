@@ -87,6 +87,19 @@ tasks:
 Inside `$( )` a refusal is only the command's: in a script, `set -e` sees it when the path is
 assigned on a line of its own, `file=$(go tool versions fetch kernel _cache)`.
 
+### A server having a bad moment
+
+Every download and every lookup is tried again when what failed would not fail the same way the
+next time: a 500, 502, 503 or 504, a 408 or a 429, a connection refused, reset or cut halfway
+through the body, or a server that sends nothing for 30 seconds. Five attempts, about 4, 8, 16
+and 32 seconds apart (a 429's `Retry-After` is waited, up to a minute), and never more than two
+minutes of waiting in all. Each wait is said on stderr: the URL, what it answered, how long until
+the next attempt and which attempt that is.
+
+A 404, a 403 or any other answer that would be the same next time fails at once. A download cut
+short is thrown away and fetched again from its first byte, and the pin is checked on the bytes
+that arrived whole: a file that is not the pin is refused, not tried again.
+
 ## Keeping up
 
 ```sh

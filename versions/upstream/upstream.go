@@ -203,12 +203,16 @@ func PinnedFile(ctx context.Context, e versions.Entry, dir string) (string, erro
 		return "", fmt.Errorf("versions: %w", err)
 	}
 	defer func() { _ = os.Remove(part.Name()) }() // gone once renamed; otherwise what was cut short
-	got, err := download(ctx, e.URL(), part)
+	err = fetch.File(ctx, e.URL(), part)
 	if cerr := part.Close(); err == nil { // mutate-exempt: closing a file just written fails only on a disk that failed the write
 		err = cerr
 	}
 	if err != nil {
 		return "", fmt.Errorf("versions: %s: %w", e.Name, err)
+	}
+	got, err := fileSum(part.Name())
+	if err != nil { // mutate-exempt: the file this function just wrote and closed
+		return "", fmt.Errorf("versions: %w", err)
 	}
 	if got != e.Pin {
 		return "", fmt.Errorf("versions: %s is not what versions.yaml pins: %s's SHA-256 is %s", e.Name, e.URL(), got)
@@ -217,20 +221,6 @@ func PinnedFile(ctx context.Context, e versions.Entry, dir string) (string, erro
 		return "", fmt.Errorf("versions: %w", err)
 	}
 	return file, nil
-}
-
-// download writes url's body to w and answers its SHA-256.
-func download(ctx context.Context, url string, w io.Writer) (string, error) {
-	body, err := fetch.Get(ctx, url)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = body.Close() }() // read-only
-	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(w, h), body); err != nil {
-		return "", fmt.Errorf("reading %s: %w", url, err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // fileSum is the SHA-256 of the file at p.
@@ -259,16 +249,24 @@ func run(ctx context.Context, name string, args ...string) (string, error) {
 }
 
 func getJSON(ctx context.Context, url string, into any) error {
-	body, err := fetch.Get(ctx, url)
-	if err != nil {
+	// Decoded whole once it has all arrived, so an attempt cut short leaves nothing in into.
+	var raw json.RawMessage
+	if err := fetch.Read(ctx, url, func(body io.Reader) error { return json.NewDecoder(body).Decode(&raw) }); err != nil {
 		return fmt.Errorf("versions: %w", err)
 	}
-	defer func() { _ = body.Close() }() // read-only
-	return json.NewDecoder(body).Decode(into)
+	return json.Unmarshal(raw, into)
 }
 
 func sha256Of(ctx context.Context, url string) (string, error) {
-	sum, err := download(ctx, url, io.Discard)
+	var sum string
+	err := fetch.Read(ctx, url, func(body io.Reader) error {
+		h := sha256.New()
+		if _, err := io.Copy(h, body); err != nil {
+			return err
+		}
+		sum = hex.EncodeToString(h.Sum(nil))
+		return nil
+	})
 	if err != nil {
 		return "", fmt.Errorf("versions: %w", err)
 	}
