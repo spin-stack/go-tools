@@ -25,8 +25,29 @@ func place(lanes []Lane, spans []ghatrace.Span) {
 				parent = &l.Job.Children[i]
 			}
 		}
+		// Spans that ran side by side in one step overlap, and the time alone puts a part of one
+		// inside the other: a span that names its parent goes under it.
+		if named := find(parent, slice, s.Parent); s.Parent != "" && named != nil {
+			named.Children = append(named.Children, slice)
+			continue
+		}
 		nest(parent, slice)
 	}
+}
+
+// find is the span under root named name that contains s, the last to start of them.
+func find(root *Slice, s Slice, name string) *Slice {
+	var found *Slice
+	for i := range root.Children {
+		c := &root.Children[i]
+		if c.Name == name && !s.Start.Before(c.Start) && !s.End.After(c.End) {
+			found = c
+		}
+		if deeper := find(c, s, name); deeper != nil {
+			found = deeper
+		}
+	}
+	return found
 }
 
 func laneOf(lanes []Lane, s ghatrace.Span) *Lane {

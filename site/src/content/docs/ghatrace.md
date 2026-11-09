@@ -47,6 +47,8 @@ interrupt on to it, so a cancelled job still records where it was.
 A Go program that knows its own parts - a runner of lanes, a test harness - records them itself
 with the package `github.com/spin-stack/go-tools/ghatrace`: `ghatrace.Record(ghatrace.Span{Name:
 ..., Start: ..., End: ..., Exit: ...})` writes to the same file, and does nothing off a runner.
+Parts that run side by side in one step overlap, and by the time alone a part of one is inside the
+other too: a span whose `Parent` names the span it belongs to goes under that one.
 
 A job uploads that file as an artifact whose name starts with `ghatrace-`, and `run` reads every
 such artifact of the run. A span goes under the step that ran it, in the job whose runner

@@ -139,6 +139,42 @@ func TestSpansGoUnderTheStepTheyRanInAndNest(t *testing.T) {
 	}
 }
 
+// Two lanes side by side in one step: by the time alone, every part of lint is inside test too.
+func TestASpanGoesUnderTheParentItNames(t *testing.T) {
+	part := func(name, parent string, s, e float64) ghatrace.Span {
+		sp := span(name, "r3", s, e, 0)
+		sp.Parent = parent
+		return sp
+	}
+	spans := []ghatrace.Span{
+		span("lint", "r3", 130, 290, 0),
+		span("test", "r3", 135, 280, 0),
+		part("golangci-lint", "lint", 140, 200),
+		part("deadcode", "lint", 200, 210),
+		part("go test", "test", 140, 270),
+		part("race", "go test", 150, 260),
+		// Named, but no span of that name holds it: time decides, and only test holds it.
+		part("stray", "nothing", 271, 275),
+	}
+	tr := runtrace.Build(runOf(), spans)
+	stepB := tr.Lanes[3].Job.Children[1]
+	tree := map[string][]string{}
+	var walk func(s runtrace.Slice)
+	walk = func(s runtrace.Slice) {
+		for _, c := range s.Children {
+			tree[s.Name] = append(tree[s.Name], c.Name)
+			walk(c)
+		}
+	}
+	walk(stepB)
+	assert.Equal(t, map[string][]string{
+		"stepB":   {"lint"},
+		"lint":    {"test", "golangci-lint", "deadcode"},
+		"test":    {"go test", "stray"},
+		"go test": {"race"},
+	}, tree)
+}
+
 // track is one of a process's tracks in a Perfetto trace.
 type track struct{ pid, tid int }
 
