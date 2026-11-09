@@ -96,6 +96,16 @@ and 32 seconds apart (a 429's `Retry-After` is waited, up to a minute), and neve
 minutes of waiting in all. Each wait is said on stderr: the URL, what it answered, how long until
 the next attempt and which attempt that is.
 
+An error names the host that answered when a redirect took the request elsewhere: a 504 from
+`release-assets.githubusercontent.com` is GitHub's download CDN, not github.com.
+
+GitHub sheds anonymous downloads under load, so in CI set `GITHUB_TOKEN` (a workflow has
+`${{ github.token }}`) or `GH_TOKEN`. With one, a release's file
+(`https://github.com/<owner>/<repo>/releases/download/<tag>/<file>`) is asked for through
+GitHub's API - its release by tag, then its asset as `application/octet-stream` - since a token
+on the github.com URL itself is not read. The token goes to `api.github.com` and nowhere else: not
+to the CDN the API redirects to, not to github.com, not to any other host.
+
 A 404, a 403 or any other answer that would be the same next time fails at once. A download cut
 short is thrown away and fetched again from its first byte, and the pin is checked on the bytes
 that arrived whole: a file that is not the pin is refused, not tried again.

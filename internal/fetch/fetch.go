@@ -12,6 +12,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -78,12 +79,20 @@ func Exists(ctx context.Context, url string) (bool, error) {
 }
 
 func (p retry) read(ctx context.Context, url string, read func(io.Reader) error) error {
-	return p.try(ctx, http.MethodGet, url, func(resp *http.Response, body io.Reader) error {
+	target, err := p.asset(ctx, url)
+	if err != nil {
+		return err
+	}
+	err = p.try(ctx, http.MethodGet, target, func(resp *http.Response, body io.Reader) error {
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("%s answered %s", url, resp.Status)
+			return answered(target, resp)
 		}
 		return read(body)
 	})
+	if err != nil && target != url {
+		return fmt.Errorf("%s: %w", url, err)
+	}
+	return err
 }
 
 func (p retry) bytes(ctx context.Context, url string, limit int64) ([]byte, error) {
@@ -116,6 +125,14 @@ func (p retry) file(ctx context.Context, url string, f *os.File) error {
 }
 
 func (p retry) exists(ctx context.Context, url string) (bool, error) {
+	if owner, repo, tag, name, ok := releaseFile(url); ok && token() != "" {
+		assets, err := p.release(ctx, owner, repo, tag)
+		if err != nil {
+			return false, fmt.Errorf("%s: %w", url, err)
+		}
+		_, ok := assets[name]
+		return ok, nil
+	}
 	var ok bool
 	err := p.try(ctx, http.MethodHead, url, func(resp *http.Response, _ io.Reader) error {
 		switch resp.StatusCode {
@@ -125,9 +142,19 @@ func (p retry) exists(ctx context.Context, url string) (bool, error) {
 		case http.StatusNotFound:
 			return nil
 		}
-		return fmt.Errorf("%s answered %s", url, resp.Status)
+		return answered(url, resp)
 	})
 	return ok, err
+}
+
+// answered is the error for a status other than the one wanted, naming the host that gave it
+// when a redirect took the request elsewhere: a 504 from GitHub's release CDN is not one from
+// github.com.
+func answered(url string, resp *http.Response) error {
+	if asked, err := neturl.Parse(url); err == nil && resp.Request != nil && resp.Request.URL.Host != asked.Host {
+		return fmt.Errorf("%s: %s answered %s", url, resp.Request.URL.Host, resp.Status)
+	}
+	return fmt.Errorf("%s answered %s", url, resp.Status)
 }
 
 // try makes the request until use answers, an attempt fails in a way another would not mend, or
@@ -174,9 +201,13 @@ func (p retry) once(ctx context.Context, method, url string, use func(*http.Resp
 	if err != nil {
 		return err
 	}
-	// GitHub answers sixty unauthenticated requests an hour; a token raises it.
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" && strings.HasPrefix(url, "https://api.github.com/") {
-		req.Header.Set("Authorization", "Bearer "+token)
+	// The token goes to GitHub's API and nowhere else: http.Client drops it on a redirect to
+	// another host, which is where an asset's bytes are served from.
+	if t := token(); t != "" && strings.HasPrefix(url, githubAPI) {
+		req.Header.Set("Authorization", "Bearer "+t)
+		if strings.Contains(url, "/releases/assets/") {
+			req.Header.Set("Accept", "application/octet-stream")
+		}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -188,7 +219,7 @@ func (p retry) once(ctx context.Context, method, url string, use func(*http.Resp
 	}
 	defer func() { _ = resp.Body.Close() }() // read-only
 	if passing(resp.StatusCode) {
-		return &again{err: fmt.Errorf("%s answered %s", url, resp.Status), after: retryAfter(resp.Header.Get("Retry-After"))}
+		return &again{err: answered(url, resp), after: retryAfter(resp.Header.Get("Retry-After"))}
 	}
 	stalled.Reset(p.quiet)
 	err = use(resp, &watched{ctx: ctx, url: url, body: resp.Body, stalled: stalled, quiet: p.quiet})
