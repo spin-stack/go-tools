@@ -81,7 +81,7 @@ func PackageOf(sym string, pkgs map[string]bool, mainPath string) string {
 	name = strings.TrimLeft(name, "*")
 	// A generic's type arguments and a method's receiver come after the package; either may hold
 	// a slash or a dot of another package.
-	if i := strings.IndexAny(name, "[("); i >= 0 {
+	if i := strings.IndexAny(name, "[("); i >= 0 { // mutate-exempt: no linker name starts with ( or [, so i is never 0
 		name = name[:i]
 	}
 	if name == "main" || strings.HasPrefix(name, "main.") {
@@ -89,7 +89,7 @@ func PackageOf(sym string, pkgs map[string]bool, mainPath string) string {
 	}
 	slash := strings.LastIndex(name, "/")
 	best := ""
-	for i := slash + 1; i < len(name); i++ {
+	for i := slash + 1; i < len(name); i++ { // mutate-exempt: a dot right after the slash would end an empty path element, which no package has
 		if name[i] == '.' && pkgs[name[:i]] {
 			best = name[:i]
 		}

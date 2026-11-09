@@ -17,15 +17,15 @@ const Std = "std"
 type Package struct {
 	ImportPath string   `json:"ImportPath"`
 	Imports    []string `json:"Imports"`
-	Standard   bool     `json:"Standard"`
-	Module     *struct {
+	// Module is nil for the standard library's packages.
+	Module *struct {
 		Path string `json:"Path"`
 	} `json:"Module"`
 }
 
 // module is the module a package is counted under.
 func (p Package) module() string {
-	if p.Module == nil || p.Standard {
+	if p.Module == nil {
 		return Std
 	}
 	return p.Module.Path
@@ -134,10 +134,9 @@ func Analyze(in Input) Binary {
 		}
 		pkgBytes[p] += s.Size
 	}
-	if allCode > 0 {
-		for p, c := range code {
-			pkgBytes[p] += uint64(float64(in.Layout.PCLNTab) * float64(c) / float64(allCode))
-		}
+	// code has an entry only where allCode counted bytes, so the division is never by zero.
+	for p, c := range code {
+		pkgBytes[p] += uint64(float64(in.Layout.PCLNTab) * float64(c) / float64(allCode))
 	}
 	b.Unattributed = pkgBytes[Unattributed]
 	delete(pkgBytes, Unattributed)
@@ -359,7 +358,8 @@ func cuts(mainPath, module string, pkgs []Package, bytes map[string]uint64) []Cu
 	if !ok {
 		return nil
 	}
-	all := g.reach(-1, -1)
+	// A package does not import itself: skipping that edge skips none.
+	all := g.reach(g.start, g.start)
 	before := g.modules(all, bytes)
 	var out []Cut
 	for i, p := range pkgs {

@@ -143,3 +143,17 @@ func TestNoAnswerIsExit2(t *testing.T) {
 		}
 	}
 }
+
+// A failed build's message is what go build said, without the graph the linker started printing.
+func TestNotEdgesIsWhatTheBuildSaid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deps")
+	if err := os.WriteFile(path, []byte("_ -> main.main\n# example.com/m\n\nmain.go:3: undefined: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := notEdges(path), "# example.com/m\nmain.go:3: undefined: x"; got != want {
+		t.Errorf("notEdges = %q, want %q", got, want)
+	}
+	if got := notEdges(filepath.Join(t.TempDir(), "none")); !strings.Contains(got, "no such file") {
+		t.Errorf("notEdges of no file = %q", got)
+	}
+}
