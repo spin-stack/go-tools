@@ -190,6 +190,18 @@ func TestRunRefusesSpansItCannotRead(t *testing.T) {
 	assert.ErrorContains(t, run(t.Context(), []string{"run", "-repo", "o/r", "-run", "9", "-out", dir, "-spans", dir}), "bad.jsonl: line 1")
 }
 
+// -json goes right after go test's own `go test`, and into nothing else.
+func TestWithJSON(t *testing.T) {
+	for _, c := range []struct{ in, want []string }{
+		{[]string{"go", "test", "-v", "./..."}, []string{"go", "test", "-json", "-v", "./..."}},
+		{[]string{"/usr/local/go/bin/go", "test"}, []string{"/usr/local/go/bin/go", "test", "-json"}},
+		{[]string{"make", "test"}, []string{"make", "test"}},
+		{[]string{"sh", "-c", "go test -json ."}, []string{"sh", "-c", "go test -json ."}},
+	} {
+		assert.Equal(t, c.want, withJSON(c.in), strings.Join(c.in, " "))
+	}
+}
+
 func TestCommands(t *testing.T) {
 	for _, help := range []string{"help", "-h", "--help"} {
 		assert.NoError(t, run(t.Context(), []string{help}), help)
@@ -290,7 +302,7 @@ func TestGoTestWritesWhatGoTestWouldAndRecordsItsTests(t *testing.T) {
 	// they are, and whose go test writes JSON all the same.
 	t.Setenv("SAMPLE_FAIL", "")
 	out = written(t, &os.Stdout, func() {
-		err = run(t.Context(), []string{"gotest", "-name", "unit", "--", "sh", "-c", "echo; echo wrapper; exec go test -v ."})
+		err = run(t.Context(), []string{"gotest", "-name", "unit", "--", "sh", "-c", "echo; echo wrapper; exec go test -json -v ."})
 	})
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(out, "\nwrapper\n"), out)
@@ -308,6 +320,7 @@ func TestGoTestWritesWhatGoTestWouldAndRecordsItsTests(t *testing.T) {
 	}
 	assert.Equal(t, []string{
 		"TestPasses<example.com/sample>0", "TestSays<example.com/sample>0", "TestFailsWhenAsked<example.com/sample>1",
+		"TestGoCommandsItRunsWriteNoJSON<example.com/sample>0",
 		"example.com/sample<go test>1", "go test<>1",
 		// -min 1s: no test of the second run is a span; its package is.
 		"example.com/sample<unit>0", "unit<>0",

@@ -46,13 +46,15 @@ with a `##[group]Run ...` line. `run` reads each finished job's log (`-logs=fals
 draws a step's own steps under it, each until the next starts. Nothing in the workflow changes: a
 setup action that takes a minute in every job shows which of its parts takes it.
 
-**Go's tests, from `go test -json`.** `ghatrace gotest` runs a go test command with `-json`, set
-through `GOFLAGS` so that a wrapper in front of `go test` - one that starts a database first - is
-run as it is:
+**Go's tests, from `go test -json`.** `ghatrace gotest` runs a go test command with `-json` put
+after its `go test` - never through `GOFLAGS`, which every go command a test runs would inherit
+and answer in JSON. A wrapper in front of go test - a script that starts a database first - is
+run as it is, and its go test is given `-json` by whoever wrote it:
 
 ```sh
 go tool ghatrace gotest -- go test -v -count=1 ./internal/e2e/...
 go tool ghatrace gotest -name unit -min 2s -- go test -race ./...
+go tool ghatrace gotest -- with-db.sh go test -json ./store/...
 ```
 
 It writes what go test would have written, with `-v` or without, so a log and whatever reads one
