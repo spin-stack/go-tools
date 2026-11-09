@@ -137,23 +137,27 @@ tasks:
         cmd: >-
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git show -s --format=%ct HEAD)"
           -C {{.OUT}}/release/{{replace "/" "_" .ITEM}} -czf {{.OUT}}/release/go-tools_{{replace "/" "_" .ITEM}}.tar.gz .
+      # What cmd/task holds a download of the latest release to, no versions.yaml pinning it.
+      - cd {{.OUT}}/release && sha256sum go-tools_*.tar.gz > checksums.txt
+
+  release:name:
+    desc: The release SHA is - released already, or the next v<YYYYMMDD>.<NN> today - as version= and new= for $GITHUB_OUTPUT.
+    requires:
+      vars: [SHA]
+    cmds:
+      - go run ./internal/release/cmd/releasename {{.SHA}} >> "${GITHUB_OUTPUT:-/dev/stdout}"
 
   release:publish:
-    desc: Publish _output/release's archives as the GitHub release bin-<commit time>, the version a versions.yaml pins (GH_TOKEN, GITHUB_SHA).
-    # Named by the commit's UTC time, which is also the time in the pseudo-version a go.mod requires
-    # this commit at: versions/gate holds a repository's go-tools entry to its go.mod's. A tag of
-    # that shape is no module version, so `go get` never takes it for one. A run that is retried
-    # publishes the release it made the first time, and fails rather than replace another's files.
+    desc: Publish _output/release as the GitHub release VERSION of SHA, which tags it (GH_TOKEN).
+    # The tag is made by the release, last: a release that failed to publish is no tag that names a
+    # commit with no files.
+    requires:
+      vars: [SHA, VERSION]
     cmds:
-      - |
-        set -euo pipefail
-        tag="bin-$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d.%H%M%S "${GITHUB_SHA}")"
-        if gh release view "$tag" >/dev/null 2>&1; then
-          echo "$tag is published already"
-          exit 0
-        fi
-        gh release create "$tag" {{.OUT}}/release/*.tar.gz --target "${GITHUB_SHA}" --title "$tag" \
-          --notes "Every go-tools command at ${GITHUB_SHA}, for a repository's versions.yaml: \`go tool versions bump go-tools\`."
+      - >-
+        gh release create {{.VERSION}} {{.OUT}}/release/*.tar.gz {{.OUT}}/release/checksums.txt
+        --target {{.SHA}} --title {{.VERSION}}
+        --notes "Every go-tools command at {{.SHA}}, attested as built by release.yml. A repository's \`go tool task\` runs the latest."
 
   site:
     desc: Build the documentation site (site/, Astro Starlight) into site/dist; task site:dev serves it with live reload.

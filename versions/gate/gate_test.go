@@ -139,34 +139,21 @@ func TestAGateOutsideARepositorySaysWhatGitSaid(t *testing.T) {
 	}
 }
 
-// A go.mod that takes go-tools' task command reads versions.yaml's task and go-tools through it,
-// and holds go-tools to the commit the go.mod requires; one without it reads neither.
-func TestTheTaskCommandReadsTaskAndGoToolsAtGoModsCommit(t *testing.T) {
-	pins := func(tools string) string {
-		file := "- name: task\n  kind: download\n  source: https://x/v{version}/task_{os}_{arch}.tar.gz\n  version: 3.54.0\n  pins:\n    linux/amd64: " +
-			strings.Repeat("a", 64) + "\n  track: github-release https://github.com/go-task/task\n"
-		if tools != "" {
-			file += "- name: go-tools\n  kind: download\n  source: https://x/bin-{version}/go-tools_{os}_{arch}.tar.gz\n  version: \"" + tools +
-				"\"\n  pins:\n    linux/amd64: " + strings.Repeat("b", 64) + "\n  track: github-release https://github.com/spin-stack/go-tools bin-\n"
-		}
-		return file
-	}
-	const tool = "\ntool (\n\tgithub.com/spin-stack/go-tools/cmd/task\n)\n"
-	const require = "module x\n\ngo 1.27\n\nrequire github.com/spin-stack/go-tools v0.0.0-20261109193146-29e3e436a905\n"
+// A go.mod that takes go-tools' task command reads versions.yaml's task through it, and owes it
+// one; a go.mod without it reads no task.
+func TestTheTaskCommandReadsTask(t *testing.T) {
+	const task = "- name: task\n  kind: download\n  source: https://x/v{version}/task_{os}_{arch}.tar.gz\n  version: 3.54.0\n  pins:\n    linux/amd64: " +
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  track: github-release https://github.com/go-task/task\n"
+	const tool = "module x\n\ntool (\n\tgithub.com/spin-stack/go-tools/cmd/task\n)\n"
 	for _, tc := range []struct {
 		name, gomod, file string
 		says              []string
 	}{
-		{"the command, and go-tools at go.mod's commit", require + tool, pins("20261109.193146"), nil},
-		{"the command, and go-tools at another commit", require + tool, pins("20261108.000000"),
-			[]string{"go.mod requires go-tools at 20261109.193146 and versions.yaml's go-tools is 20261108.000000"}},
-		{"the command, with go-tools not required as a library", "module x\n" + tool, pins("20261108.000000"), nil},
-		{"the command and no go-tools", "module x\n" + tool, pins(""), nil},
-		{"the command and no task", "module x\n" + tool, "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n",
+		{"the command and its task", tool, task, nil},
+		{"the command on a tool line of its own", "module x\n\ntool " + TaskCommand + "\n", task, nil},
+		{"the command and no task", tool, "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n",
 			[]string{"go.mod takes " + TaskCommand + ", which runs the Task versions.yaml pins", "pins go, and nothing reads it"}},
-		{"the command on a tool line of its own", "module x\n\ntool " + TaskCommand + "\n", pins(""), nil},
-		{"no command: nothing reads them", "module x\n", pins("20261109.193146"),
-			[]string{"pins task, and nothing reads it", "pins go-tools, and nothing reads it"}},
+		{"no command: nothing reads the task", "module x\n", task, []string{"pins task, and nothing reads it"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := Gate{Root: repo(t, map[string]string{versions.File: tc.file, "go.mod": tc.gomod})}.Check()

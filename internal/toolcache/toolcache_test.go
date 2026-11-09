@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spin-stack/go-tools/versions"
 )
@@ -194,5 +195,114 @@ func TestAnInstallThatLosesTheRaceAnswersTheWinnersDirectory(t *testing.T) {
 	}
 	if left, _ := os.ReadDir(filepath.Join(root, "tool")); len(left) != 1 {
 		t.Errorf("beside it: %v", left)
+	}
+}
+
+// github plays a repository's releases: /releases/latest redirects to *latest, each release in
+// releases lists its archives in checksums.txt, and asked counts the questions for the latest.
+type github struct {
+	latest   *string
+	releases map[string][]byte // tag -> linux/amd64 archive
+	asked    atomic.Int32
+	down     atomic.Bool
+}
+
+func (g *github) serve(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if g.down.Load() {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path == "/releases/latest" {
+			g.asked.Add(1)
+			http.Redirect(w, r, "/releases/tag/"+*g.latest, http.StatusFound)
+			return
+		}
+		for tag, body := range g.releases {
+			s := sha256.Sum256(body)
+			switch r.URL.Path {
+			case "/releases/download/" + tag + "/checksums.txt":
+				_, _ = w.Write([]byte(hex.EncodeToString(s[:]) + "  go-tools_linux_amd64.tar.gz\n" + strings.Repeat("0", 64) + "  go-tools_darwin_arm64.tar.gz\n"))
+				return
+			case "/releases/download/" + tag + "/go-tools_linux_amd64.tar.gz":
+				_, _ = w.Write(body)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// The latest release is installed held to the sha256 its checksums give, asked for at most every
+// ten minutes, and a machine that cannot ask goes on with the last release it had.
+func TestTheLatestReleaseIsAskedForAtMostEveryTenMinutes(t *testing.T) {
+	one, _ := tarball(t, member{name: "mutate", body: "one", mode: 0o755, kind: tar.TypeReg})
+	two, _ := tarball(t, member{name: "mutate", body: "two", mode: 0o755, kind: tar.TypeReg})
+	tag := "v20261110.01"
+	g := &github{latest: &tag, releases: map[string][]byte{"v20261110.01": one, "v20261110.02": two}}
+	base := g.serve(t)
+	root := t.TempDir()
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	holds := func(at time.Time, want string) {
+		t.Helper()
+		dir, err := latest(t.Context(), base, "go-tools", root, "linux", "amd64", at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, "mutate")); string(got) != want {
+			t.Errorf("at %s: mutate is %q, want %q", at.Format(time.TimeOnly), got, want)
+		}
+	}
+	holds(now, "one")
+	// A stamp is written at the machine's own time: it is the clock latest is given that is read
+	// against it here, so the test moves that clock rather than the file's.
+	stamp := filepath.Join(root, "go-tools", "latest")
+	written := time.Now()
+	tag = "v20261110.02"
+	holds(written.Add(9*time.Minute), "one")
+	if g.asked.Load() != 1 {
+		t.Errorf("asked %d times within ten minutes", g.asked.Load())
+	}
+	holds(written.Add(11*time.Minute), "two")
+	if g.asked.Load() != 2 {
+		t.Errorf("asked %d times past ten minutes", g.asked.Load())
+	}
+	if got, _ := os.ReadFile(stamp); string(got) != "v20261110.02" {
+		t.Errorf("the stamp says %q", got)
+	}
+	g.down.Store(true)
+	holds(time.Now().Add(time.Hour), "two")
+}
+
+// What the latest release cannot be is said: GitHub down with nothing asked before, a redirect
+// that is not to a release, a release whose checksums do not list this platform's archive.
+func TestALatestReleaseThatCannotBeHadIsSaid(t *testing.T) {
+	archive, _ := tarball(t, member{name: "mutate", body: "x", mode: 0o755, kind: tar.TypeReg})
+	for _, tc := range []struct {
+		name, tag, goos string
+		down            bool
+		says            string
+	}{
+		{"github down", "v20261110.01", "linux", true, "the latest release of"},
+		{"no release", "", "linux", false, "not a release"},
+		{"a release without it", "v20261110.01", "windows", false, "lists no go-tools_windows_amd64.tar.gz"},
+		{"a release that is not there", "v20261110.09", "linux", false, "404"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tag := tc.tag
+			g := &github{latest: &tag, releases: map[string][]byte{"v20261110.01": archive}}
+			g.down.Store(tc.down)
+			base := g.serve(t)
+			if tc.name == "no release" {
+				base += "/nothing"
+			}
+			_, err := latest(t.Context(), base, "go-tools", t.TempDir(), tc.goos, "amd64", time.Now())
+			if err == nil || !strings.Contains(err.Error(), tc.says) {
+				t.Errorf("err = %v, want %q", err, tc.says)
+			}
+		})
 	}
 }

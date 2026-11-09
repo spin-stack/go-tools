@@ -6,10 +6,11 @@
 //
 // A repository takes this one command in its go.mod instead of Task's and go-tools' own: compiling
 // those is about 450 modules and a minute or more on a runner, for programs their authors already
-// release. This one links versions.yaml's reader and a download, and it puts versions.yaml's `task`
-// entry - and its `go-tools` entry, when it has one - in the user's cache, each held to its sha256
-// and unpacked once by it (internal/toolcache), then becomes Task: the same process, so a signal,
-// the terminal and the exit status are Task's.
+// release. This one links versions.yaml's reader and a download. It puts versions.yaml's `task`
+// in the user's cache, held to its sha256, and go-tools' latest release, held to the sha256 its
+// checksums give - every repository runs the newest commands main has passed its gate with, and
+// none bumps them - each unpacked once (internal/toolcache). Then it becomes Task: the same
+// process, so a signal, the terminal and the exit status are Task's.
 package main
 
 import (
@@ -25,18 +26,23 @@ import (
 	"github.com/spin-stack/go-tools/versions"
 )
 
+// goTools is where go-tools' releases are, made by its release.yml of main each time its gate
+// passes.
+const goTools = "https://github.com/spin-stack/go-tools"
+
 func main() {
-	err := run(context.Background(), os.Args[1:], syscall.Exec) // mutate-exempt: the process's own arguments; run is what the test drives
-	fmt.Fprintln(os.Stderr, "task:", err)                       //nolint:errcheck // the error is the exit status's reason; stderr failing changes no status
-	os.Exit(2)                                                  // mutate-exempt: main is reached only when the exec failed, which no test makes it do; run is what the tests drive
+	err := run(context.Background(), os.Args[1:], goTools, syscall.Exec) // mutate-exempt: the process's own arguments; run is what the test drives
+	fmt.Fprintln(os.Stderr, "task:", err)                                //nolint:errcheck // the error is the exit status's reason; stderr failing changes no status
+	os.Exit(2)                                                           // mutate-exempt: main is reached only when the exec failed, which no test makes it do; run is what the tests drive
 }
 
 // execFunc replaces the process with argv[0]'s program: syscall.Exec, and a recorder in a test.
 type execFunc func(path string, argv []string, env []string) error
 
-// run finds the repository's versions.yaml, installs what it pins, and execs Task with args. It
-// returns only when that fails: on success the process is Task's.
-func run(ctx context.Context, args []string, exec execFunc) error {
+// run finds the repository's versions.yaml, installs the Task it pins and the latest release of
+// the tools at base, and execs Task with args. It returns only when that fails: on success the
+// process is Task's.
+func run(ctx context.Context, args []string, base string, exec execFunc) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -62,15 +68,12 @@ func run(ctx context.Context, args []string, exec execFunc) error {
 	if err != nil {
 		return err
 	}
-	path := os.Getenv("PATH")
-	if tools, err := v.Get("go-tools"); err == nil {
-		dir, err := toolcache.Install(ctx, tools, root)
-		if err != nil {
-			return err
-		}
-		path = dir + string(os.PathListSeparator) + path
+	tools, err := toolcache.Latest(ctx, base, "go-tools", root)
+	if err != nil {
+		return err
 	}
 	bin := filepath.Join(taskDir, "task")
+	path := tools + string(os.PathListSeparator) + os.Getenv("PATH")
 	return exec(bin, append([]string{bin}, args...), withPath(os.Environ(), path))
 }
 

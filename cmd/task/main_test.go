@@ -36,9 +36,10 @@ func archive(t *testing.T, name string) ([]byte, string) {
 	return buf.Bytes(), hex.EncodeToString(s[:])
 }
 
-// repository is a directory whose versions.yaml pins task, and go-tools when withTools, at a TLS
-// server the default client trusts for the test; the user cache is a directory of the test's.
-func repository(t *testing.T, withTools bool) string {
+// repository is a directory whose versions.yaml pins task at a TLS server the default client
+// trusts for the test, and the base URL of go-tools' releases there - its latest, v20261110.01,
+// listed in its checksums. The user's cache is a directory of the test's.
+func repository(t *testing.T) (repo, base string) {
 	t.Helper()
 	platform := runtime.GOOS + "_" + runtime.GOARCH
 	taskArchive, taskPin := archive(t, "task")
@@ -47,7 +48,11 @@ func repository(t *testing.T, withTools bool) string {
 		switch r.URL.Path {
 		case "/task/v3.54.0/task_" + platform + ".tar.gz":
 			_, _ = w.Write(taskArchive)
-		case "/tools/bin-1.2/go-tools_" + platform + ".tar.gz":
+		case "/go-tools/releases/latest":
+			http.Redirect(w, r, "/go-tools/releases/tag/v20261110.01", http.StatusFound)
+		case "/go-tools/releases/download/v20261110.01/checksums.txt":
+			_, _ = w.Write([]byte(toolsPin + "  go-tools_" + platform + ".tar.gz\n"))
+		case "/go-tools/releases/download/v20261110.01/go-tools_" + platform + ".tar.gz":
 			_, _ = w.Write(toolsArchive)
 		default:
 			http.NotFound(w, r)
@@ -58,42 +63,31 @@ func repository(t *testing.T, withTools bool) string {
 	http.DefaultClient.Transport = srv.Client().Transport
 	t.Cleanup(func() { http.DefaultClient.Transport = before })
 
-	p := runtime.GOOS + "/" + runtime.GOARCH
 	file := `- name: task
   kind: download
   source: ` + srv.URL + `/task/v{version}/task_{os}_{arch}.tar.gz
   version: 3.54.0
   pins:
-    ` + p + `: ` + taskPin + `
+    ` + runtime.GOOS + "/" + runtime.GOARCH + `: ` + taskPin + `
   track: github-release https://github.com/go-task/task
 `
-	if withTools {
-		file += `- name: go-tools
-  kind: download
-  source: ` + srv.URL + `/tools/bin-{version}/go-tools_{os}_{arch}.tar.gz
-  version: "1.2"
-  pins:
-    ` + p + `: ` + toolsPin + `
-  track: github-release https://github.com/spin-stack/go-tools bin-
-`
-	}
-	repo := t.TempDir()
+	repo = t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "versions.yaml"), []byte(file), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
-	return repo
+	return repo, srv.URL + "/go-tools"
 }
 
 type call struct {
-	path       string
-	argv, env  []string
-	calledWith bool
+	path      string
+	argv, env []string
+	called    bool
 }
 
 func (c *call) exec(path string, argv, env []string) error {
-	c.path, c.argv, c.env, c.calledWith = path, argv, env, true
+	c.path, c.argv, c.env, c.called = path, argv, env, true
 	return nil
 }
 
@@ -108,9 +102,9 @@ func pathOf(env []string) []string {
 }
 
 // From anywhere under the repository, `go tool task` is the pinned Task, given the arguments it
-// was given, with go-tools' commands first on a PATH that is there once.
-func TestTaskIsThePinnedTaskWithTheToolsOnItsPath(t *testing.T) {
-	repo := repository(t, true)
+// was given, with the latest go-tools first on a PATH that is there once.
+func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
+	repo, base := repository(t)
 	sub := filepath.Join(repo, "internal", "x")
 	if err := os.MkdirAll(sub, 0o750); err != nil {
 		t.Fatal(err)
@@ -118,7 +112,7 @@ func TestTaskIsThePinnedTaskWithTheToolsOnItsPath(t *testing.T) {
 	t.Chdir(sub)
 	t.Setenv("PATH", "/usr/bin")
 	var c call
-	if err := run(t.Context(), []string{"lint", "--", "-v"}, c.exec); err != nil {
+	if err := run(t.Context(), []string{"lint", "--", "-v"}, base, c.exec); err != nil {
 		t.Fatal(err)
 	}
 	if filepath.Base(c.path) != "task" || !slices.Equal(c.argv, []string{c.path, "lint", "--", "-v"}) {
@@ -137,28 +131,16 @@ func TestTaskIsThePinnedTaskWithTheToolsOnItsPath(t *testing.T) {
 	}
 }
 
-// A repository that pins no go-tools still runs its Task, with the caller's PATH as it was.
-func TestTaskWithoutGoToolsKeepsThePath(t *testing.T) {
-	t.Chdir(repository(t, false))
-	t.Setenv("PATH", "/usr/bin")
-	var c call
-	if err := run(t.Context(), nil, c.exec); err != nil {
-		t.Fatal(err)
-	}
-	if paths := pathOf(c.env); !slices.Equal(paths, []string{"/usr/bin"}) {
-		t.Errorf("PATH = %v", paths)
-	}
-}
-
 // What `go tool task` cannot run is said, and nothing is exec'd: no versions.yaml above, one that
-// pins no Task, one that does not read.
+// pins no Task, one that does not read, no go-tools release to be had.
 func TestWhatCannotRunTaskIsSaid(t *testing.T) {
+	_, base := repository(t)
 	for _, tc := range []struct {
-		name, file, says string
+		name, file, base, says string
 	}{
-		{"no versions.yaml", "", "no versions.yaml here or above"},
-		{"no task in it", "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n", "runs the Task it pins"},
-		{"a file that does not read", "- name: [\n", "versions"},
+		{"no versions.yaml", "", base, "no versions.yaml here or above"},
+		{"no task in it", "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n", base, "runs the Task it pins"},
+		{"a file that does not read", "- name: [\n", base, "versions"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -169,10 +151,19 @@ func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 			}
 			t.Chdir(dir)
 			var c call
-			err := run(t.Context(), nil, c.exec)
-			if err == nil || !strings.Contains(err.Error(), tc.says) || c.calledWith {
-				t.Errorf("err = %v, exec'd %v; want %q", err, c.calledWith, tc.says)
+			err := run(t.Context(), nil, tc.base, c.exec)
+			if err == nil || !strings.Contains(err.Error(), tc.says) || c.called {
+				t.Errorf("err = %v, exec'd %v; want %q", err, c.called, tc.says)
 			}
 		})
 	}
+	t.Run("no go-tools release", func(t *testing.T) {
+		repo, base := repository(t)
+		t.Chdir(repo)
+		var c call
+		err := run(t.Context(), nil, base+"/none", c.exec)
+		if err == nil || !strings.Contains(err.Error(), "the latest release of") || c.called {
+			t.Errorf("err = %v, exec'd %v", err, c.called)
+		}
+	})
 }
