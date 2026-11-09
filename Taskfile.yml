@@ -5,6 +5,7 @@
 #                     gates run on itself: ctxlife, testquality, refs, sfw, taskgate, and actionlint
 #   task mutate       break what the change against BASE (origin/main) touched, and ask the tests
 #   task coverage     coverage.out's numbers, to the terminal or the workflow run's summary
+#   task trace        where a workflow run's time went (ghatrace), to its summary and _output/ghatrace
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
 #   task site         the documentation site under site/, built into site/dist
 
@@ -44,7 +45,9 @@ tasks:
       # GOTOOLCHAIN=local: the linter reads the code with the Go its image carries; go.mod's
       # toolchain line is what builds and tests run under, and fetching it in here has no sumdb.
       - mkdir -p {{.OUT}}/golangci-lint
+      # A span of the lint step in the run's trace (task trace); off a runner it only runs.
       - >-
+        go run ./cmd/ghatrace span -name golangci-lint --
         docker run --rm -u {{.OWNER}} -v {{.ROOT_DIR}}:/work -w /work
         -v "$(go env GOMODCACHE)":/go/pkg/mod -v "$(go env GOCACHE)":/cache/go-build
         -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/cache/go-build -e GOLANGCI_LINT_CACHE=/work/_output/golangci-lint
@@ -104,6 +107,11 @@ tasks:
         func=$(go tool cover -func=coverage.out)
         printf '## Go coverage\n\n**%s** total\n\n<details><summary>Function detail</summary>\n\n```\n%s\n```\n</details>\n' "$(awk '/^total:/ {print $3}' <<< "$func")" "$func" >> "$out"
         go tool cover -html=coverage.out -o coverage.html
+
+  trace:
+    desc: Where the run's time went (ghatrace), to its summary and _output/ghatrace; its own job's spans are in $RUNNER_TEMP.
+    cmds:
+      - go run ./cmd/ghatrace run -spans "${RUNNER_TEMP:-}"
 
   site:
     desc: Build the documentation site (site/, Astro Starlight) into site/dist; task site:dev serves it with live reload.
