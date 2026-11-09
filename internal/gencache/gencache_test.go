@@ -212,7 +212,7 @@ func TestAChangeRunsTheMocksThatReadItAndOnlyThose(t *testing.T) {
 		},
 		{name: "a package no mock reads", file: "other/other.go", old: "func Other() {}", new: "func Other() { _ = 1 }"},
 		{name: "a package beside the mock", file: "use/use.go", old: `s.Get("k")`, new: `s.Get("key")`},
-		{name: "the module's go line", file: "go.mod", old: "\ngo 1.27\n", new: "\ngo 1.27.1\n", ran: keyed},
+		{name: "the module's go line", file: "go.mod", old: "\ngo 1.27.0\n", new: "\ngo 1.27.1\n", ran: keyed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir, cache := newModule(t, nil), t.TempDir()
