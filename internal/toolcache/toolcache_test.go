@@ -306,3 +306,48 @@ func TestALatestReleaseThatCannotBeHadIsSaid(t *testing.T) {
 		})
 	}
 }
+
+// A stamp that says nothing is no release, however fresh: the latest is asked for.
+func TestAnEmptyStampIsAskedPast(t *testing.T) {
+	archive, _ := tarball(t, member{name: "mutate", body: "x", mode: 0o755, kind: tar.TypeReg})
+	tag := "v20261110.01"
+	g := &github{latest: &tag, releases: map[string][]byte{tag: archive}}
+	base := g.serve(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "go-tools"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go-tools", "latest"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := latest(t.Context(), base, "go-tools", root, "linux", "amd64", time.Now()); err != nil || g.asked.Load() != 1 {
+		t.Errorf("err = %v, asked %d times", err, g.asked.Load())
+	}
+}
+
+// Only a redirect to a release is the latest release: one elsewhere, one to a release with no
+// name, and a release's address in an answer that is no redirect are not.
+func TestOnlyARedirectToAReleaseIsTheLatest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/elsewhere/releases/latest":
+			http.Redirect(w, r, "/elsewhere/login", http.StatusFound)
+		case "/unnamed/releases/latest":
+			http.Redirect(w, r, "/unnamed/releases/tag/", http.StatusFound)
+		case "/not-a-redirect/releases/latest":
+			w.Header().Set("Location", "/not-a-redirect/releases/tag/v20261110.01")
+			w.WriteHeader(http.StatusOK)
+		case "/good/releases/latest":
+			http.Redirect(w, r, "/good/releases/tag/v20261110.01", http.StatusFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	for _, repo := range []string{"elsewhere", "unnamed", "not-a-redirect"} {
+		if tag, err := askLatest(t.Context(), srv.URL+"/"+repo); err == nil {
+			t.Errorf("%s: %q is the latest release", repo, tag)
+		}
+	}
+	if tag, err := askLatest(t.Context(), srv.URL+"/good"); err != nil || tag != "v20261110.01" {
+		t.Errorf("good: %q, %v", tag, err)
+	}
+}
