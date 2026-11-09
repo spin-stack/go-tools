@@ -6,6 +6,7 @@ package gotest
 import (
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,6 +37,15 @@ type Reader struct {
 
 	started map[string]time.Time // by package and test
 	held    map[string][]string  // a test's output, until it fails or passes
+
+	// Without -json, go test writes each package's output in one piece, and what reads its log
+	// counts on that: a skip is the package's whose "ok" line follows it. With -json the
+	// packages' events come as they happen, side by side, so one package's lines are written as
+	// they come and the others' are kept until it ends.
+	current string              // the package written as it comes
+	waiting []string            // the others, in the order they first said something
+	kept    map[string][]string // what each of them said
+	ended   map[string]bool     // those of them that have ended
 }
 
 func key(pkg, test string) string { return pkg + "\x00" + test }
@@ -50,6 +60,7 @@ func (r *Reader) Line(line []byte) error {
 	}
 	if r.started == nil {
 		r.started, r.held = map[string]time.Time{}, map[string][]string{}
+		r.kept, r.ended = map[string][]string{}, map[string]bool{}
 	}
 	k := key(e.Package, e.Test)
 	switch e.Action {
@@ -77,8 +88,61 @@ func (r *Reader) output(e event, k string) error {
 		// The test binary's own verdict, which go test without -v leaves to its "ok" line.
 		return nil
 	}
-	_, err := io.WriteString(r.Out, e.Output)
-	return err
+	return r.write(e.Package, e.Output)
+}
+
+// write says text, of pkg's: now when pkg is the package written as it comes, or none is, and
+// once it is otherwise. What belongs to no package - a build's output - is said now.
+func (r *Reader) write(pkg, text string) error {
+	if r.current == "" {
+		r.current = pkg
+	}
+	if pkg == "" || pkg == r.current {
+		_, err := io.WriteString(r.Out, text)
+		return err
+	}
+	if !slices.Contains(r.waiting, pkg) {
+		r.waiting = append(r.waiting, pkg)
+	}
+	r.kept[pkg] = append(r.kept[pkg], text)
+	return nil
+}
+
+// done is pkg ended: when it was the one written as it came, the next one waiting is written
+// whole, and the first of them still running is written as it comes from then on.
+func (r *Reader) done(pkg string) error {
+	if pkg != r.current {
+		r.ended[pkg] = true
+		return nil
+	}
+	r.current = ""
+	for len(r.waiting) > 0 && r.current == "" {
+		next := r.waiting[0]
+		r.waiting = r.waiting[1:]
+		for _, text := range r.kept[next] {
+			if _, err := io.WriteString(r.Out, text); err != nil {
+				return err
+			}
+		}
+		delete(r.kept, next)
+		if !r.ended[next] {
+			r.current = next
+		}
+	}
+	return nil
+}
+
+// Flush writes what packages that never ended said: go test was stopped.
+func (r *Reader) Flush() error {
+	for _, pkg := range r.waiting {
+		for _, text := range r.kept[pkg] {
+			if _, err := io.WriteString(r.Out, text); err != nil {
+				return err
+			}
+		}
+	}
+	r.waiting = nil
+	return nil
 }
 
 func (r *Reader) end(e event, k string) error {
@@ -88,9 +152,14 @@ func (r *Reader) end(e event, k string) error {
 	delete(r.started, k)
 	if e.Action == "fail" {
 		for _, line := range held {
-			if _, err := io.WriteString(r.Out, line); err != nil {
+			if err := r.write(e.Package, line); err != nil {
 				return err
 			}
+		}
+	}
+	if e.Test == "" {
+		if err := r.done(e.Package); err != nil {
+			return err
 		}
 	}
 	if !ok || r.Record == nil {

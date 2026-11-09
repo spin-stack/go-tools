@@ -313,7 +313,7 @@ func goTest(ctx context.Context, args []string) error {
 				}
 			}
 			if errors.Is(err, io.EOF) {
-				return nil
+				return r.Flush()
 			}
 			if err != nil {
 				return err

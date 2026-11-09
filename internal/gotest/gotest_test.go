@@ -133,3 +133,53 @@ func TestShort(t *testing.T) {
 		assert.Equal(t, want, gotest.Short(in))
 	}
 }
+
+// Packages run side by side and their events come interleaved; go test without -json writes each
+// package's output in one piece, and a log's reader counts on it - a skip is the package's whose
+// "ok" line follows. One package is written as it comes, the others when it ends, in the order
+// they first said something; one that ended while waiting is written whole, and the next still
+// running becomes the one written as it comes.
+func TestEachPackagesOutputIsWrittenInOnePiece(t *testing.T) {
+	const a, b, c = "example.com/r/a", "example.com/r/b", "example.com/r/c"
+	out := func(s float64, pkg, text string) string { return ev(s, "output", pkg, "", text) }
+	var buf strings.Builder
+	r := &gotest.Reader{Out: &buf, Verbose: true}
+	for _, line := range []string{
+		ev(0, "start", a, "", ""), ev(0, "start", b, "", ""), ev(0, "start", c, "", ""),
+		out(1, b, "b1\n"),
+		out(2, a, "a1\n"),
+		out(3, c, "c1\n"),
+		out(4, c, "ok c\n"), ev(4, "pass", c, "", ""),
+		out(5, a, "a2\n"),
+		out(6, b, "ok b\n"), ev(6, "pass", b, "", ""),
+		out(7, a, "a3\n"),
+		"a wrapper's line",
+		out(8, a, "ok a\n"), ev(8, "pass", a, "", ""),
+		ev(9, "start", "example.com/r/d", "", ""),
+		out(9, "example.com/r/d", "d1\n"),
+	} {
+		require.NoError(t, r.Line([]byte(line)))
+	}
+	assert.Equal(t, "b1\nok b\n"+"a1\na2\na3\na wrapper's line\nok a\n"+"c1\nok c\n"+"d1\n", buf.String(),
+		"all of it as it came: c whole once a ended, and d as it comes")
+	require.NoError(t, r.Flush())
+	assert.Equal(t, "b1\nok b\n"+"a1\na2\na3\na wrapper's line\nok a\n"+"c1\nok c\n"+"d1\n", buf.String(), "nothing left to flush")
+}
+
+// go test stopped mid-run: what the packages still waiting said is written all the same.
+func TestFlushWritesWhatPackagesThatNeverEndedSaid(t *testing.T) {
+	var buf strings.Builder
+	r := &gotest.Reader{Out: &buf, Verbose: true}
+	for _, line := range []string{
+		ev(0, "output", "example.com/r/a", "", "a1\n"),
+		ev(1, "output", "example.com/r/b", "", "b1\n"),
+		ev(2, "output", "example.com/r/c", "", "c1\n"),
+	} {
+		require.NoError(t, r.Line([]byte(line)))
+	}
+	assert.Equal(t, "a1\n", buf.String())
+	require.NoError(t, r.Flush())
+	assert.Equal(t, "a1\nb1\nc1\n", buf.String())
+	require.NoError(t, r.Flush())
+	assert.Equal(t, "a1\nb1\nc1\n", buf.String(), "once")
+}
