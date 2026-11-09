@@ -1,6 +1,10 @@
 package linkweight
 
 import (
+	"debug/elf"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -97,10 +101,68 @@ func TestReceiverType(t *testing.T) {
 	for name, want := range map[string]string{
 		"github.com/godbus/dbus/v5.(*Conn).Export": "type:*github.com/godbus/dbus/v5.Conn",
 		"encoding/json/v2.addressableValue.Method": "type:encoding/json/v2.addressableValue",
+		"a.M":  "type:a",
 		"main": "",
 	} {
 		if got := receiverType(name); got != want {
 			t.Errorf("receiverType(%q) = %q, want %q", name, got, want)
 		}
+	}
+}
+
+// A program built as linkweight builds one: what ships is the loaded sections, which the program
+// headers say independently, and no symbol is empty or memory the file does not hold.
+func TestReadLayoutCountsWhatTheFileShips(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a program")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() { println(1) }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "prog")
+	build := exec.Command("go", "build", "-o", bin, "main.go")
+	build.Dir = dir
+	build.Env = append(os.Environ(), "GOOS=linux", "CGO_ENABLED=0", "GOFLAGS=")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	l, err := ReadLayout(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := elf.Open(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	var loaded uint64
+	for _, p := range f.Progs {
+		if p.Type == elf.PT_LOAD {
+			loaded += p.Filesz
+		}
+	}
+	if l.Shipped > loaded || l.Shipped < loaded*9/10 {
+		t.Errorf("shipped %d, the loaded segments %d", l.Shipped, loaded)
+	}
+	if l.PCLNTab == 0 || l.PCLNTab >= l.Shipped {
+		t.Errorf("pclntab %d of %d", l.PCLNTab, l.Shipped)
+	}
+	byName := map[string]Sym{}
+	for _, s := range l.Symbols {
+		if s.Size == 0 {
+			t.Errorf("%s is empty and listed", s.Name)
+		}
+		byName[s.Name] = s
+	}
+	// runtime.mheap_ is the heap's state, in .bss: memory at run time, no byte of the file.
+	if _, ok := byName["runtime.mheap_"]; ok {
+		t.Error("a .bss symbol is counted as shipped")
+	}
+	if !byName["runtime.main"].Code || byName["runtime.buildVersion"].Code || byName["runtime.buildVersion"].Size == 0 {
+		t.Errorf("runtime.main %+v, runtime.buildVersion %+v", byName["runtime.main"], byName["runtime.buildVersion"])
+	}
+	if _, err := ReadLayout(filepath.Join(t.TempDir(), "none")); err == nil {
+		t.Error("a file that is not there read as a binary")
 	}
 }

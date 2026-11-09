@@ -40,7 +40,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	roots := fs.String("roots", "./...", "the pattern every binary is under")
 	skip := fs.String("skip", "", "main packages that are no binary of the report, comma-separated as ./cmd/x")
 	tags := fs.String("tags", "", "build tags, as the release builds with them")
-	top := fs.Int("top", 15, "the modules and cuts listed for each binary")
+	top := fs.Int("top", 15, "the modules and cuts listed for each binary") // mutate-exempt: a default length of reading, which the tests set
 	jsonPath := fs.String("json", "", "write the whole report here, for comparing two revisions")
 	allowPath := fs.String("allow", "", "gate: `<root> capability|reflect-method <name>  # why` a line; a finding no line explains fails, and a line no finding matches")
 	if err := fs.Parse(args); err != nil {
@@ -133,18 +133,21 @@ func one(root, module, tags, dir string) (linkweight.Binary, error) {
 	if err != nil {
 		return linkweight.Binary{}, err
 	}
-	defer func() { _ = deps.Close() }()
 	// -dumpdep writes the graph to standard error, which is where the build's own errors go too:
 	// a failed build is told by its exit status, and its message is the lines that are no edge.
 	cmd := exec.Command("go", "build", "-trimpath", "-tags", tags, "-ldflags=-dumpdep", "-o", bin, root) //nolint:gosec // go, over the caller's own module
 	cmd.Stderr = deps
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	_ = deps.Close() // written by the build; it is read below from its path
+	if err != nil {
 		return linkweight.Binary{}, fmt.Errorf("go build %s: %w: %s", root, err, notEdges(depsPath))
 	}
-	if _, err := deps.Seek(0, io.SeekStart); err != nil {
+	dump, err := os.Open(depsPath) //nolint:gosec // a file in our own temporary directory
+	if err != nil {
 		return linkweight.Binary{}, err
 	}
-	g, err := linkweight.ParseDeps(deps)
+	defer func() { _ = dump.Close() }() // read-only
+	g, err := linkweight.ParseDeps(dump)
 	if err != nil {
 		return linkweight.Binary{}, fmt.Errorf("%s: %w", root, err)
 	}

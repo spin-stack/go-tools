@@ -33,7 +33,7 @@ type Graph struct {
 func ParseDeps(r io.Reader) (*Graph, error) {
 	g := &Graph{ids: map[string]int{}, reflectMethod: map[int]bool{}}
 	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, 1<<20), 1<<24)
+	s.Buffer(make([]byte, 0, 1<<20), 1<<24) // mutate-exempt: room for a line, not behaviour; a symbol name is far shorter than either
 	for s.Scan() {
 		from, to, ok := strings.Cut(s.Text(), " -> ")
 		if !ok {
@@ -167,12 +167,12 @@ func (g *Graph) Chain(name string) (chain []string, viaMethod bool) {
 // pkg.(*T).M is a method of type:*pkg.T, pkg.T.M of type:pkg.T. A name that is no method answers
 // a type symbol the graph does not have, which is no way in.
 func receiverType(name string) string {
-	if i := strings.Index(name, ".(*"); i >= 0 {
-		if j := strings.Index(name[i:], ")."); j >= 0 {
-			return "type:*" + name[:i] + "." + name[i+3:i+j]
+	if pkg, rest, ok := strings.Cut(name, ".(*"); ok {
+		if typ, _, ok := strings.Cut(rest, ")."); ok {
+			return "type:*" + pkg + "." + typ
 		}
 	}
-	if i := strings.LastIndex(name, "."); i >= 0 {
+	if i := strings.LastIndex(name, "."); i > 0 {
 		return "type:" + name[:i]
 	}
 	return ""
