@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -359,4 +361,24 @@ func TestACompositeActionsStepsComeFromTheLog(t *testing.T) {
 	assert.Contains(t, buf.String(), "| AppArmor | lane | 12s |")
 	assert.NotContains(t, buf.String(), "| Run ./.github/actions/fleet-setup |", "the step holds its parts: they are what is listed")
 	assert.NotContains(t, buf.String(), "| Toolchains; Go and Node |", "nor one that holds a single part")
+}
+
+// The page the site shows is this package's own, drawn from a real run (go-tools' gate, run
+// 42672797946, testdata/example.json, its steps named without their action's commit, which only
+// versions.yaml may write): a test writes it, so it is never older than the code. UPDATE_GOLDEN=1
+// writes it.
+func TestTheExampleTheSiteShows(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "example.json"))
+	require.NoError(t, err)
+	var tr runtrace.Trace
+	require.NoError(t, json.Unmarshal(raw, &tr))
+	var buf bytes.Buffer
+	require.NoError(t, runtrace.WriteHTML(&buf, tr))
+	path := filepath.Join("..", "..", "site", "public", "ghatrace", "example.html")
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o600))
+	}
+	want, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, string(want), buf.String())
 }

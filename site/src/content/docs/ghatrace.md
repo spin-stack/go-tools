@@ -14,6 +14,17 @@ go tool ghatrace run                          # in the run's last job
 go tool ghatrace span -name e2e:up -- task e2e:up   # inside any step, to time a part of it
 ```
 
+## What it looks like
+
+This is the page `run` wrote for one of this repository's own gates, opened: one job, its steps,
+golangci-lint as a span inside Lint, and inside Test every package and every test of a second or
+more. Packages run side by side; inside some of them - `internal/mutate`, `internal/gencache` -
+the tests run one after another, a staircase where side by side would be a column. Whether that
+is worth changing is the repository's call; the trace is what shows it. A test writes this page
+from that run, so it is always what the code draws ([open it on its own](example.html#open)).
+
+<iframe src="example.html#open" title="ghatrace's page for a run of go-tools' gate" style="width: 100%; height: 720px; border: 1px solid var(--sl-color-gray-5); border-radius: 6px;" loading="lazy"></iframe>
+
 ## What `run` writes
 
 `run` reads its own run (`$GITHUB_RUN_ID`, or `-run` with an id or a run's URL) with

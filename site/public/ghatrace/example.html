@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CI run 42672797946</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --line: #d8dee4; --row: #f6f8fa;
+  --job: #4c8bf5; --crit: #d9480f; --step: #8fa3bf; --span: #1f9e89; --fail: #cf222e;
+  --queue: #c9d1d9; --link: #0969da;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --row: #161b22;
+    --job: #4c8bf5; --crit: #f0883e; --step: #6e7f99; --span: #2bb69e; --fail: #f85149;
+    --queue: #3d444d; --link: #4493f8;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--link); }
+h1 { font-size: 18px; margin: 0 0 4px; }
+h1 a { color: inherit; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 8px 0 12px; color: var(--muted); }
+.stats b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.bar-tools { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+button { font: inherit; color: var(--fg); background: var(--row); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.legend { display: flex; gap: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.wf { --name: min(340px, 40vw); border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: var(--name) 64px 1fr; align-items: center;
+  min-height: 22px; border-bottom: 1px solid var(--line); }
+.row:hover { background: var(--row); }
+.row.lane { font-weight: 600; }
+.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+.name a { color: inherit; text-decoration: none; }
+.name a:hover { text-decoration: underline; }
+.tog { display: inline-block; width: 14px; color: var(--muted); cursor: pointer; user-select: none; }
+.dur { text-align: right; padding-right: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 22px; }
+.b { position: absolute; top: 5px; height: 12px; min-width: 2px; border-radius: 2px; }
+.b.job { background: var(--job); }
+.b.job.crit { background: var(--crit); }
+.b.step { background: var(--step); }
+.b.span { background: var(--span); }
+.b.queue { background: repeating-linear-gradient(45deg, var(--queue) 0 3px, transparent 3px 6px); }
+.b.fail { outline: 2px solid var(--fail); outline-offset: -1px; }
+.axis { position: sticky; top: 0; z-index: 1; background: var(--bg); }
+.axis .track { height: 20px; }
+.tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line);
+  padding-left: 3px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.grid { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--line); pointer-events: none; }
+.crit-mark { color: var(--crit); }
+.fail-mark { color: var(--fail); }
+.foot { margin-top: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1><a href="https://github.com/spin-stack/go-tools/actions/runs/42672797946">CI</a> · run 42672797946</h1>
+<div class="stats">
+  <span>wall <b>3m59s</b></span>
+  <span>on runners <b>3m57s</b> (4 job-minutes rounded up)</span>
+  <span>waiting for runners <b>2s</b></span>
+  <span>longest wait <b>2s (Gate)</b></span>
+</div>
+<div class="bar-tools">
+  <button id="expand">Expand all</button><button id="collapse">Collapse all</button>
+  <span class="legend">
+    <span><i style="background:var(--crit)"></i>critical path</span>
+    <span><i style="background:var(--job)"></i>job</span>
+    <span><i style="background:var(--step)"></i>step</span>
+    <span><i style="background:var(--span)"></i>span</span>
+    <span><i style="background:repeating-linear-gradient(45deg,var(--queue) 0 3px,transparent 3px 6px)"></i>waiting for a runner</span>
+  </span>
+</div>
+<div class="wf" id="wf"></div>
+
+<p class="foot">The same run in detail: open trace.json at <a href="https://ui.perfetto.dev">ui.perfetto.dev</a>.</p>
+<script>
+const data = {"lanes":[{"url":"https://github.com/spin-stack/go-tools/actions/runs/42672797946/job/129349569338","runner":"GitHub Actions 1000006653","labels":["ubuntu-latest"],"critical":true,"queue":{"n":"waiting for a runner","k":"queue","s":0,"e":2000},"job":{"n":"Gate","k":"job","s":2000,"e":238612,"c":[{"n":"Set up job","k":"step","s":3000,"e":4000},{"n":"Run actions/checkout","k":"step","s":4000,"e":5000},{"n":"Run actions/setup-go","k":"step","s":5000,"e":13000},{"n":"Task's pin","k":"step","s":13000,"e":14000},{"n":"Run go-task/setup-task","k":"step","s":14000,"e":14000},{"n":"Lint findings, from the last run","k":"step","s":14000,"e":15000},{"n":"Lint","k":"step","s":15000,"e":117000,"c":[{"n":"golangci-lint","k":"span","s":16831,"e":73324}]},{"n":"Test","k":"step","s":117000,"e":228000,"c":[{"n":"go test","k":"span","s":117188,"e":227907,"c":[{"n":"attestgate","k":"span","s":145936,"e":147068},{"n":"cmd/attestgate","k":"span","s":146025,"e":147055},{"n":"cmd/ctxlife","k":"span","s":146353,"e":147384},{"n":"cmd/deadgate","k":"span","s":146816,"e":150329,"c":[{"n":"TestTheGateReadsTheRootsAndTheTwoLists","k":"span","s":146825,"e":149319}]},{"n":"cmd/exposure","k":"span","s":147057,"e":147449},{"n":"cmd/gencache","k":"span","s":147070,"e":147448},{"n":"cmd/ghatrace","k":"span","s":147485,"e":151310,"c":[{"n":"TestGoTestSpanThatCannotBeRecordedSaysSo","k":"span","s":147569,"e":149811}]},{"n":"cmd/mutate","k":"span","s":148813,"e":152457,"c":[{"n":"TestTheExampleTheSiteShows","k":"span","s":148827,"e":151450}]},{"n":"cmd/proven","k":"span","s":149285,"e":151225},{"n":"cmd/provenance","k":"span","s":150877,"e":151900},{"n":"cmd/refs","k":"span","s":151226,"e":151375},{"n":"cmd/sbom","k":"span","s":151998,"e":153219},{"n":"cmd/sfw","k":"span","s":152720,"e":152898},{"n":"cmd/taskgate","k":"span","s":152771,"e":152943},{"n":"cmd/testquality","k":"span","s":154997,"e":155259},{"n":"cmd/trustroot","k":"span","s":165190,"e":166227},{"n":"cmd/versions","k":"span","s":165293,"e":166352},{"n":"cmd/vulngate","k":"span","s":165316,"e":166433},{"n":"ghatrace","k":"span","s":165577,"e":166592},{"n":"internal/allow","k":"span","s":166228,"e":167242},{"n":"internal/ctxlife","k":"span","s":166353,"e":167380},{"n":"internal/deadgate","k":"span","s":166434,"e":167449},{"n":"internal/exposure","k":"span","s":166594,"e":167695},{"n":"internal/fetch","k":"span","s":167243,"e":169101},{"n":"internal/gencache","k":"span","s":167381,"e":202290,"c":[{"n":"TestFirstRunRunsEveryDirectiveAndTheSecondRunsOnlyWhatIsNotKeyed","k":"span","s":167398,"e":170539},{"n":"TestAChangeRunsTheMocksThatReadItAndOnlyThose","k":"span","s":170539,"e":179365,"c":[{"n":"TestAChangeRunsTheMocksThatReadItAndOnlyThose/the_mocked_interface","k":"span","s":170539,"e":171954},{"n":"TestAChangeRunsTheMocksThatReadItAndOnlyThose/a_source-mode_file","k":"span","s":171954,"e":173772},{"n":"TestAChangeRunsTheMocksThatReadItAndOnlyThose/a_package_no_mock_reads","k":"span","s":173775,"e":175517},{"n":"TestAChangeRunsTheMocksThatReadItAndOnlyThose/a_package_beside_the_mock","k":"span","s":175517,"e":177196},{"n":"TestAChangeRunsTheMocksThatReadItAndOnlyThose/the_module's_go_line","k":"span","s":177196,"e":179365}]},{"n":"TestWhatNoMockReadsIsNotInTheKey","k":"span","s":179365,"e":182896,"c":[{"n":"TestWhatNoMockReadsIsNotInTheKey/a_file_that_is_not_Go","k":"span","s":179365,"e":180375},{"n":"TestWhatNoMockReadsIsNotInTheKey/a_test_of_a_package_only_package_mode_reads","k":"span","s":180375,"e":181608},{"n":"TestWhatNoMockReadsIsNotInTheKey/a_directory_inside_the_package's","k":"span","s":181608,"e":182894}]},{"n":"TestTheBuildConfigurationIsInTheKey","k":"span","s":182896,"e":185511},{"n":"TestKeysDoNotDependOnWhereTheCheckoutIs","k":"span","s":185511,"e":187249},{"n":"TestAMockThatIsNotWhatTheCacheHasIsWrittenBack","k":"span","s":187249,"e":190438,"c":[{"n":"TestAMockThatIsNotWhatTheCacheHasIsWrittenBack/deleted","k":"span","s":187249,"e":188801},{"n":"TestAMockThatIsNotWhatTheCacheHasIsWrittenBack/edited_by_hand","k":"span","s":188801,"e":190438}]},{"n":"TestAMockBesideWhatItMocksIsNotPartOfItsOwnKey","k":"span","s":190438,"e":192065},{"n":"TestTagsChooseTheFilesWhoseDirectivesRun","k":"span","s":192065,"e":193875},{"n":"TestAMockReadAfterAGeneratorItCannotKeyReadsWhatTheGeneratorWrote","k":"span","s":193875,"e":196142},{"n":"TestADirectiveItCannotKeyFailsAsGoGenerateFails","k":"span","s":196142,"e":201161,"c":[{"n":"TestADirectiveItCannotKeyFailsAsGoGenerateFails/a_tool_go.mod_does_not_have","k":"span","s":197050,"e":198292},{"n":"TestADirectiveItCannotKeyFailsAsGoGenerateFails/a_package_that_is_not_there","k":"span","s":198292,"e":199673},{"n":"TestADirectiveItCannotKeyFailsAsGoGenerateFails/a_package_whose_import_is_not_there","k":"span","s":199673,"e":201161}]}]},{"n":"internal/gotest","k":"span","s":167450,"e":168475},{"n":"internal/mutate","k":"span","s":167705,"e":225771,"c":[{"n":"TestATestProcessIsHeldByItsCgroup","k":"span","s":167728,"e":170138},{"n":"TestAnEditThatAllocatesForEverIsStoppedAndRefused","k":"span","s":170853,"e":178083},{"n":"TestEveryTestProcessIsHeldToItsShare","k":"span","s":178086,"e":180095},{"n":"TestARefusalIsKeptForTheCodeItWasAskedOf","k":"span","s":180134,"e":183945},{"n":"TestARefusalIsKeptForThePackagesItsTestsAreBuiltFrom","k":"span","s":183945,"e":188636},{"n":"TestAPackageWithNoTestsIsSaidSoAndNotCountedAsASurvivor","k":"span","s":188741,"e":196572},{"n":"TestAnEditIsPutToTheTestsThatReachIt","k":"span","s":197184,"e":200129},{"n":"TestEveryEditIsCountedAsTheTestsAnswered","k":"span","s":200573,"e":202021},{"n":"TestATestThatAlwaysFailsRefusesNothing","k":"span","s":202021,"e":203299},{"n":"TestAPackageWithNoTestsIsAskedThroughItsImporters","k":"span","s":203299,"e":204357},{"n":"TestATestThatWritesInItsDirectoryWritesInACopyOfItsOwn","k":"span","s":204383,"e":205961},{"n":"TestAnEditBuiltAloneIsAskedInACopyOfItsOwn","k":"span","s":205961,"e":207374},{"n":"TestAnEditItsOwnTestsLetThroughIsAskedOfEachImporterInTurn","k":"span","s":207374,"e":211292},{"n":"TestEachTestProcessHasATemporaryDirectoryOfItsOwn","k":"span","s":211292,"e":212483},{"n":"TestAnEditInTheSchemaIsAnsweredAsItIsAlone","k":"span","s":212483,"e":221478},{"n":"TestAnImportersTestsAreBuiltFromTheModulesRoot","k":"span","s":222766,"e":224535}]},{"n":"internal/proven","k":"span","s":168478,"e":169637},{"n":"internal/refs","k":"span","s":169103,"e":180357,"c":[{"n":"TestTasksAreAskedOfTheTaskGoModPins","k":"span","s":169159,"e":179337}]},{"n":"internal/runtrace","k":"span","s":169651,"e":170784},{"n":"internal/sfw","k":"span","s":170786,"e":171891},{"n":"internal/shell","k":"span","s":171935,"e":172963},{"n":"internal/taskgate","k":"span","s":175150,"e":176480},{"n":"internal/testquality","k":"span","s":182714,"e":211009,"c":[{"n":"TestTestsThatCannotFailAreFlagged","k":"span","s":182731,"e":188286},{"n":"TestTestsThatCanFailAreNotFlagged","k":"span","s":188286,"e":193965},{"n":"TestLongSleepsInATestAreFlagged","k":"span","s":193965,"e":200130},{"n":"TestTestsThatNeverRunAreFlagged","k":"span","s":200130,"e":205274},{"n":"TestFindingsAreKeyedByThePackageAPersonWrites","k":"span","s":205274,"e":209752}]},{"n":"internal/vulngate","k":"span","s":182847,"e":183879},{"n":"provenance","k":"span","s":185695,"e":186736},{"n":"sbom","k":"span","s":188870,"e":190507},{"n":"trustroot","k":"span","s":223986,"e":225318},{"n":"versions","k":"span","s":224543,"e":225619},{"n":"versions/gate","k":"span","s":224576,"e":226085},{"n":"versions/upstream","k":"span","s":226416,"e":227691}]}]},{"n":"Coverage summary","k":"step","s":228000,"e":228000},{"n":"Upload Go coverage HTML","k":"step","s":228000,"e":229000},{"n":"What this change broke, and whether a test noticed","k":"step","s":229000,"e":238612}]}}],"wall":238612};
+const wall = Math.max(data.wall, 1);
+const pct = ms => (100 * ms / wall) + '%';
+const wf = document.getElementById('wf');
+
+function fmt(ms) {
+  const s = Math.round(ms / 1000);
+  if (ms > 0 && ms < 1000) return ms + 'ms';
+  if (s >= 3600) return Math.floor(s / 3600) + 'h' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm';
+  if (s >= 60) return Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's';
+  return s + 's';
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function bar(track, s, kind, extra) {
+  const b = el('div', 'b ' + kind + (s.f ? ' fail' : '') + (extra || ''));
+  b.style.left = pct(s.s);
+  b.style.width = pct(s.e - s.s);
+  b.title = s.n + ' · ' + fmt(s.e - s.s) + ' · from ' + fmt(s.s) + ' to ' + fmt(s.e);
+  track.appendChild(b);
+}
+
+
+function row(node, depth, lane) {
+  const r = el('div', 'row' + (lane ? ' lane' : ''));
+  const name = el('div', 'name');
+  name.style.paddingLeft = (depth * 14) + 'px';
+  const tog = el('span', 'tog', node.c && node.c.length ? '▸' : '');
+  name.appendChild(tog);
+  if (lane && lane.url) {
+    const a = el('a', '', node.n);
+    a.href = lane.url;
+    name.appendChild(a);
+  } else {
+    name.appendChild(document.createTextNode(node.n));
+  }
+  if (lane && lane.critical) name.appendChild(el('span', 'crit-mark', ' ●'));
+  if (node.f) name.appendChild(el('span', 'fail-mark', ' ✗'));
+  name.title = node.n + (lane ? ' · ' + lane.runner + ' · ' + (lane.labels || []).join(', ') : '');
+  r.appendChild(name);
+  r.appendChild(el('div', 'dur', fmt(node.e - node.s)));
+  const track = el('div', 'track');
+  if (lane && lane.queue.e > lane.queue.s) bar(track, lane.queue, 'queue');
+  bar(track, node, node.k, lane && lane.critical ? ' crit' : '');
+  r.appendChild(track);
+  wf.appendChild(r);
+  const kids = [];
+  for (const c of node.c || []) kids.push(...row(c, depth + 1));
+  for (const k of kids) k.hidden = true;
+  r.open = false;
+  r.kids = kids;
+  r.direct = kids.filter(k => k.depth === depth + 1);
+  r.depth = depth;
+  tog.onclick = () => toggle(r, !r.open);
+  return [r, ...kids];
+}
+
+function toggle(r, open) {
+  r.open = open;
+  r.querySelector('.tog').textContent = r.kids.length ? (open ? '▾' : '▸') : '';
+  for (const k of r.direct) {
+    k.hidden = !open;
+    if (!open && k.open) toggle(k, false);
+  }
+}
+
+const axis = el('div', 'row axis');
+axis.appendChild(el('div', 'name', 'job / step / span'));
+axis.appendChild(el('div', 'dur', 'took'));
+const at = el('div', 'track');
+const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600].map(s => s * 1000);
+const step = steps.find(s => wall / s <= 10) || 3600000;
+for (let t = 0; t <= wall; t += step) {
+  const tk = el('div', 'tick', t % 60000 === 0 && t > 0 ? fmt(t).replace(/m00s$/, 'm').replace(/h00m$/, 'h') : fmt(t));
+  tk.style.left = pct(t);
+  at.appendChild(tk);
+}
+axis.appendChild(at);
+wf.appendChild(axis);
+
+const lanes = data.lanes.map(l => row(l.job, 0, l)[0]);
+document.getElementById('expand').onclick = () => {
+  const all = [...wf.querySelectorAll('.row')].filter(r => r.kids);
+  for (const r of all) toggle(r, true);
+};
+document.getElementById('collapse').onclick = () => lanes.forEach(r => toggle(r, false));
+
+
+if (location.hash === '#open') document.getElementById('expand').click();
+</script>
+</body>
+</html>
