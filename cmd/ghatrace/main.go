@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -284,11 +285,11 @@ func goTest(ctx context.Context, args []string) error {
 	if len(argv) == 0 {
 		return errors.New("gotest: a go test command is needed after --")
 	}
+	// In go test's own arguments, never GOFLAGS: every go command a test runs inherits that, and
+	// one that lists packages or generates code would answer in JSON its test does not read.
+	argv = withJSON(argv)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // the command the caller asked to run
-	// Through GOFLAGS rather than the arguments, so a wrapper in front of go test - one that starts
-	// a database first - is run as it is, and the go test inside it writes JSON.
 	goflags := os.Getenv("GOFLAGS")
-	cmd.Env = append(os.Environ(), "GOFLAGS="+strings.TrimSpace(goflags+" -json"))
 	cmd.Stdin, cmd.Stderr = os.Stdin, os.Stderr
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -319,6 +320,17 @@ func goTest(ctx context.Context, args []string) error {
 			}
 		}
 	})
+}
+
+// withJSON is argv with -json after its `go test`. A wrapper in front of go test - a script that
+// starts a database first - is run as it is, and its go test is given -json by whoever wrote it.
+func withJSON(argv []string) []string {
+	for i := 1; i < len(argv); i++ {
+		if argv[i] == "test" && filepath.Base(argv[i-1]) == "go" {
+			return slices.Concat(argv[:i+1], []string{"-json"}, argv[i+1:])
+		}
+	}
+	return argv
 }
 
 // verbose is whether args ask go test for -v: word by word, since a wrapper's shell has the whole
