@@ -53,6 +53,10 @@ func TestTheExampleTheSiteShows(t *testing.T) {
 	if err := json.Unmarshal(raw, &bins); err != nil {
 		t.Fatal(err)
 	}
+	// A report it cannot write is no answer.
+	if code := run([]string{"-json", filepath.Join(t.TempDir(), "none", "report.json")}, &out, &errs); code != 2 || !strings.Contains(errs.String(), "no such file") {
+		t.Errorf("a -json it cannot write: exit %d, %s", code, errs.String())
+	}
 	if len(bins) != 2 || bins[0].Root != "cmd/api" || bins[0].MethodElimination || !bins[1].MethodElimination || bins[0].Shipped == 0 {
 		t.Errorf("the JSON report = %+v", bins)
 	}
