@@ -72,14 +72,13 @@ func install(ctx context.Context, e versions.Entry, root, goos, goarch string) (
 	if err := unpack(archive.Name(), part); err != nil {
 		return "", fmt.Errorf("toolcache: %s: %w", e.Name, err)
 	}
-	if err := os.Rename(part, dir); err != nil {
-		// Another process put the same pin in place first: its directory is this one's.
-		if _, serr := os.Stat(dir); serr == nil {
-			return dir, nil
-		}
-		return "", fmt.Errorf("toolcache: %w", err)
+	renamed := os.Rename(part, dir)
+	// Renamed into place here, or put there first by another process installing the same pin,
+	// whose directory is this one's: either way it is there.
+	if _, err := os.Stat(dir); err == nil {
+		return dir, nil
 	}
-	return dir, nil
+	return "", fmt.Errorf("toolcache: %w", renamed)
 }
 
 // unpack writes the regular files and directories of the gzipped tar at archive into dir, each
