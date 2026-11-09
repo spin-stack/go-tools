@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# sfw's binary and versions' downloads are asked of GitHub with this: anonymous ones are the
+# first it sheds under load.
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+
 jobs:
   gate:
     name: Gate

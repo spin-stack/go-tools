@@ -17,6 +17,11 @@ concurrency:
 permissions:
   contents: read
 
+# What the tools download from a GitHub release they ask for with this, through the API: GitHub
+# sheds anonymous downloads under load, and they 504 for minutes at a time (2026-11-09).
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+
 jobs:
   gate:
     # The check main's ruleset requires, named Gate in every spin-stack repository.
