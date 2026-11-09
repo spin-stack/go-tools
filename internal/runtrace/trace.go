@@ -1,13 +1,14 @@
-// Package ghatrace turns one workflow run - its jobs, their steps, and the spans its jobs recorded -
+// Package runtrace turns one workflow run - its jobs, their steps, and the spans its jobs recorded -
 // into a trace: a lane per job with the wait for a runner, the job, its steps and the spans inside
 // them, and the chain of jobs the run's wall time is made of.
-package ghatrace
+package runtrace
 
 import (
 	"cmp"
 	"slices"
 	"time"
 
+	"github.com/spin-stack/go-tools/ghatrace"
 	"github.com/spin-stack/go-tools/internal/proven"
 )
 
@@ -65,7 +66,7 @@ func (t Trace) Wall() time.Duration { return t.End.Sub(t.Start) }
 
 // Build is the trace of run, with spans placed under the step of the job that recorded them.
 // A span no job ran is dropped: it was recorded by a runner the run does not name.
-func Build(run Run, spans []Span) Trace {
+func Build(run Run, spans []ghatrace.Span) Trace {
 	t := Trace{Run: run.ID, Title: run.Workflow, URL: run.URL}
 	for _, j := range run.Jobs {
 		if j.StartedAt.IsZero() || j.Conclusion == "skipped" {

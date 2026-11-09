@@ -1,10 +1,9 @@
-package ghatrace_test
+package runtrace_test
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/spin-stack/go-tools/internal/ghatrace"
+	"github.com/spin-stack/go-tools/ghatrace"
 	"github.com/spin-stack/go-tools/internal/proven"
+	"github.com/spin-stack/go-tools/internal/runtrace"
 )
 
 var t0 = time.Date(2026, 11, 9, 14, 0, 0, 0, time.UTC)
@@ -35,8 +35,8 @@ func job(name, runner string, q, s, e int, steps ...int) proven.Job {
 // A plan job, three lanes it unblocks, and a gate that waits for all of them: the run's wall is
 // plan, then the slowest lane, then the gate - not the lane that was queued first or ran longest
 // on its own.
-func runOf() ghatrace.Run {
-	return ghatrace.Run{ID: 7, Workflow: "CI", Now: at(1000), Jobs: []proven.Job{
+func runOf() runtrace.Run {
+	return runtrace.Run{ID: 7, Workflow: "CI", Now: at(1000), Jobs: []proven.Job{
 		job("gate", "r5", 301, 305, 310),
 		job("plan", "r1", 0, 2, 40),
 		job("lane fast", "r2", 40, 45, 100),
@@ -48,7 +48,7 @@ func runOf() ghatrace.Run {
 	}}
 }
 
-func names(t ghatrace.Trace, critical bool) []string {
+func names(t runtrace.Trace, critical bool) []string {
 	var out []string
 	for _, l := range t.Lanes {
 		if !critical || l.Critical {
@@ -59,7 +59,7 @@ func names(t ghatrace.Trace, critical bool) []string {
 }
 
 func TestBuildOrdersLanesAndFindsTheCriticalPath(t *testing.T) {
-	tr := ghatrace.Build(runOf(), nil)
+	tr := runtrace.Build(runOf(), nil)
 	assert.Equal(t, []string{"plan", "lane mid", "lane fast", "lane slow", "gate"}, names(tr, false), "by queued, then started")
 	assert.Equal(t, []string{"plan", "lane slow", "gate"}, names(tr, true))
 	assert.Equal(t, []string{"build", "deploy"}, tr.Skipped)
@@ -75,8 +75,8 @@ func TestCriticalPathStopsAtAWaitNoJobExplains(t *testing.T) {
 		61:  {"deploy"},
 		170: {"deploy"},
 	} {
-		r := ghatrace.Run{Jobs: []proven.Job{job("build", "r1", 0, 1, 50), job("deploy", "r2", queued, queued+1, queued+30)}}
-		assert.Equal(t, want, names(ghatrace.Build(r, nil), true), "deploy queued at %d", queued)
+		r := runtrace.Run{Jobs: []proven.Job{job("build", "r1", 0, 1, 50), job("deploy", "r2", queued, queued+1, queued+30)}}
+		assert.Equal(t, want, names(runtrace.Build(r, nil), true), "deploy queued at %d", queued)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestAJobThatDidNotSucceedIsFailed(t *testing.T) {
 	for conclusion, failed := range map[string]bool{"success": false, "failure": true, "cancelled": true, "timed_out": true} {
 		j := job("lane", "r1", 0, 1, 2)
 		j.Conclusion = conclusion
-		tr := ghatrace.Build(ghatrace.Run{Jobs: []proven.Job{j}}, nil)
+		tr := runtrace.Build(runtrace.Run{Jobs: []proven.Job{j}}, nil)
 		assert.Equal(t, failed, tr.Lanes[0].Job.Failed, conclusion)
 	}
 }
@@ -94,7 +94,7 @@ func TestAJobStillRunningEndsNow(t *testing.T) {
 	j.CompletedAt, j.Status, j.Conclusion = time.Time{}, "in_progress", ""
 	j.Steps[0].CompletedAt = time.Time{}
 	j.Steps = append(j.Steps, proven.Step{Name: "pending"})
-	tr := ghatrace.Build(ghatrace.Run{Now: at(9), Jobs: []proven.Job{j}}, nil)
+	tr := runtrace.Build(runtrace.Run{Now: at(9), Jobs: []proven.Job{j}}, nil)
 	require.Len(t, tr.Lanes, 1)
 	assert.Equal(t, at(9), tr.Lanes[0].Job.End)
 	require.Len(t, tr.Lanes[0].Job.Children, 1, "a step that has not started is not drawn")
@@ -118,7 +118,7 @@ func TestSpansGoUnderTheStepTheyRanInAndNest(t *testing.T) {
 		// r9 ran no job of this run.
 		span("other", "r9", 61, 62, 0),
 	}
-	tr := ghatrace.Build(runOf(), spans)
+	tr := runtrace.Build(runOf(), spans)
 	slow := tr.Lanes[3]
 	require.Equal(t, "lane slow", slow.Name)
 	stepA, stepB := slow.Job.Children[0], slow.Job.Children[1]
@@ -139,24 +139,6 @@ func TestSpansGoUnderTheStepTheyRanInAndNest(t *testing.T) {
 	}
 }
 
-func TestSpansSurviveTheirFile(t *testing.T) {
-	path := t.TempDir() + "/spans.jsonl"
-	want := []ghatrace.Span{span("a", "r1", 1, 2, 0), span("b", "r1", 3, 4, 2)}
-	for _, s := range want {
-		require.NoError(t, ghatrace.Append(path, s))
-	}
-	f, err := openFile(path)
-	require.NoError(t, err)
-	got, err := ghatrace.Read(f)
-	require.NoError(t, err)
-	require.Len(t, got, 2)
-	assert.True(t, want[1].End.Equal(got[1].End))
-	assert.Equal(t, 2, got[1].Exit)
-
-	_, err = ghatrace.Read(strings.NewReader("{\"name\":\"a\"}\n\nnot json\n"))
-	assert.ErrorContains(t, err, "line 3")
-}
-
 // track is one of a process's tracks in a Perfetto trace.
 type track struct{ pid, tid int }
 
@@ -168,10 +150,10 @@ type perfetto struct {
 	trackNames                  map[track][]string
 }
 
-func perfettoOf(t *testing.T, tr ghatrace.Trace) perfetto {
+func perfettoOf(t *testing.T, tr runtrace.Trace) perfetto {
 	t.Helper()
 	var buf bytes.Buffer
-	require.NoError(t, ghatrace.WritePerfetto(&buf, tr))
+	require.NoError(t, runtrace.WritePerfetto(&buf, tr))
 	var doc struct {
 		Events []struct {
 			Ph   string         `json:"ph"`
@@ -217,7 +199,7 @@ func TestPerfettoTracksHoldOnlyNestedOrDisjointSlices(t *testing.T) {
 	}
 	r := runOf()
 	r.Jobs[1].CreatedAt = r.Jobs[1].StartedAt // plan did not wait
-	p := perfettoOf(t, ghatrace.Build(r, spans))
+	p := perfettoOf(t, runtrace.Build(r, spans))
 	processes, spanNames, waits, tracks, trackNames := p.processes, p.spanNames, p.waits, p.tracks, p.trackNames
 	assert.Equal(t, []string{"plan (critical path)", "lane mid", "lane fast", "lane slow (critical path)", "gate (critical path)"}, processes)
 	assert.ElementsMatch(t, []string{"up 50s", "build 29s", "push 20s", "✗ test B 2m50s", "test A 2m50s", "test C 10s"}, spanNames)
@@ -249,7 +231,7 @@ func TestSummary(t *testing.T) {
 	r := runOf()
 	r.Jobs[2].Name = "lane: fast #1; x|y"
 	var buf bytes.Buffer
-	require.NoError(t, ghatrace.WriteSummary(&buf, ghatrace.Build(r, nil), "see the artifacts"))
+	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(r, nil), "see the artifacts"))
 	out := buf.String()
 	assert.Contains(t, out, "| **5m10s** | 9m07s (11 job-minutes rounded up) | 32s | 20s (lane slow) |")
 	assert.Contains(t, out, "**Critical path**: plan (38s, waited 2s) → lane slow (4m00s, waited 20s) → gate (5s, waited 4s)")
@@ -263,9 +245,9 @@ func TestSummary(t *testing.T) {
 
 func TestSummaryOfOneJobAndOfNone(t *testing.T) {
 	// Queued as it started, and done in the same second.
-	one := ghatrace.Run{Workflow: "Lint", Jobs: []proven.Job{job("lint", "r1", 5, 5, 5), {Name: "fix", Conclusion: "skipped"}}}
+	one := runtrace.Run{Workflow: "Lint", Jobs: []proven.Job{job("lint", "r1", 5, 5, 5), {Name: "fix", Conclusion: "skipped"}}}
 	var buf bytes.Buffer
-	require.NoError(t, ghatrace.WriteSummary(&buf, ghatrace.Build(one, nil), ""))
+	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(one, nil), ""))
 	out := buf.String()
 	assert.Contains(t, out, "**Critical path**: lint (0s, waited 0s)")
 	assert.NotContains(t, out, "    wait ", "no bar for a wait under a second")
@@ -275,7 +257,7 @@ func TestSummaryOfOneJobAndOfNone(t *testing.T) {
 	assert.Contains(t, out, "Did not run: fix.")
 
 	buf.Reset()
-	require.NoError(t, ghatrace.WriteSummary(&buf, ghatrace.Build(ghatrace.Run{Workflow: "Empty"}, nil), ""))
+	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(runtrace.Run{Workflow: "Empty"}, nil), ""))
 	assert.Equal(t, "## Empty: where the time went\n\n| wall | on runners | waiting for runners | longest wait |\n|---|---|---|---|\n| **0s** | 0s (0 job-minutes rounded up) | 0s | - |\n\n", buf.String())
 }
 
@@ -283,11 +265,9 @@ func TestHTMLPageEscapesWhatAJobIsCalled(t *testing.T) {
 	r := runOf()
 	r.Jobs[1].Name = "</script><script>alert(1)</script>"
 	var buf bytes.Buffer
-	require.NoError(t, ghatrace.WriteHTML(&buf, ghatrace.Build(r, nil)))
+	require.NoError(t, runtrace.WriteHTML(&buf, runtrace.Build(r, nil)))
 	page := buf.String()
 	assert.Equal(t, 1, strings.Count(page, "<script>"), "only the page's own script")
 	assert.Contains(t, page, `"wall":310000`)
 	assert.Contains(t, page, `"n":"stepB"`, "a job's steps are on the page")
 }
-
-func openFile(path string) (*os.File, error) { return os.Open(path) } //nolint:gosec // the test's own file
