@@ -90,7 +90,7 @@ func (p retry) bytes(ctx context.Context, url string, limit int64) ([]byte, erro
 	var raw []byte
 	err := p.read(ctx, url, func(body io.Reader) error {
 		var err error
-		raw, err = io.ReadAll(io.LimitReader(body, limit+1))
+		raw, err = io.ReadAll(io.LimitReader(body, limit+1)) // mutate-exempt: one byte past the limit is all the refusal needs, and more is the same refusal
 		return err
 	})
 	if err != nil {
@@ -234,14 +234,14 @@ func transient(err error) bool {
 
 // retryAfter is a Retry-After header's wait, in seconds or until a date; none when it says
 // neither.
-func retryAfter(v string) time.Duration {
+func retryAfter(v string) (wait time.Duration) {
 	if s, err := strconv.Atoi(v); err == nil {
 		return time.Duration(s) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil {
-		return time.Until(t)
+		wait = time.Until(t)
 	}
-	return 0
+	return wait
 }
 
 // jitter is a wait somewhere in the upper half of d.

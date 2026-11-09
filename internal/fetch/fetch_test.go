@@ -345,14 +345,37 @@ func TestTransientIsTheNetworkNotTheRequest(t *testing.T) {
 	}
 }
 
-// A jittered wait is in the upper half of the backoff, and not always the same.
+// A jittered wait is anywhere in the upper half of the backoff, both ends included, and nowhere
+// else: a backoff of four nanoseconds is small enough to see every wait it can be.
 func TestJitterIsTheUpperHalf(t *testing.T) {
 	seen := map[time.Duration]bool{}
-	for range 200 {
-		d := jitter(8 * time.Second)
-		require.GreaterOrEqual(t, d, 4*time.Second)
-		require.LessOrEqual(t, d, 8*time.Second)
-		seen[d] = true
+	for range 1000 {
+		seen[jitter(4)] = true
 	}
-	assert.Greater(t, len(seen), 1)
+	assert.Equal(t, map[time.Duration]bool{2: true, 3: true, 4: true}, seen)
 }
+
+// A token goes to GitHub's API, which limits what is asked without one, and nowhere else.
+func TestATokenGoesOnlyToGitHubsAPI(t *testing.T) {
+	var got []string
+	before := http.DefaultClient.Transport
+	http.DefaultClient.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+		got = append(got, r.URL.Host+" "+r.Header.Get("Authorization"))
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}")), Request: r}, nil
+	})
+	t.Cleanup(func() { http.DefaultClient.Transport = before })
+	for _, tc := range []struct{ token, url string }{
+		{"tok", "https://api.github.com/repos/a/b"},
+		{"tok", "https://github.com/a/b/releases/download/v1/f"},
+		{"", "https://api.github.com/repos/a/b"},
+	} {
+		t.Setenv("GITHUB_TOKEN", tc.token)
+		_, err := Bytes(t.Context(), tc.url, 64)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, []string{"api.github.com Bearer tok", "github.com ", "api.github.com "}, got)
+}
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
