@@ -355,25 +355,165 @@ func TestJitterIsTheUpperHalf(t *testing.T) {
 	assert.Equal(t, map[time.Duration]bool{2: true, 3: true, 4: true}, seen)
 }
 
-// A token goes to GitHub's API, which limits what is asked without one, and nowhere else.
-func TestATokenGoesOnlyToGitHubsAPI(t *testing.T) {
-	var got []string
+const (
+	releaseURL = "https://github.com/o/r/releases/download/v1.2/tool"
+	cdn        = "release-assets.githubusercontent.com"
+)
+
+// github is GitHub as these tests ask it, host by host, through http.DefaultClient's transport -
+// so the client's own redirect handling, which is what drops a token, is the real one - with
+// every request written down as "host/path authorization|accept". A release's file is served as
+// GitHub serves it: github.com and the API redirect to the CDN that holds the bytes.
+func github(t *testing.T, fromCDN http.HandlerFunc) *[]string {
+	var asked []string
+	hosts := map[string]http.HandlerFunc{
+		"github.com": func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/o/r/releases/download/v1.2/tool":
+				http.Redirect(w, r, "https://"+cdn+"/tool", http.StatusFound)
+			case "/o/r/archive/v1.2.tar.gz":
+				_, _ = io.WriteString(w, "an archive")
+			default:
+				http.NotFound(w, r)
+			}
+		},
+		"api.github.com": func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/o/r/releases/tags/v1.2":
+				_, _ = io.WriteString(w, `{"assets":[{"id":8,"name":"other"},{"id":7,"name":"tool"}]}`)
+			case "/repos/o/r/releases/assets/7":
+				http.Redirect(w, r, "https://"+cdn+"/tool", http.StatusFound)
+			default:
+				http.NotFound(w, r)
+			}
+		},
+		cdn:           fromCDN,
+		"example.com": func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "elsewhere") },
+	}
 	before := http.DefaultClient.Transport
 	http.DefaultClient.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		got = append(got, r.URL.Host+" "+r.Header.Get("Authorization"))
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}")), Request: r}, nil
+		asked = append(asked, r.URL.Host+r.URL.Path+" "+r.Header.Get("Authorization")+"|"+r.Header.Get("Accept"))
+		rec := httptest.NewRecorder()
+		hosts[r.URL.Host](rec, r)
+		resp := rec.Result()
+		resp.Request = r
+		return resp, nil
 	})
 	t.Cleanup(func() { http.DefaultClient.Transport = before })
-	for _, tc := range []struct{ token, url string }{
-		{"tok", "https://api.github.com/repos/a/b"},
-		{"tok", "https://github.com/a/b/releases/download/v1/f"},
-		{"", "https://api.github.com/repos/a/b"},
+	return &asked
+}
+
+// A token goes to GitHub's API and nowhere else. A release's file is asked for through the API,
+// where a token counts, and the token stops there: the CDN the API redirects to, github.com and
+// any other host never see it.
+func TestATokenGoesOnlyToGitHubsAPI(t *testing.T) {
+	viaAPI := func(tok string) []string {
+		return []string{
+			"api.github.com/repos/o/r/releases/tags/v1.2 Bearer " + tok + "|",
+			"api.github.com/repos/o/r/releases/assets/7 Bearer " + tok + "|application/octet-stream",
+			cdn + "/tool |application/octet-stream",
+		}
+	}
+	for _, tc := range []struct {
+		name, githubToken, ghToken, url, want string
+		asked                                 []string
+	}{
+		{name: "a release's file, with GITHUB_TOKEN", githubToken: "tok", url: releaseURL, want: "the tool", asked: viaAPI("tok")},
+		{name: "a release's file, with GH_TOKEN", ghToken: "gh", url: releaseURL, want: "the tool", asked: viaAPI("gh")},
+		{name: "a release's file, with both", githubToken: "tok", ghToken: "gh", url: releaseURL, want: "the tool", asked: viaAPI("tok")},
+		{name: "a release's file, without a token", url: releaseURL, want: "the tool",
+			asked: []string{"github.com/o/r/releases/download/v1.2/tool |", cdn + "/tool |"}},
+		{name: "github.com, not a release's file", githubToken: "tok", url: "https://github.com/o/r/archive/v1.2.tar.gz",
+			want: "an archive", asked: []string{"github.com/o/r/archive/v1.2.tar.gz |"}},
+		{name: "another host", githubToken: "tok", url: "https://example.com/f", want: "elsewhere", asked: []string{"example.com/f |"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GITHUB_TOKEN", tc.githubToken)
+			t.Setenv("GH_TOKEN", tc.ghToken)
+			asked := github(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "the tool") })
+			got, err := Bytes(t.Context(), tc.url, 64)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got))
+			assert.Equal(t, tc.asked, *asked)
+		})
+	}
+}
+
+// With a token, a release's file that is not there - no such release, or none of that name - is
+// said so, and Exists answers no rather than failing.
+func TestAReleaseFileThatIsNotThereIsSaidSo(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "tok")
+	t.Setenv("GH_TOKEN", "")
+	github(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "the tool") })
+	for _, tc := range []struct {
+		url, wantErr string
+		exists       bool
+	}{
+		{url: releaseURL, exists: true},
+		{url: "https://github.com/o/r/releases/download/v1.2/missing", wantErr: "release v1.2 of o/r has no asset missing"},
+		{url: "https://github.com/o/r/releases/download/v9/tool", wantErr: "release v9 of o/r has no asset tool"},
+	} {
+		_, err := Bytes(t.Context(), tc.url, 64)
+		if tc.wantErr != "" {
+			require.ErrorContains(t, err, tc.url+": "+tc.wantErr)
+		} else {
+			require.NoError(t, err)
+		}
+		ok, err := Exists(t.Context(), tc.url)
+		require.NoError(t, err)
+		assert.Equal(t, tc.exists, ok, tc.url)
+	}
+	// And without one, it is asked of github.com as it always was.
+	t.Setenv("GITHUB_TOKEN", "")
+	asked := github(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	ok, err := Exists(t.Context(), releaseURL)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, []string{"github.com/o/r/releases/download/v1.2/tool |", cdn + "/tool |"}, *asked)
+}
+
+// A failure names the host that answered: a 504 from GitHub's CDN, behind a redirect, is not
+// github.com's.
+func TestAFailureNamesTheHostThatAnswered(t *testing.T) {
+	for _, tc := range []struct{ token, want string }{
+		{"", releaseURL + ": " + cdn + " answered 504 Gateway Timeout (tried 5 times)"},
+		{"tok", releaseURL + ": https://api.github.com/repos/o/r/releases/assets/7: " + cdn + " answered 504 Gateway Timeout (tried 5 times)"},
 	} {
 		t.Setenv("GITHUB_TOKEN", tc.token)
-		_, err := Bytes(t.Context(), tc.url, 64)
-		require.NoError(t, err)
+		t.Setenv("GH_TOKEN", "")
+		github(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusGatewayTimeout) })
+		p, _, said := waiting()
+		_, err := p.bytes(t.Context(), releaseURL, 64)
+		require.EqualError(t, err, tc.want)
+		assert.Contains(t, said.String(), cdn+" answered 504 Gateway Timeout, trying again")
 	}
-	assert.Equal(t, []string{"api.github.com Bearer tok", "github.com ", "api.github.com "}, got)
+	// And a host that answered itself is named once.
+	github(t, nil)
+	_, err := Bytes(t.Context(), "https://github.com/o/r/archive/missing.tar.gz", 64)
+	require.EqualError(t, err, "https://github.com/o/r/archive/missing.tar.gz answered 404 Not Found")
+}
+
+// What a release download is, and what is only like one.
+func TestAReleaseFileIsGitHubsReleaseDownload(t *testing.T) {
+	for _, tc := range []struct {
+		url              string
+		owner, repo, tag string
+		name             string
+		ok               bool
+	}{
+		{url: releaseURL, owner: "o", repo: "r", tag: "v1.2", name: "tool", ok: true},
+		{url: "https://github.com/o/r/releases/download/v1%2B2/a%20b", owner: "o", repo: "r", tag: "v1+2", name: "a b", ok: true},
+		{url: "http://github.com/o/r/releases/download/v1.2/tool"},
+		{url: "https://github.com/o/r/releases/download/v1.2/tool?x=1"},
+		{url: "https://api.github.com/o/r/releases/download/v1.2/tool"},
+		{url: "https://github.com/o/r/releases/latest/download/tool"},
+		{url: "https://github.com/o/r/archive/download/v1.2/tool"},
+		{url: "https://github.com/o/r/releases/download/release/v1/tool"},
+		{url: "://"},
+	} {
+		owner, repo, tag, name, ok := releaseFile(tc.url)
+		assert.Equal(t, []any{tc.owner, tc.repo, tc.tag, tc.name, tc.ok}, []any{owner, repo, tag, name, ok}, tc.url)
+	}
 }
 
 type roundTrip func(*http.Request) (*http.Response, error)
