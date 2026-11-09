@@ -151,7 +151,8 @@ func (p retry) exists(ctx context.Context, url string) (bool, error) {
 // when a redirect took the request elsewhere: a 504 from GitHub's release CDN is not one from
 // github.com.
 func answered(url string, resp *http.Response) error {
-	if asked, err := neturl.Parse(url); err == nil && resp.Request != nil && resp.Request.URL.Host != asked.Host {
+	// url parses: the request made of it did, and the response is that request's, followed.
+	if asked, _ := neturl.Parse(url); resp.Request.URL.Host != asked.Host {
 		return fmt.Errorf("%s: %s answered %s", url, resp.Request.URL.Host, resp.Status)
 	}
 	return fmt.Errorf("%s answered %s", url, resp.Status)

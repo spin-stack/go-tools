@@ -380,8 +380,9 @@ func github(t *testing.T, fromCDN http.HandlerFunc) *[]string {
 		"api.github.com": func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/repos/o/r/releases/tags/v1.2":
-				_, _ = io.WriteString(w, `{"assets":[{"id":8,"name":"other"},{"id":7,"name":"tool"}]}`)
-			case "/repos/o/r/releases/assets/7":
+				// An id past nine: decimal, as the API spells it, and no other base.
+				_, _ = io.WriteString(w, `{"assets":[{"id":8,"name":"other"},{"id":70,"name":"tool"}]}`)
+			case "/repos/o/r/releases/assets/70":
 				http.Redirect(w, r, "https://"+cdn+"/tool", http.StatusFound)
 			default:
 				http.NotFound(w, r)
@@ -410,7 +411,7 @@ func TestATokenGoesOnlyToGitHubsAPI(t *testing.T) {
 	viaAPI := func(tok string) []string {
 		return []string{
 			"api.github.com/repos/o/r/releases/tags/v1.2 Bearer " + tok + "|",
-			"api.github.com/repos/o/r/releases/assets/7 Bearer " + tok + "|application/octet-stream",
+			"api.github.com/repos/o/r/releases/assets/70 Bearer " + tok + "|application/octet-stream",
 			cdn + "/tool |application/octet-stream",
 		}
 	}
@@ -477,7 +478,7 @@ func TestAReleaseFileThatIsNotThereIsSaidSo(t *testing.T) {
 func TestAFailureNamesTheHostThatAnswered(t *testing.T) {
 	for _, tc := range []struct{ token, want string }{
 		{"", releaseURL + ": " + cdn + " answered 504 Gateway Timeout (tried 5 times)"},
-		{"tok", releaseURL + ": https://api.github.com/repos/o/r/releases/assets/7: " + cdn + " answered 504 Gateway Timeout (tried 5 times)"},
+		{"tok", releaseURL + ": https://api.github.com/repos/o/r/releases/assets/70: " + cdn + " answered 504 Gateway Timeout (tried 5 times)"},
 	} {
 		t.Setenv("GITHUB_TOKEN", tc.token)
 		t.Setenv("GH_TOKEN", "")
