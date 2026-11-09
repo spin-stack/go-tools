@@ -96,6 +96,9 @@ func TestAReleaseIsUnpackedOnceByItsPin(t *testing.T) {
 	if err != nil || st.Mode().Perm() != 0o755 {
 		t.Errorf("bin/task: %v, %v", st, err)
 	}
+	if body, err := os.ReadFile(filepath.Join(dir, "bin", "task")); err != nil || string(body) != "#!/bin/sh\n" {
+		t.Errorf("bin/task holds %q, %v", body, err)
+	}
 	if st, err := os.Stat(filepath.Join(dir, "LICENSE")); err != nil || st.Mode().Perm() != 0o644 {
 		t.Errorf("LICENSE: %v, %v", st, err)
 	}
@@ -162,5 +165,34 @@ func TestInstallIsThisPlatforms(t *testing.T) {
 		Pins: map[string]string{"plan9/mips": strings.Repeat("0", 64)}}
 	if _, err := Install(t.Context(), e, t.TempDir()); err == nil || !strings.Contains(err.Error(), "pins no file for") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// Two processes installing the same pin at once are both right: the one that renames second finds
+// the other's directory in place, and answers it.
+func TestAnInstallThatLosesTheRaceAnswersTheWinnersDirectory(t *testing.T) {
+	body, pin := tarball(t, member{name: "task", body: "mine", mode: 0o755, kind: tar.TypeReg})
+	root := t.TempDir()
+	winner := filepath.Join(root, "tool", pin)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// While this one downloads, another puts the same pin in place.
+		if err := os.MkdirAll(winner, 0o750); err != nil {
+			t.Error(err)
+		}
+		if err := os.WriteFile(filepath.Join(winner, "task"), []byte("theirs"), 0o600); err != nil {
+			t.Error(err)
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	dir, err := install(t.Context(), entry(srv.URL+"/v{version}/tool_{os}_{arch}.tar.gz", pin), root, "linux", "amd64")
+	if err != nil || dir != winner {
+		t.Fatalf("installed %s, %v", dir, err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "task")); string(got) != "theirs" {
+		t.Errorf("the winner's directory holds %q", got)
+	}
+	if left, _ := os.ReadDir(filepath.Join(root, "tool")); len(left) != 1 {
+		t.Errorf("beside it: %v", left)
 	}
 }

@@ -131,9 +131,13 @@ func taskCommand(v *versions.Versions, gomod string, used map[string]bool) []err
 		return errs
 	}
 	used["go-tools"] = true
-	if m := goTools.FindStringSubmatch(gomod); m != nil && tools.Version != m[1]+"."+m[2] {
-		errs = append(errs, fmt.Errorf("go.mod requires go-tools at %s.%s and %s's go-tools is %s: one commit for the packages and the commands (versions bump go-tools %s.%s)",
-			m[1], m[2], versions.File, tools.Version, m[1], m[2]))
+	m := goTools.FindStringSubmatch(gomod)
+	if m == nil {
+		return errs
+	}
+	if want := m[1] + "." + m[2]; tools.Version != want {
+		errs = append(errs, fmt.Errorf("go.mod requires go-tools at %s and %s's go-tools is %s: one commit for the packages and the commands (versions bump go-tools %s)",
+			want, versions.File, tools.Version, want))
 	}
 	return errs
 }
