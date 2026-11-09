@@ -396,3 +396,17 @@ func TestAFetchIsThisPlatformsFile(t *testing.T) {
 		t.Error("a platform the entry pins nothing for read a file")
 	}
 }
+
+// One platform pinned under pins is still a file per platform: the bump hashes its file, not the
+// source with {os} and {arch} in it.
+func TestABumpOfOnePlatformsPinsHashesItsFile(t *testing.T) {
+	serve(t, map[string]string{"https://example.test/bin-2.0/go-tools_linux_amd64.tar.gz": "linux"})
+	v, err := versions.Parse([]byte(strings.Replace(perPlatform, "    darwin/arm64: "+strings.Repeat("b", 64)+"\n", "", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _, err := Bump(t.Context(), v, "go-tools", "2.0")
+	if err != nil || e.Pins["linux/amd64"] != sumOf("linux") {
+		t.Errorf("bumped: %+v, %v", e, err)
+	}
+}

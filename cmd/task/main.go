@@ -28,7 +28,7 @@ import (
 func main() {
 	err := run(context.Background(), os.Args[1:], syscall.Exec) // mutate-exempt: the process's own arguments; run is what the test drives
 	fmt.Fprintln(os.Stderr, "task:", err)                       //nolint:errcheck // the error is the exit status's reason; stderr failing changes no status
-	os.Exit(2)
+	os.Exit(2)                                                  // mutate-exempt: main is reached only when the exec failed, which no test makes it do; run is what the tests drive
 }
 
 // execFunc replaces the process with argv[0]'s program: syscall.Exec, and a recorder in a test.
@@ -77,7 +77,7 @@ func run(ctx context.Context, args []string, exec execFunc) error {
 // withPath is env with PATH set to path: replaced where it is, since a program that reads the
 // environment from the front would find a second PATH appended after the first only by luck.
 func withPath(env []string, path string) []string {
-	out := make([]string, 0, len(env)+1)
+	var out []string
 	for _, kv := range env {
 		if !strings.HasPrefix(kv, "PATH=") {
 			out = append(out, kv)
