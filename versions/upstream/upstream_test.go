@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -291,4 +293,106 @@ func TestAPinnedFileIsOnlyThePinnedBytes(t *testing.T) {
 
 	_, err := PinnedFile(t.Context(), versions.Entry{Name: "go", Kind: versions.Image}, t.TempDir())
 	require.ErrorContains(t, err, "go is a image, not a download")
+}
+
+// A release's tag is the version the pin spells: a prefix the track names taken off, and a v kept
+// only when the pin has one.
+func TestAReleasesTagIsTheVersionThePinSpells(t *testing.T) {
+	for _, tc := range []struct {
+		tag, prefix string
+		withV       bool
+		want        string
+	}{
+		{"v3.54.0", "", false, "3.54.0"},
+		{"v3.54.0", "", true, "v3.54.0"},
+		{"bin-20261109.193146", "bin-", false, "20261109.193146"},
+		{"bin-v2", "bin-", true, "v2"},
+	} {
+		if got, err := releaseVersion(tc.tag, tc.prefix, tc.withV); err != nil || got != tc.want {
+			t.Errorf("%s with %q: %q, %v; want %q", tc.tag, tc.prefix, got, err, tc.want)
+		}
+	}
+	if _, err := releaseVersion("v3.54.0", "bin-", false); err == nil {
+		t.Error("a release that is not bin-<version> was read as one")
+	}
+}
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// serve answers each URL in files with its body and every other with 404, as the default client's
+// transport for the test.
+func serve(t *testing.T, files map[string]string) {
+	t.Helper()
+	before := http.DefaultClient.Transport
+	http.DefaultClient.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+		body, ok := files[r.URL.String()]
+		status := http.StatusOK
+		if !ok {
+			status = http.StatusNotFound
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Request: r, Header: http.Header{}}, nil
+	})
+	t.Cleanup(func() { http.DefaultClient.Transport = before })
+}
+
+func sumOf(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+
+const perPlatform = `- name: go-tools
+  kind: download
+  source: https://example.test/bin-{version}/go-tools_{os}_{arch}.tar.gz
+  version: "1.0"
+  pins:
+    linux/amd64: ` + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + `
+    darwin/arm64: ` + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" + `
+  track: github-release https://github.com/spin-stack/go-tools bin-
+`
+
+// A bump of a download pinned per platform hashes each platform's file of the new version, and is
+// refused whole when the release lacks one of them.
+func TestABumpPinsEveryPlatformsFile(t *testing.T) {
+	serve(t, map[string]string{
+		"https://example.test/bin-2.0/go-tools_linux_amd64.tar.gz":  "linux",
+		"https://example.test/bin-2.0/go-tools_darwin_arm64.tar.gz": "darwin",
+		"https://example.test/bin-3.0/go-tools_linux_amd64.tar.gz":  "linux 3",
+	})
+	v, err := versions.Parse([]byte(perPlatform))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, out, err := Bump(t.Context(), v, "go-tools", "2.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Pins["linux/amd64"] != sumOf("linux") || e.Pins["darwin/arm64"] != sumOf("darwin") ||
+		!strings.Contains(string(out), "linux/amd64: "+sumOf("linux")+"\n") || !strings.Contains(string(out), `version: "2.0"`) {
+		t.Errorf("bumped: %+v\n%s", e, out)
+	}
+	if _, _, err := Bump(t.Context(), v, "go-tools", "3.0"); err == nil || !strings.Contains(err.Error(), "darwin/arm64") {
+		t.Errorf("a release without darwin/arm64's file was pinned: %v", err)
+	}
+}
+
+// What is fetched of a download pinned per platform is this platform's file, held to its pin.
+func TestAFetchIsThisPlatformsFile(t *testing.T) {
+	own := "https://example.test/bin-1.0/go-tools_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+	serve(t, map[string]string{own: "mine"})
+	e := versions.Entry{Name: "go-tools", Kind: versions.Download, Version: "1.0",
+		Source: "https://example.test/bin-{version}/go-tools_{os}_{arch}.tar.gz",
+		Pins:   map[string]string{runtime.GOOS + "/" + runtime.GOARCH: sumOf("mine")}}
+	file, err := PinnedFile(t.Context(), e, t.TempDir())
+	if err != nil || filepath.Base(file) != filepath.Base(own) {
+		t.Fatalf("fetched %s, %v", file, err)
+	}
+	if raw, err := Pinned(t.Context(), e, 1<<10); err != nil || string(raw) != "mine" {
+		t.Errorf("Pinned = %q, %v", raw, err)
+	}
+	e.Pins = map[string]string{"plan9/mips": sumOf("mine")}
+	if _, err := PinnedFile(t.Context(), e, t.TempDir()); err == nil {
+		t.Error("a platform the entry pins nothing for fetched a file")
+	}
+	if _, err := Pinned(t.Context(), e, 1<<10); err == nil {
+		t.Error("a platform the entry pins nothing for read a file")
+	}
 }
