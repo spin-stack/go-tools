@@ -1,28 +1,24 @@
 package runtrace
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
 
-// group is a `##[group]Run ...` line of a job's log: where GitHub starts each step it runs, a
-// composite action's own steps included, which the jobs API does not list.
-type group struct {
-	name string
-	at   time.Time
-	// next is when the group after it started: zero for the log's last.
-	next time.Time
-}
-
-// groups is every step start in log, in order. Each line of a job's log starts with its time.
-func groups(log string) []group {
-	var out []group
+// actions is every step the job's log says a step ran itself: the runner writes a
+// `##[start-action display=<name>;id=<id>]` line when a composite action starts one of its own
+// steps, and `##[end-action id=<id>;...;conclusion=<conclusion>;...]` when it ends, each line
+// starting with its time. The jobs API lists none of them.
+func actions(log string) []Slice {
+	type open struct {
+		name string
+		at   time.Time
+	}
+	started := map[string]open{}
+	var out []Slice
 	for line := range strings.Lines(log) {
 		stamp, text, ok := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
-		if !ok {
-			continue
-		}
-		name, ok := strings.CutPrefix(text, "##[group]Run ")
 		if !ok {
 			continue
 		}
@@ -30,45 +26,50 @@ func groups(log string) []group {
 		if err != nil {
 			continue
 		}
-		if len(out) > 0 { // mutate-exempt: the log's first group is the first of its step, the step itself, whose next nothing reads
-			out[len(out)-1].next = at
+		if rest, ok := strings.CutPrefix(text, "##[start-action display="); ok {
+			// The name is what the workflow wrote, a semicolon and all: the id is after the last.
+			if i := strings.LastIndex(rest, ";id="); i >= 0 { // mutate-exempt: a display is never empty - the runner writes the step's name, or what it uses or runs
+				started[strings.TrimSuffix(rest[i+len(";id="):], "]")] = open{name: rest[:i], at: at}
+			}
+			continue
 		}
-		out = append(out, group{name: name, at: at})
+		rest, ok := strings.CutPrefix(text, "##[end-action id=")
+		if !ok {
+			continue
+		}
+		id, fields, _ := strings.Cut(strings.TrimSuffix(rest, "]"), ";")
+		if s, ok := started[id]; ok {
+			delete(started, id)
+			failed := strings.Contains(";"+fields+";", ";conclusion=failure;")
+			out = append(out, Slice{Name: s.name, Kind: "step", Start: s.at, End: at, Failed: failed})
+		}
 	}
 	return out
 }
 
-// subSteps puts under each of job's steps the steps it ran itself, from its log: a composite
-// action's. A step's first group is the step; the ones after it, until the next step starts, are
-// its own, each until the next group or the step's end.
+// subSteps puts each step a step ran itself, from the job's log, under the step that ran it - by
+// time, as a span is - and inside any of them that contains it: a composite action in another.
 func subSteps(job *Slice, log string) {
-	byStep := make([][]group, len(job.Children))
-	for _, g := range groups(log) {
-		// Steps are timed to the second, floored, and in order: a line is the last step's to start
-		// by then.
-		started := 0
-		for _, s := range job.Children {
-			if !s.Start.After(g.at) {
-				started++
-			}
-		}
-		if started > 0 {
-			byStep[started-1] = append(byStep[started-1], g)
-		}
-	}
-	for s, own := range byStep {
-		if len(own) < 2 {
+	parts := actions(log)
+	// An action that contains another, read first.
+	slices.SortStableFunc(parts, func(a, b Slice) int { return outerFirst(a.Start, a.End, b.Start, b.End) })
+	for _, p := range parts {
+		parent := stepAt(job, p.Start)
+		if parent == nil {
 			continue
 		}
-		parent := &job.Children[s]
-		// A step's end is floored too: its last part ends within the second after it.
-		end := parent.End.Add(slack)
-		for _, g := range own[1:] {
-			stop := end
-			if !g.next.IsZero() && g.next.Before(stop) {
-				stop = g.next
-			}
-			parent.Children = append(parent.Children, Slice{Name: g.name, Kind: "step", Start: g.at, End: stop})
+		nest(parent, p)
+	}
+}
+
+// stepAt is job's step that was running at t. Steps are timed to the second, floored, and in
+// order: it is the last to start by then.
+func stepAt(job *Slice, t time.Time) *Slice {
+	var at *Slice
+	for i := range job.Children {
+		if !job.Children[i].Start.After(t) {
+			at = &job.Children[i]
 		}
 	}
+	return at
 }

@@ -117,13 +117,17 @@ func TestSpansGoUnderTheStepTheyRanInAndNest(t *testing.T) {
 		span("stray", "r3", 500, 501, 0),
 		// r9 ran no job of this run.
 		span("other", "r9", 61, 62, 0),
+		// Ends past A's floored end of 120, as a span that ran to A's real end does.
+		span("tail", "r3", 119.5, 120.6, 0),
 	}
 	tr := runtrace.Build(runOf(), spans)
 	slow := tr.Lanes[3]
 	require.Equal(t, "lane slow", slow.Name)
+	assert.Len(t, slow.Job.Children, 2, "every span is under a step, none beside them")
 	stepA, stepB := slow.Job.Children[0], slow.Job.Children[1]
-	require.Len(t, stepA.Children, 1)
+	require.Len(t, stepA.Children, 2)
 	assert.Equal(t, "up", stepA.Children[0].Name)
+	assert.Equal(t, "tail", stepA.Children[1].Name, "under the step it started in")
 	require.Len(t, stepA.Children[0].Children, 1)
 	assert.Equal(t, "build", stepA.Children[0].Children[0].Name, "nested inside the span that contains it")
 	require.Len(t, stepB.Children, 2)
@@ -308,9 +312,9 @@ func stamp(s float64) string {
 	return t0.Add(time.Duration(s * float64(time.Second))).Format("2006-01-02T15:04:05.0000000Z")
 }
 
-// A composite action's steps are in the job's log, each a `##[group]Run` line with its time: they
-// go under the step that ran them, each until the next starts, and the summary lists them rather
-// than the step that holds them.
+// A step's own steps are in the job's log, between the runner's start-action and end-action
+// lines: they go under the step that ran them - a composite action's inside the one that ran it -
+// failed when they failed, and the summary lists them rather than the step that holds them.
 func TestACompositeActionsStepsComeFromTheLog(t *testing.T) {
 	j := job("lane", "r1", 0, 10, 120, 30)
 	j.ID = 7
@@ -318,29 +322,41 @@ func TestACompositeActionsStepsComeFromTheLog(t *testing.T) {
 	log := strings.Join([]string{
 		"\ufeff" + stamp(9.5) + " Requested labels: kvm",
 		stamp(10.12) + " ##[group]Run ./.github/actions/fleet-setup",
-		stamp(10.14) + " ##[group]Run actions/setup-node@abc",
+		stamp(10.14) + " ##[start-action display=Set up Node.js;id=__self.__actions_setup-node]",
 		stamp(10.15) + " with: node-version 20",
-		stamp(13.3) + " ##[endgroup]",
-		stamp(13.33) + " ##[group]Run pnpm/action-setup@def",
-		stamp(18.2) + " ##[group]Run go tool task fleet:apparmor",
+		stamp(13.33) + " ##[end-action id=__self.__actions_setup-node;outcome=success;conclusion=success;duration_ms=3190]",
+		stamp(13.34) + " ##[start-action display=Toolchains; Go and Node;id=__self.__tools]",
+		stamp(13.40) + " ##[start-action display=Set up Go;id=__tools.__setup-go]",
+		stamp(18.10) + " ##[end-action id=__tools.__setup-go;outcome=success;conclusion=success;duration_ms=4700]",
+		stamp(18.15) + " ##[end-action id=__self.__tools;outcome=success;conclusion=success;duration_ms=4810]",
 		"not a line of the log",
+		stamp(18.2) + " ##[start-action display=AppArmor;id=__self.__run]",
+		stamp(29.9) + " ##[end-action id=__self.__run;outcome=failure;conclusion=failure;duration_ms=11700]",
 		stamp(30.4) + " ##[group]Run go tool task ci:lane",
-		stamp(119.9) + " ##[group]Run something in the lane's own output",
+		// Started and never ended: the job was cancelled under it.
+		stamp(100) + " ##[start-action display=Never ends;id=__self.__never]",
+		stamp(101) + " ##[end-action id=__self.__unknown;outcome=success;conclusion=success;duration_ms=1]",
 	}, "\n")
 	tr := runtrace.Build(runtrace.Run{Jobs: []proven.Job{j}, Logs: map[int64]string{7: log}}, nil)
 	setup, lane := tr.Lanes[0].Job.Children[0], tr.Lanes[0].Job.Children[1]
-	var got []string
-	for _, s := range setup.Children {
-		got = append(got, fmt.Sprintf("%s %s", s.Name, s.Duration()))
+	tree := map[string][]string{}
+	var walk func(s runtrace.Slice)
+	walk = func(s runtrace.Slice) {
+		for _, c := range s.Children {
+			tree[s.Name] = append(tree[s.Name], fmt.Sprintf("%s %s failed=%t", c.Name, c.Duration(), c.Failed))
+			walk(c)
+		}
 	}
-	assert.Equal(t, []string{"actions/setup-node@abc 3.19s", "pnpm/action-setup@def 4.87s", "go tool task fleet:apparmor 12.2s"}, got,
-		"each until the next starts, the last until the next step's own line")
-	require.Len(t, lane.Children, 1, "a step's first group is the step itself")
-	assert.Equal(t, 1100*time.Millisecond, lane.Children[0].Duration(), "the last runs to the step's end, timed to the second")
+	walk(setup)
+	assert.Equal(t, map[string][]string{
+		"Run ./.github/actions/fleet-setup": {"Set up Node.js 3.19s failed=false", "Toolchains; Go and Node 4.81s failed=false", "AppArmor 11.7s failed=true"},
+		"Toolchains; Go and Node":           {"Set up Go 4.7s failed=false"},
+	}, tree)
+	assert.Empty(t, lane.Children, "an action that never ended, or ended without starting, is no step")
 
 	var buf bytes.Buffer
 	require.NoError(t, runtrace.WriteSummary(&buf, tr, ""))
-	assert.Contains(t, buf.String(), "| go tool task fleet:apparmor | lane | 12s |")
+	assert.Contains(t, buf.String(), "| AppArmor | lane | 12s |")
 	assert.NotContains(t, buf.String(), "| Run ./.github/actions/fleet-setup |", "the step holds its parts: they are what is listed")
-	assert.NotContains(t, buf.String(), "| The lane |", "nor one that holds a single part")
+	assert.NotContains(t, buf.String(), "| Toolchains; Go and Node |", "nor one that holds a single part")
 }

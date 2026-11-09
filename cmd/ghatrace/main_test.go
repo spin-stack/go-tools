@@ -65,9 +65,11 @@ func api(t *testing.T, asked *[]string) *httptest.Server {
 		case "/repos/o/r/actions/jobs/1/logs": // the lane's is gone
 			http.Redirect(w, r, "/blob/1", http.StatusFound)
 		case "/blob/1":
-			_, _ = w.Write([]byte("2026-11-09T14:00:02.1000000Z ##[group]Run plan\n" +
-				"2026-11-09T14:00:05.0000000Z ##[group]Run fetch\n" +
-				"2026-11-09T14:00:50.0000000Z ##[group]Run pick\n"))
+			_, _ = w.Write([]byte("2026-11-09T14:00:02.1000000Z ##[group]Run ./plan\n" +
+				"2026-11-09T14:00:05.0000000Z ##[start-action display=fetch;id=a]\n" +
+				"2026-11-09T14:00:50.0000000Z ##[end-action id=a;outcome=success;conclusion=success;duration_ms=45000]\n" +
+				"2026-11-09T14:00:50.0000000Z ##[start-action display=pick;id=b]\n" +
+				"2026-11-09T14:00:59.5000000Z ##[end-action id=b;outcome=success;conclusion=success;duration_ms=9500]\n"))
 		case "/raw/3": // uploaded with archive: false
 			_, _ = w.Write([]byte(`{"name": "decide", "runner": "r1", "start": "2026-11-09T14:00:10Z", "end": "2026-11-09T14:00:40Z"}` + "\n"))
 		default:
@@ -111,7 +113,7 @@ func TestRunWritesTheSummaryAndBothFiles(t *testing.T) {
 	assert.Contains(t, string(got), "| e2e:up (span) | lane | 1m50s |", "from the zipped artifact")
 	assert.Contains(t, string(got), "| decide (span) | plan | 30s |", "from the unarchived one")
 	assert.Contains(t, string(got), "| teardown (span) | lane | 40s |", "from -spans")
-	assert.Contains(t, string(got), "| pick | plan | 11s |", "from the plan's log, the last part to the step's end, timed to the second")
+	assert.Contains(t, string(got), "| pick | plan | 10s |", "from the plan's log")
 	var logs []string
 	for _, p := range asked {
 		if strings.HasSuffix(p, "/logs") {
