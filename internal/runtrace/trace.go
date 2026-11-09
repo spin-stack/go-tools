@@ -21,6 +21,8 @@ type Run struct {
 	Jobs     []proven.Job
 	// Now is the end of whatever has not finished: the job that writes the trace is still running.
 	Now time.Time
+	// Logs is each finished job's log, by the job's id: what it has of a step's own steps.
+	Logs map[int64]string
 }
 
 // Slice is one bar: a wait, a job, a step or a span.
@@ -87,6 +89,7 @@ func Build(run Run, spans []ghatrace.Span) Trace {
 				Name: s.Name, Kind: "step", Start: s.StartedAt, End: orNow(s.CompletedAt, run.Now), Failed: failed(s.Conclusion),
 			})
 		}
+		subSteps(&lane.Job, run.Logs[j.ID])
 		t.Lanes = append(t.Lanes, lane)
 	}
 	place(t.Lanes, spans)

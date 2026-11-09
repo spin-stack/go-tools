@@ -271,10 +271,8 @@ func TestSummary(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "| **5m10s** | 9m07s (11 job-minutes rounded up) | 32s | 20s (lane slow) |")
 	assert.Contains(t, out, "**Critical path**: plan (38s, waited 2s) → lane slow (4m00s, waited 20s) → gate (5s, waited 4s)")
-	assert.Contains(t, out, "    section lane  fast  1  x|y\n", "no colon, hash or semicolon reaches Mermaid")
-	assert.Contains(t, out, "    4m00s :crit, j3, ")
-	assert.Contains(t, out, "    wait 20s :done, q3, ")
 	assert.Contains(t, out, "|---|---|---|\n| stepA | lane mid | 3m29s |\n| stepB | lane slow | 3m00s |\n", "the slowest first")
+	assert.Contains(t, out, "| stepA | lane: fast #1; x\\|y | 55s |\n", "a pipe in a name does not end its cell")
 	assert.Contains(t, out, "Did not run: build, deploy.")
 	assert.True(t, strings.HasSuffix(out, "see the artifacts\n"))
 }
@@ -285,10 +283,7 @@ func TestSummaryOfOneJobAndOfNone(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(one, nil), ""))
 	out := buf.String()
-	assert.Contains(t, out, "**Critical path**: lint (0s, waited 0s)")
-	assert.NotContains(t, out, "    wait ", "no bar for a wait under a second")
-	start := at(5).UnixMilli()
-	assert.Contains(t, out, fmt.Sprintf("    0s :crit, j0, %d, %d\n", start, start+1000), "a bar a second long, or Mermaid draws nothing")
+	assert.Contains(t, out, "**Critical path**: lint (0s, waited 0s)\n\n| slowest | job | took |\n")
 	assert.Contains(t, out, "| stepA | lint | 0s |")
 	assert.Contains(t, out, "Did not run: fix.")
 
@@ -306,4 +301,46 @@ func TestHTMLPageEscapesWhatAJobIsCalled(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(page, "<script>"), "only the page's own script")
 	assert.Contains(t, page, `"wall":310000`)
 	assert.Contains(t, page, `"n":"stepB"`, "a job's steps are on the page")
+}
+
+// stamp is a log line's time, s seconds into the run, as GitHub writes it.
+func stamp(s float64) string {
+	return t0.Add(time.Duration(s * float64(time.Second))).Format("2006-01-02T15:04:05.0000000Z")
+}
+
+// A composite action's steps are in the job's log, each a `##[group]Run` line with its time: they
+// go under the step that ran them, each until the next starts, and the summary lists them rather
+// than the step that holds them.
+func TestACompositeActionsStepsComeFromTheLog(t *testing.T) {
+	j := job("lane", "r1", 0, 10, 120, 30)
+	j.ID = 7
+	j.Steps[0].Name, j.Steps[1].Name = "Run ./.github/actions/fleet-setup", "The lane"
+	log := strings.Join([]string{
+		"\ufeff" + stamp(9.5) + " Requested labels: kvm",
+		stamp(10.12) + " ##[group]Run ./.github/actions/fleet-setup",
+		stamp(10.14) + " ##[group]Run actions/setup-node@abc",
+		stamp(10.15) + " with: node-version 20",
+		stamp(13.3) + " ##[endgroup]",
+		stamp(13.33) + " ##[group]Run pnpm/action-setup@def",
+		stamp(18.2) + " ##[group]Run go tool task fleet:apparmor",
+		"not a line of the log",
+		stamp(30.4) + " ##[group]Run go tool task ci:lane",
+		stamp(119.9) + " ##[group]Run something in the lane's own output",
+	}, "\n")
+	tr := runtrace.Build(runtrace.Run{Jobs: []proven.Job{j}, Logs: map[int64]string{7: log}}, nil)
+	setup, lane := tr.Lanes[0].Job.Children[0], tr.Lanes[0].Job.Children[1]
+	var got []string
+	for _, s := range setup.Children {
+		got = append(got, fmt.Sprintf("%s %s", s.Name, s.Duration()))
+	}
+	assert.Equal(t, []string{"actions/setup-node@abc 3.19s", "pnpm/action-setup@def 4.87s", "go tool task fleet:apparmor 12.2s"}, got,
+		"each until the next starts, the last until the next step's own line")
+	require.Len(t, lane.Children, 1, "a step's first group is the step itself")
+	assert.Equal(t, 1100*time.Millisecond, lane.Children[0].Duration(), "the last runs to the step's end, timed to the second")
+
+	var buf bytes.Buffer
+	require.NoError(t, runtrace.WriteSummary(&buf, tr, ""))
+	assert.Contains(t, buf.String(), "| go tool task fleet:apparmor | lane | 12s |")
+	assert.NotContains(t, buf.String(), "| Run ./.github/actions/fleet-setup |", "the step holds its parts: they are what is listed")
+	assert.NotContains(t, buf.String(), "| The lane |", "nor one that holds a single part")
 }

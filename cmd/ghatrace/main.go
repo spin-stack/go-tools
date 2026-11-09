@@ -2,6 +2,7 @@
 //
 //	go tool ghatrace run                  the run as a Job Summary, trace.html and trace.json
 //	go tool ghatrace span -name N -- cmd  run cmd and record it as a span of the step it runs in
+//	go tool ghatrace gotest -- go test    the same, and a span for each package and long test
 //
 // run is the last job of a workflow, or a step at the end of its last job. It reads its own run
 // ($GITHUB_RUN_ID, or -run) from the API with $GH_TOKEN or $GITHUB_TOKEN, and the spans the run's
@@ -11,6 +12,7 @@ package main
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -29,6 +31,7 @@ import (
 	"time"
 
 	"github.com/spin-stack/go-tools/ghatrace"
+	"github.com/spin-stack/go-tools/internal/gotest"
 	"github.com/spin-stack/go-tools/internal/proven"
 	"github.com/spin-stack/go-tools/internal/runtrace"
 )
@@ -50,12 +53,14 @@ type exitError int
 
 func (e exitError) Error() string { return "exit status " + strconv.Itoa(int(e)) }
 
-const usage = `usage: ghatrace run|span [flags]
+const usage = `usage: ghatrace run|span|gotest [flags]
 
-  run   read a workflow run and write where its time went: the Job Summary ($GITHUB_STEP_SUMMARY,
-        or stdout), trace.html (open it in a browser) and trace.json (open it at ui.perfetto.dev)
-        in -out
-  span  -name NAME -- cmd args...: run cmd, and record it as a span of the step it runs in
+  run     read a workflow run and write where its time went: the Job Summary ($GITHUB_STEP_SUMMARY,
+          or stdout), trace.html (open it in a browser) and trace.json (open it at ui.perfetto.dev)
+          in -out; a composite action's steps come from each job's log
+  span    -name NAME -- cmd args...: run cmd, and record it as a span of the step it runs in
+  gotest  -- go test args...: run it with -json, write what it would have written, and record
+          a span for each package and each test of -min or more
 
 -h after a command says the rest.
 `
@@ -73,8 +78,10 @@ func run(ctx context.Context, argv []string) error {
 		return report(ctx, argv[1:])
 	case "span":
 		return span(ctx, argv[1:])
+	case "gotest":
+		return goTest(ctx, argv[1:])
 	}
-	return fmt.Errorf("no command %q; one of run, span", argv[0])
+	return fmt.Errorf("no command %q; one of run, span, gotest", argv[0])
 }
 
 func report(ctx context.Context, args []string) error {
@@ -84,6 +91,7 @@ func report(ctx context.Context, args []string) error {
 	out := fs.String("out", "_output/ghatrace", "the directory trace.html and trace.json are written to")
 	artifacts := fs.String("artifacts", "ghatrace-", "the start of the names of the run's artifacts that hold spans; empty reads none")
 	local := fs.String("spans", "", "a directory whose *.jsonl files are spans too, read as well as the artifacts")
+	logs := fs.Bool("logs", true, "read each finished job's log for the steps its steps ran: a composite action's")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -110,9 +118,21 @@ func report(ctx context.Context, args []string) error {
 		Workflow: fmt.Sprintf("run %d", runID),
 		Jobs:     jobs,
 		Now:      time.Now(),
+		Logs:     map[int64]string{},
 	}
 	for _, j := range jobs {
 		r.Workflow = cmp.Or(j.Workflow, r.Workflow)
+		if !*logs || j.Status != "completed" || j.Conclusion == "skipped" {
+			continue
+		}
+		// A log is detail: one GitHub no longer holds, or that fails to come, leaves the job's
+		// steps as the API has them.
+		log, err := gh.Log(ctx, j.ID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ghatrace: %s: no steps of its steps' own: %v\n", j.Name, err)
+			continue
+		}
+		r.Logs[j.ID] = log
 	}
 	t := runtrace.Build(r, spans)
 	if err := os.MkdirAll(*out, 0o755); err != nil { //nolint:gosec // the output is the run's to read
@@ -250,8 +270,75 @@ func span(ctx context.Context, args []string) error {
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // the command the caller asked to run
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	// A cancelled run interrupts the step: the command gets the signal, and the span is written
-	// once it has stopped, so a cancelled lane still shows where it was.
+	return timed(cmd, *name, nil)
+}
+
+func goTest(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("ghatrace gotest", flag.ContinueOnError)
+	name := fs.String("name", "go test", "what the span of the whole command is called; its packages are drawn under it")
+	shortest := fs.Duration("min", time.Second, "the shortest test drawn as a span; every package is")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	argv := fs.Args()
+	if len(argv) == 0 {
+		return errors.New("gotest: a go test command is needed after --")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // the command the caller asked to run
+	// Through GOFLAGS rather than the arguments, so a wrapper in front of go test - one that starts
+	// a database first - is run as it is, and the go test inside it writes JSON.
+	goflags := os.Getenv("GOFLAGS")
+	cmd.Env = append(os.Environ(), "GOFLAGS="+strings.TrimSpace(goflags+" -json"))
+	cmd.Stdin, cmd.Stderr = os.Stdin, os.Stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	r := &gotest.Reader{
+		Out: os.Stdout, Verbose: verbose(append(strings.Fields(goflags), argv...)), Min: *shortest, Parent: *name,
+		Record: func(s ghatrace.Span) {
+			if err := ghatrace.Record(s); err != nil {
+				fmt.Fprintf(os.Stderr, "ghatrace: span %q not recorded: %v\n", s.Name, err)
+			}
+		},
+	}
+	return timed(cmd, *name, func() error {
+		lines := bufio.NewReader(out)
+		for {
+			line, err := lines.ReadBytes('\n')
+			if len(line) > 0 {
+				if werr := r.Line(bytes.TrimSuffix(line, []byte("\n"))); werr != nil {
+					return werr
+				}
+			}
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+		}
+	})
+}
+
+// verbose is whether args ask go test for -v: word by word, since a wrapper's shell has the whole
+// go test command in one argument.
+func verbose(args []string) bool {
+	for _, a := range args {
+		for _, word := range strings.Fields(a) {
+			switch strings.TrimLeft(word, "-") {
+			case "v", "v=true", "test.v", "test.v=true":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// timed runs cmd and records it as a span named name, with read taking its output while it
+// runs. A cancelled run interrupts the step: the command gets the signal, and the span is written
+// once it has stopped, so a cancelled lane still shows where it was. It exits as cmd did.
+func timed(cmd *exec.Cmd, name string, read func() error) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigs)
@@ -270,9 +357,13 @@ func span(ctx context.Context, args []string) error {
 			}
 		}
 	}()
+	var rerr error
+	if read != nil {
+		rerr = read()
+	}
 	err := cmd.Wait()
 	close(done)
-	s := ghatrace.Span{Name: *name, Start: start, End: time.Now()}
+	s := ghatrace.Span{Name: name, Start: start, End: time.Now()}
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit):
@@ -289,5 +380,5 @@ func span(ctx context.Context, args []string) error {
 	if s.Exit != 0 {
 		return exitError(s.Exit)
 	}
-	return nil
+	return rerr
 }

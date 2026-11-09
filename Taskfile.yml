@@ -28,7 +28,9 @@ tasks:
       # let a change through, or it is a gate that reports whatever it is given.
       COVERAGE_FLOOR: 60
     cmds:
-      - go test -race -covermode=atomic -coverprofile=coverage.out ./...
+      # Each package and each test of a second or more a span of the run's trace (task trace);
+      # off a runner only go test.
+      - go run ./cmd/ghatrace gotest -name "go test" -- go test -race -covermode=atomic -coverprofile=coverage.out ./...
       # The anchor makes it the total line, not a function with "total" in its name.
       - |
         total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')
