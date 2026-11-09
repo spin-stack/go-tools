@@ -60,8 +60,16 @@ func TestNoCommitOrNoGitIsNoName(t *testing.T) {
 
 // git's own output is read a word a line, and its failure says what it said.
 func TestGitIsTheClonesGit(t *testing.T) {
-	tags, err := git("tag", "--list", "no-such-tag-*")
-	if err != nil || len(tags) != 0 {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"},
+		{"tag", "v20261110.01"}, {"tag", "v20261110.02"}} {
+		if _, err := git(args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tags, err := git("tag", "--list")
+	if err != nil || !slices.Equal(tags, []string{"v20261110.01", "v20261110.02"}) {
 		t.Errorf("tags = %v, %v", tags, err)
 	}
 	if _, err := git("no-such-command"); err == nil || !strings.Contains(err.Error(), "git no-such-command") {
