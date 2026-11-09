@@ -382,10 +382,10 @@ func TestFlakesAreTheTestsThatPassedOnTheSameTree(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "1 failed tests in 4 runs; none flaky more than once\n")
 
-	// An artifact that is not a zip is said with its name.
-	f.archive = []byte("nope")
+	// An artifact uploaded unarchived - a run's trace.json - is its one file: read, not refused.
+	f.archive = []byte(`{"traceEvents":[]}`)
 	err = run(t.Context(), []string{"flakes", "-also", ""})
-	assert.ErrorContains(t, err, "run 6: artifact ci-lanes-short-6: the artifact is not a zip")
+	require.NoError(t, err)
 }
 
 // What is refused before the API is asked: no command, an unknown one, a flag it has not, no

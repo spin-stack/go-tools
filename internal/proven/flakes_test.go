@@ -44,8 +44,13 @@ func TestFailedInReadsEveryFileOfTheArtifact(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"TestA", "TestB"}, got)
-	_, err = proven.FailedIn([]byte("not a zip"))
-	assert.ErrorContains(t, err, "is not a zip")
+	// An artifact uploaded unarchived is its one file.
+	got, err = proven.FailedIn([]byte("ok  \tx\n--- FAIL: TestC (2s)\n"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"TestC"}, got)
+	// A zip cut short is said, not read as text.
+	_, err = proven.FailedIn([]byte("PK\x03\x04 cut short"))
+	assert.ErrorContains(t, err, "the artifact is a broken zip")
 }
 
 // A test is flaky when another finished run on a tree it failed on did not fail it - passed, or

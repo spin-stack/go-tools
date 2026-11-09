@@ -115,6 +115,46 @@ tasks:
     cmds:
       - go run ./cmd/ghatrace run -spans "${RUNNER_TEMP:-}"
 
+  release:build:
+    desc: Every command, for each platform a repository runs them on, as _output/release/go-tools_<os>_<arch>.tar.gz.
+    # What a repository's `go tool task` (cmd/task) unpacks onto Task's PATH, so that no repository
+    # compiles these commands or takes their modules. Stripped and without cgo: a program that runs
+    # on any machine of its platform, the same bytes from the same commit. The archive's members
+    # are sorted, owned by nobody and dated by the commit, for the same reason. cmd/task is not in
+    # it: it is the command a repository compiles, and its directory is first on Task's PATH, where
+    # a second task would stand in front of Task.
+    vars:
+      PLATFORMS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+      COMMANDS:
+        sh: go list ./cmd/... | grep -v '/cmd/task$' | tr '\n' ' '
+    cmds:
+      - rm -rf {{.OUT}}/release
+      - for: {var: PLATFORMS, split: ' '}
+        cmd: >-
+          CGO_ENABLED=0 GOOS={{index (splitList "/" .ITEM) 0}} GOARCH={{index (splitList "/" .ITEM) 1}}
+          go build -trimpath -ldflags='-s -w' -o {{.OUT}}/release/{{replace "/" "_" .ITEM}}/ {{.COMMANDS}}
+      - for: {var: PLATFORMS, split: ' '}
+        cmd: >-
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git show -s --format=%ct HEAD)"
+          -C {{.OUT}}/release/{{replace "/" "_" .ITEM}} -czf {{.OUT}}/release/go-tools_{{replace "/" "_" .ITEM}}.tar.gz .
+
+  release:publish:
+    desc: Publish _output/release's archives as the GitHub release bin-<commit time>, the version a versions.yaml pins (GH_TOKEN, GITHUB_SHA).
+    # Named by the commit's UTC time, which is also the time in the pseudo-version a go.mod requires
+    # this commit at: versions/gate holds a repository's go-tools entry to its go.mod's. A tag of
+    # that shape is no module version, so `go get` never takes it for one. A run that is retried
+    # publishes the release it made the first time, and fails rather than replace another's files.
+    cmds:
+      - |
+        set -euo pipefail
+        tag="bin-$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d.%H%M%S "${GITHUB_SHA}")"
+        if gh release view "$tag" >/dev/null 2>&1; then
+          echo "$tag is published already"
+          exit 0
+        fi
+        gh release create "$tag" {{.OUT}}/release/*.tar.gz --target "${GITHUB_SHA}" --title "$tag" \
+          --notes "Every go-tools command at ${GITHUB_SHA}, for a repository's versions.yaml: \`go tool versions bump go-tools\`."
+
   site:
     desc: Build the documentation site (site/, Astro Starlight) into site/dist; task site:dev serves it with live reload.
     cmds:
