@@ -29,6 +29,8 @@ arm64) in [`cmd/sfw/versions.yaml`](https://github.com/spin-stack/go-tools/blob/
 which the command embeds. It is downloaded the first time into the user's cache directory and
 checked against its pin on every run: Socket doesn't sign the binaries, so the pin is what makes
 it the one that was reviewed. A repository gets a newer firewall by moving to a newer go-tools.
+The download is tried again when GitHub has a bad moment, as [versions](../versions/#a-server-having-a-bad-moment)
+says.
 
 ## The gate
 
