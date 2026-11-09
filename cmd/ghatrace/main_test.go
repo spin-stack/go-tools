@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/spin-stack/go-tools/internal/ghatrace"
+	"github.com/spin-stack/go-tools/ghatrace"
 )
 
 // api answers as GitHub does for run 9 of o/r: two jobs, the artifacts each uploaded its spans

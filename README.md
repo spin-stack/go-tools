@@ -29,7 +29,7 @@ go get -tool github.com/spin-stack/go-tools/cmd/mutate
 go tool mutate -base origin/main
 ```
 
-`versions`, `versions/upstream`, `versions/gate`, `provenance`, `attestgate`, `sbom` and
+`versions`, `versions/upstream`, `versions/gate`, `provenance`, `attestgate`, `sbom`, `ghatrace` and
 `trustroot` are also packages another repository imports; the rest is `internal/`.
 
 ## Working here

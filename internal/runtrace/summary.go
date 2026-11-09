@@ -1,4 +1,4 @@
-package ghatrace
+package runtrace
 
 import (
 	"cmp"

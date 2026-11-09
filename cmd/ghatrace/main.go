@@ -28,8 +28,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/spin-stack/go-tools/internal/ghatrace"
+	"github.com/spin-stack/go-tools/ghatrace"
 	"github.com/spin-stack/go-tools/internal/proven"
+	"github.com/spin-stack/go-tools/internal/runtrace"
 )
 
 func main() {
@@ -103,7 +104,7 @@ func report(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	r := ghatrace.Run{
+	r := runtrace.Run{
 		ID:       runID,
 		URL:      fmt.Sprintf("%s/%s/actions/runs/%d", cmp.Or(os.Getenv("GITHUB_SERVER_URL"), "https://github.com"), owner, runID),
 		Workflow: fmt.Sprintf("run %d", runID),
@@ -113,22 +114,22 @@ func report(ctx context.Context, args []string) error {
 	for _, j := range jobs {
 		r.Workflow = cmp.Or(j.Workflow, r.Workflow)
 	}
-	t := ghatrace.Build(r, spans)
+	t := runtrace.Build(r, spans)
 	if err := os.MkdirAll(*out, 0o755); err != nil { //nolint:gosec // the output is the run's to read
 		return err
 	}
-	if err := write(filepath.Join(*out, "trace.html"), false, func(w io.Writer) error { return ghatrace.WriteHTML(w, t) }); err != nil {
+	if err := write(filepath.Join(*out, "trace.html"), false, func(w io.Writer) error { return runtrace.WriteHTML(w, t) }); err != nil {
 		return err
 	}
-	if err := write(filepath.Join(*out, "trace.json"), false, func(w io.Writer) error { return ghatrace.WritePerfetto(w, t) }); err != nil {
+	if err := write(filepath.Join(*out, "trace.json"), false, func(w io.Writer) error { return runtrace.WritePerfetto(w, t) }); err != nil {
 		return err
 	}
 	files := "The waterfall is trace.html, and the detail trace.json for https://ui.perfetto.dev, in " + *out + "."
 	if path := os.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
 		files = "The waterfall is trace.html, and the detail trace.json for [ui.perfetto.dev](https://ui.perfetto.dev), in this run's artifacts."
-		return write(path, true, func(w io.Writer) error { return ghatrace.WriteSummary(w, t, files) })
+		return write(path, true, func(w io.Writer) error { return runtrace.WriteSummary(w, t, files) })
 	}
-	return ghatrace.WriteSummary(os.Stdout, t, files)
+	return runtrace.WriteSummary(os.Stdout, t, files)
 }
 
 // runOf is the run's id and repository from -run, which may be the run's URL.
@@ -271,7 +272,7 @@ func span(ctx context.Context, args []string) error {
 	}()
 	err := cmd.Wait()
 	close(done)
-	s := ghatrace.Span{Name: *name, Start: start, End: time.Now(), Runner: os.Getenv("RUNNER_NAME"), Job: os.Getenv("GITHUB_JOB")}
+	s := ghatrace.Span{Name: *name, Start: start, End: time.Now()}
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit):
@@ -282,25 +283,11 @@ func span(ctx context.Context, args []string) error {
 	case err != nil:
 		return err
 	}
-	if path := spansFile(); path != "" {
-		if werr := ghatrace.Append(path, s); werr != nil {
-			fmt.Fprintf(os.Stderr, "ghatrace: span %q not recorded: %v\n", s.Name, werr)
-		}
+	if werr := ghatrace.Record(s); werr != nil {
+		fmt.Fprintf(os.Stderr, "ghatrace: span %q not recorded: %v\n", s.Name, werr)
 	}
 	if s.Exit != 0 {
 		return exitError(s.Exit)
 	}
 	return nil
-}
-
-// spansFile is where spans are recorded: $GHATRACE_SPANS, or a file of the runner's own on one,
-// and nowhere off one, where span only runs the command.
-func spansFile() string {
-	if path := os.Getenv("GHATRACE_SPANS"); path != "" {
-		return path
-	}
-	if tmp := os.Getenv("RUNNER_TEMP"); tmp != "" {
-		return filepath.Join(tmp, "ghatrace-spans.jsonl")
-	}
-	return ""
 }
