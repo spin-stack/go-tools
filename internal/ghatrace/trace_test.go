@@ -1,0 +1,293 @@
+package ghatrace_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/spin-stack/go-tools/internal/ghatrace"
+	"github.com/spin-stack/go-tools/internal/proven"
+)
+
+var t0 = time.Date(2026, 11, 9, 14, 0, 0, 0, time.UTC)
+
+func at(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+
+// job is a completed job queued at q, started at s and finished at e, with steps back to back
+// between s and e at the given boundaries.
+func job(name, runner string, q, s, e int, steps ...int) proven.Job {
+	j := proven.Job{Name: name, Runner: runner, Status: "completed", Conclusion: "success", CreatedAt: at(q), StartedAt: at(s), CompletedAt: at(e)}
+	from := s
+	for i, to := range append(steps, e) {
+		j.Steps = append(j.Steps, proven.Step{Name: "step" + string(rune('A'+i)), StartedAt: at(from), CompletedAt: at(to), Conclusion: "success"})
+		from = to
+	}
+	return j
+}
+
+// A plan job, three lanes it unblocks, and a gate that waits for all of them: the run's wall is
+// plan, then the slowest lane, then the gate - not the lane that was queued first or ran longest
+// on its own.
+func runOf() ghatrace.Run {
+	return ghatrace.Run{ID: 7, Workflow: "CI", Now: at(1000), Jobs: []proven.Job{
+		job("gate", "r5", 301, 305, 310),
+		job("plan", "r1", 0, 2, 40),
+		job("lane fast", "r2", 40, 45, 100),
+		job("lane slow", "r3", 40, 60, 300, 120),
+		job("lane mid", "r4", 40, 41, 250),
+		// The API times a skipped job as starting and ending when it was queued.
+		{Name: "build", Status: "completed", Conclusion: "skipped", CreatedAt: at(40), StartedAt: at(40), CompletedAt: at(40)},
+		{Name: "deploy", Status: "queued", CreatedAt: at(310)},
+	}}
+}
+
+func names(t ghatrace.Trace, critical bool) []string {
+	var out []string
+	for _, l := range t.Lanes {
+		if !critical || l.Critical {
+			out = append(out, l.Name)
+		}
+	}
+	return out
+}
+
+func TestBuildOrdersLanesAndFindsTheCriticalPath(t *testing.T) {
+	tr := ghatrace.Build(runOf(), nil)
+	assert.Equal(t, []string{"plan", "lane mid", "lane fast", "lane slow", "gate"}, names(tr, false), "by queued, then started")
+	assert.Equal(t, []string{"plan", "lane slow", "gate"}, names(tr, true))
+	assert.Equal(t, []string{"build", "deploy"}, tr.Skipped)
+	assert.Equal(t, 310*time.Second, tr.Wall())
+	assert.Equal(t, 20*time.Second, tr.Lanes[3].Queue.Duration(), "lane slow waited from 40 to 60")
+}
+
+// A job queued long after the jobs before it ended waited on something outside the run, such as
+// an approval, and starts the chain.
+func TestCriticalPathStopsAtAWaitNoJobExplains(t *testing.T) {
+	for queued, want := range map[int][]string{
+		60:  {"build", "deploy"},
+		61:  {"deploy"},
+		170: {"deploy"},
+	} {
+		r := ghatrace.Run{Jobs: []proven.Job{job("build", "r1", 0, 1, 50), job("deploy", "r2", queued, queued+1, queued+30)}}
+		assert.Equal(t, want, names(ghatrace.Build(r, nil), true), "deploy queued at %d", queued)
+	}
+}
+
+func TestAJobThatDidNotSucceedIsFailed(t *testing.T) {
+	for conclusion, failed := range map[string]bool{"success": false, "failure": true, "cancelled": true, "timed_out": true} {
+		j := job("lane", "r1", 0, 1, 2)
+		j.Conclusion = conclusion
+		tr := ghatrace.Build(ghatrace.Run{Jobs: []proven.Job{j}}, nil)
+		assert.Equal(t, failed, tr.Lanes[0].Job.Failed, conclusion)
+	}
+}
+
+func TestAJobStillRunningEndsNow(t *testing.T) {
+	j := job("trace", "r1", 0, 1, 2)
+	j.CompletedAt, j.Status, j.Conclusion = time.Time{}, "in_progress", ""
+	j.Steps[0].CompletedAt = time.Time{}
+	j.Steps = append(j.Steps, proven.Step{Name: "pending"})
+	tr := ghatrace.Build(ghatrace.Run{Now: at(9), Jobs: []proven.Job{j}}, nil)
+	require.Len(t, tr.Lanes, 1)
+	assert.Equal(t, at(9), tr.Lanes[0].Job.End)
+	require.Len(t, tr.Lanes[0].Job.Children, 1, "a step that has not started is not drawn")
+	assert.Equal(t, at(9), tr.Lanes[0].Job.Children[0].End)
+}
+
+func span(name, runner string, s, e float64, exit int) ghatrace.Span {
+	d := func(x float64) time.Time { return t0.Add(time.Duration(x * float64(time.Second))) }
+	return ghatrace.Span{Name: name, Runner: runner, Start: d(s), End: d(e), Exit: exit}
+}
+
+func TestSpansGoUnderTheStepTheyRanInAndNest(t *testing.T) {
+	spans := []ghatrace.Span{
+		span("test A", "r3", 125, 295, 0),
+		span("up", "r3", 60.4, 110, 0),
+		// Inside step B by its real start, though B's floored start and A's floored end are both 120.
+		span("test B", "r3", 120.3, 290, 1),
+		span("build", "r3", 61, 90, 0),
+		// r3 ran no job at 500: a span of some other run's.
+		span("stray", "r3", 500, 501, 0),
+		// r9 ran no job of this run.
+		span("other", "r9", 61, 62, 0),
+	}
+	tr := ghatrace.Build(runOf(), spans)
+	slow := tr.Lanes[3]
+	require.Equal(t, "lane slow", slow.Name)
+	stepA, stepB := slow.Job.Children[0], slow.Job.Children[1]
+	require.Len(t, stepA.Children, 1)
+	assert.Equal(t, "up", stepA.Children[0].Name)
+	require.Len(t, stepA.Children[0].Children, 1)
+	assert.Equal(t, "build", stepA.Children[0].Children[0].Name, "nested inside the span that contains it")
+	require.Len(t, stepB.Children, 2)
+	assert.Equal(t, "test B", stepB.Children[0].Name)
+	assert.True(t, stepB.Children[0].Failed)
+	assert.Equal(t, "test A", stepB.Children[1].Name, "overlaps test B without being inside it: a sibling")
+	for _, l := range tr.Lanes {
+		if l.Name != "lane slow" {
+			for _, s := range l.Job.Children {
+				assert.Empty(t, s.Children, l.Name)
+			}
+		}
+	}
+}
+
+func TestSpansSurviveTheirFile(t *testing.T) {
+	path := t.TempDir() + "/spans.jsonl"
+	want := []ghatrace.Span{span("a", "r1", 1, 2, 0), span("b", "r1", 3, 4, 2)}
+	for _, s := range want {
+		require.NoError(t, ghatrace.Append(path, s))
+	}
+	f, err := openFile(path)
+	require.NoError(t, err)
+	got, err := ghatrace.Read(f)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.True(t, want[1].End.Equal(got[1].End))
+	assert.Equal(t, 2, got[1].Exit)
+
+	_, err = ghatrace.Read(strings.NewReader("{\"name\":\"a\"}\n\nnot json\n"))
+	assert.ErrorContains(t, err, "line 3")
+}
+
+// track is one of a process's tracks in a Perfetto trace.
+type track struct{ pid, tid int }
+
+// perfetto is a trace as WritePerfetto wrote it, read back: the processes' names, the names of
+// the spans and the waits, and each track's slices and names.
+type perfetto struct {
+	processes, spanNames, waits []string
+	tracks                      map[track][][2]int64
+	trackNames                  map[track][]string
+}
+
+func perfettoOf(t *testing.T, tr ghatrace.Trace) perfetto {
+	t.Helper()
+	var buf bytes.Buffer
+	require.NoError(t, ghatrace.WritePerfetto(&buf, tr))
+	var doc struct {
+		Events []struct {
+			Ph   string         `json:"ph"`
+			Name string         `json:"name"`
+			PID  int            `json:"pid"`
+			TID  int            `json:"tid"`
+			TS   int64          `json:"ts"`
+			Dur  int64          `json:"dur"`
+			Args map[string]any `json:"args"`
+		} `json:"traceEvents"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &doc))
+	p := perfetto{tracks: map[track][][2]int64{}, trackNames: map[track][]string{}}
+	for _, e := range doc.Events {
+		k := track{e.PID, e.TID}
+		switch {
+		case e.Ph == "M" && e.Name == "process_name":
+			p.processes = append(p.processes, fmt.Sprint(e.Args["name"]))
+		case e.Ph == "M" && e.Name == "thread_name":
+			p.trackNames[k] = append(p.trackNames[k], fmt.Sprint(e.Args["name"]))
+		case e.Ph == "X" && strings.HasPrefix(e.Name, "waiting for a runner"):
+			p.waits = append(p.waits, e.Name)
+			p.tracks[k] = append(p.tracks[k], [2]int64{e.TS, e.TS + e.Dur})
+		case e.Ph == "X":
+			p.tracks[k] = append(p.tracks[k], [2]int64{e.TS, e.TS + e.Dur})
+			if e.TID > 1 {
+				p.spanNames = append(p.spanNames, e.Name)
+			}
+		}
+	}
+	return p
+}
+
+// Perfetto draws a track right only when every two slices on it nest or are apart.
+func TestPerfettoTracksHoldOnlyNestedOrDisjointSlices(t *testing.T) {
+	spans := []ghatrace.Span{
+		span("up", "r3", 60.4, 110, 0), span("build", "r3", 61, 90, 0),
+		// push starts once build has ended, inside up, and ends after up: not on up's track.
+		span("push", "r3", 95, 115, 0),
+		// test A starts inside test B and ends after it: they cannot share a track.
+		span("test A", "r3", 125, 295, 0), span("test B", "r3", 120.3, 290, 1),
+		span("test C", "r3", 130, 140, 0),
+	}
+	r := runOf()
+	r.Jobs[1].CreatedAt = r.Jobs[1].StartedAt // plan did not wait
+	p := perfettoOf(t, ghatrace.Build(r, spans))
+	processes, spanNames, waits, tracks, trackNames := p.processes, p.spanNames, p.waits, p.tracks, p.trackNames
+	assert.Equal(t, []string{"plan (critical path)", "lane mid", "lane fast", "lane slow (critical path)", "gate (critical path)"}, processes)
+	assert.ElementsMatch(t, []string{"up 50s", "build 29s", "push 20s", "✗ test B 2m50s", "test A 2m50s", "test C 10s"}, spanNames)
+	assert.Equal(t, []string{"waiting for a runner 1s", "waiting for a runner 5s", "waiting for a runner 20s", "waiting for a runner 4s"}, waits, "no bar for plan, which did not wait")
+	var slowTracks int
+	for k := range tracks {
+		want := "spans"
+		if k.tid == 1 {
+			want = "steps"
+		}
+		assert.Equal(t, []string{want}, trackNames[k], "track %v", k)
+		if k.pid == 4 && k.tid > 1 {
+			slowTracks++
+		}
+	}
+	assert.Equal(t, 2, slowTracks, "lane slow's spans fit on two tracks: up, build, test B, test C; push, test A")
+	for k, slices := range tracks {
+		for i, a := range slices {
+			for _, b := range slices[i+1:] {
+				nested := (a[0] <= b[0] && b[1] <= a[1]) || (b[0] <= a[0] && a[1] <= b[1])
+				apart := a[1] <= b[0] || b[1] <= a[0]
+				assert.True(t, nested || apart, "track %v: %v and %v overlap", k, a, b)
+			}
+		}
+	}
+}
+
+func TestSummary(t *testing.T) {
+	r := runOf()
+	r.Jobs[2].Name = "lane: fast #1; x|y"
+	var buf bytes.Buffer
+	require.NoError(t, ghatrace.WriteSummary(&buf, ghatrace.Build(r, nil), "see the artifacts"))
+	out := buf.String()
+	assert.Contains(t, out, "| **5m10s** | 9m07s (11 job-minutes rounded up) | 32s | 20s (lane slow) |")
+	assert.Contains(t, out, "**Critical path**: plan (38s, waited 2s) → lane slow (4m00s, waited 20s) → gate (5s, waited 4s)")
+	assert.Contains(t, out, "    section lane  fast  1  x|y\n", "no colon, hash or semicolon reaches Mermaid")
+	assert.Contains(t, out, "    4m00s :crit, j3, ")
+	assert.Contains(t, out, "    wait 20s :done, q3, ")
+	assert.Contains(t, out, "|---|---|---|\n| stepA | lane mid | 3m29s |\n| stepB | lane slow | 3m00s |\n", "the slowest first")
+	assert.Contains(t, out, "Did not run: build, deploy.")
+	assert.True(t, strings.HasSuffix(out, "see the artifacts\n"))
+}
+
+func TestSummaryOfOneJobAndOfNone(t *testing.T) {
+	// Queued as it started, and done in the same second.
+	one := ghatrace.Run{Workflow: "Lint", Jobs: []proven.Job{job("lint", "r1", 5, 5, 5), {Name: "fix", Conclusion: "skipped"}}}
+	var buf bytes.Buffer
+	require.NoError(t, ghatrace.WriteSummary(&buf, ghatrace.Build(one, nil), ""))
+	out := buf.String()
+	assert.Contains(t, out, "**Critical path**: lint (0s, waited 0s)")
+	assert.NotContains(t, out, "    wait ", "no bar for a wait under a second")
+	start := at(5).UnixMilli()
+	assert.Contains(t, out, fmt.Sprintf("    0s :crit, j0, %d, %d\n", start, start+1000), "a bar a second long, or Mermaid draws nothing")
+	assert.Contains(t, out, "| stepA | lint | 0s |")
+	assert.Contains(t, out, "Did not run: fix.")
+
+	buf.Reset()
+	require.NoError(t, ghatrace.WriteSummary(&buf, ghatrace.Build(ghatrace.Run{Workflow: "Empty"}, nil), ""))
+	assert.Equal(t, "## Empty: where the time went\n\n| wall | on runners | waiting for runners | longest wait |\n|---|---|---|---|\n| **0s** | 0s (0 job-minutes rounded up) | 0s | - |\n\n", buf.String())
+}
+
+func TestHTMLPageEscapesWhatAJobIsCalled(t *testing.T) {
+	r := runOf()
+	r.Jobs[1].Name = "</script><script>alert(1)</script>"
+	var buf bytes.Buffer
+	require.NoError(t, ghatrace.WriteHTML(&buf, ghatrace.Build(r, nil)))
+	page := buf.String()
+	assert.Equal(t, 1, strings.Count(page, "<script>"), "only the page's own script")
+	assert.Contains(t, page, `"wall":310000`)
+	assert.Contains(t, page, `"n":"stepB"`, "a job's steps are on the page")
+}
+
+func openFile(path string) (*os.File, error) { return os.Open(path) } //nolint:gosec // the test's own file

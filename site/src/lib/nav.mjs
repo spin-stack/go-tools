@@ -31,4 +31,5 @@ export const sidebar = [
 		],
 	},
 	{ label: 'Doing less work', items: [{ label: 'gencache', slug: 'gencache' }] },
+	{ label: 'Seeing where CI spends', items: [{ label: 'ghatrace', slug: 'ghatrace' }] },
 ];
