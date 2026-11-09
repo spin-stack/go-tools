@@ -21,8 +21,8 @@ go tool ghatrace span -name e2e:up -- task e2e:up   # inside any step, to time a
 
 - **The run's summary** (`$GITHUB_STEP_SUMMARY`, or stdout off a runner): the wall time, the
   time on runners and as job-minutes rounded up the way GitHub bills its own runners, the time
-  spent waiting for runners and the longest wait, the critical path, the jobs as a Gantt chart
-  GitHub draws, and the ten slowest steps and spans.
+  spent waiting for runners and the longest wait, the critical path, and the ten slowest steps and
+  spans that hold no other - what holds others says again what they say.
 - **`trace.html`** in `-out` (`_output/ghatrace`): one page with nothing to fetch. Every job is a
   row with its wait and its run on one time axis, the critical path in its own colour; a job
   opens to its steps, and a step to its spans.
@@ -36,9 +36,34 @@ back from the time: the job that finished last, then the job that finished last 
 was queued, and so on. A job queued more than ten seconds after anything finished starts the
 chain: something outside the run held it, such as an approval.
 
-## Spans: the parts of a step
+## Inside a step
 
-The API times steps, to the second, and nothing inside them. `ghatrace span` runs a command and
+The API times steps, to the second, and nothing inside them. Three things fill a step in.
+
+**A composite action's own steps, from the log.** Every line of a job's log starts with its time,
+and GitHub starts each step it runs - a composite action's included, which the API does not list -
+with a `##[group]Run ...` line. `run` reads each finished job's log (`-logs=false` reads none) and
+draws a step's own steps under it, each until the next starts. Nothing in the workflow changes: a
+setup action that takes a minute in every job shows which of its parts takes it.
+
+**Go's tests, from `go test -json`.** `ghatrace gotest` runs a go test command with `-json`, set
+through `GOFLAGS` so that a wrapper in front of `go test` - one that starts a database first - is
+run as it is:
+
+```sh
+go tool ghatrace gotest -- go test -v -count=1 ./internal/e2e/...
+go tool ghatrace gotest -name unit -min 2s -- go test -race ./...
+```
+
+It writes what go test would have written, with `-v` or without, so a log and whatever reads one
+see no difference, and exits as go test did. Each package is a span under the command's (`-name`,
+`go test` by default), each test of `-min` or more (a second by default) a span under its
+package, and each subtest one under its test: by name rather than by time, since packages and
+parallel tests run side by side.
+
+## Spans: the parts you name
+
+`ghatrace span` runs a command and
 records it - its name, start, end, exit code and the job's runner - to `$GHATRACE_SPANS`, or
 `$RUNNER_TEMP/ghatrace-spans.jsonl` on a runner. Off a runner it only runs the command, so a task
 can wrap its parts and a laptop sees no difference. It exits as the command did, and hands an
