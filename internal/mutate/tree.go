@@ -88,13 +88,35 @@ func (t *Tree) in(dir string, run func(at, tmp string)) error {
 		return err
 	}
 	run(filepath.Join(c.dst, rel), tmp)
-	if err := os.RemoveAll(tmp); err != nil {
+	if err := removeAll(tmp); err != nil {
 		return fmt.Errorf("mutate: removing the temporary directory of %s's tests: %w", root, err)
 	}
 	if err := c.reset(func(rel string) { t.wrote[filepath.Join(c.src, rel)] = true }); err != nil {
 		return fmt.Errorf("mutate: putting the copy of %s back after its tests: %w", root, err)
 	}
 	return nil
+}
+
+// removeAll removes dir and everything under it, read-only or not. A test that makes a directory
+// read-only puts it back in its t.Cleanup, which never runs when the test binary is killed at its
+// timeout - as an edit that hangs it is - and os.RemoveAll cannot unlink a file from a directory
+// its owner may not write. Each directory is made its owner's to write and search first, as the
+// go command's own removeAll does for a read-only module cache. WalkDir does not follow a link,
+// so nothing outside dir has its mode changed.
+func removeAll(dir string) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.Chmod(path, 0o700) //nolint:gosec // a directory, searched to remove what is in it
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return os.RemoveAll(dir)
 }
 
 // bin is where a test binary the tree's holder builds goes, beside the copies: one at a time.
