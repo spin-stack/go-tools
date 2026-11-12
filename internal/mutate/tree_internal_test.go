@@ -100,6 +100,80 @@ func TestARunsTemporaryDirectoryTakesASocketFromATestWithALongName(t *testing.T)
 	}
 }
 
+// What a killed test leaves in its temporary directory is removed: a read-only directory of
+// read-only files, as a test that restores its modes in t.Cleanup leaves it when it never got
+// there. A link out of the directory is removed, never followed: what it points at keeps its
+// files and its mode. A directory already gone is no error.
+func TestATemporaryDirectoryAKilledTestLeftReadOnlyIsRemoved(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		make func(t *testing.T, dir string)
+	}{
+		{"read-only directory of read-only files", func(t *testing.T, dir string) {
+			t.Helper()
+			ro := filepath.Join(dir, "TestAnArtifact1715224689", "002")
+			readOnlyDir(t, ro)
+		}},
+		{"a link to a read-only directory outside it", func(t *testing.T, dir string) {
+			t.Helper()
+			outside := filepath.Join(t.TempDir(), "outside")
+			readOnlyDir(t, outside)
+			t.Cleanup(func() { _ = os.Chmod(outside, 0o700) }) //nolint:gosec // a directory, made writable so t.TempDir can remove it
+			if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				info, err := os.Stat(outside)
+				if err != nil {
+					t.Fatalf("the link's target is gone: %v", err)
+				}
+				if perm := info.Mode().Perm(); perm != 0o500 {
+					t.Errorf("the link's target is %v, want it untouched at 0500", perm)
+				}
+				if _, err := os.Stat(filepath.Join(outside, "mkfs.ext4")); err != nil {
+					t.Errorf("the link's target lost its file: %v", err)
+				}
+			})
+		}},
+		{"already gone", func(t *testing.T, dir string) {
+			t.Helper()
+			if err := os.Remove(dir); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "m")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			tc.make(t, dir)
+			if err := removeAll(dir); err != nil {
+				t.Fatalf("removing %s: %v", dir, err)
+			}
+			if _, err := os.Lstat(dir); err == nil {
+				t.Errorf("%s outlived its removal", dir)
+			}
+		})
+	}
+}
+
+// readOnlyDir makes dir a 0500 directory holding two 0400 files.
+func readOnlyDir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"mkfs.ext4", "spin-supervisor.qcow2"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // a directory, read-only as the test that left it made it
+		t.Fatal(err)
+	}
+}
+
 // gitModule is a module in a git work tree: files tracked, one neither tracked nor ignored, an
 // ignored file in its package p, and a directory it ignores.
 func gitModule(t *testing.T) string {
