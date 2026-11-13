@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/spin-stack/go-tools/internal/gittest"
 	"github.com/spin-stack/go-tools/internal/sfw"
 	"github.com/spin-stack/go-tools/versions"
 )
@@ -84,9 +84,7 @@ tasks:
 	write("internal/x/testdata/package-lock.json", "{}")
 	write(".gitignore", "ignored/\n")
 	write("ignored/install.sh", "npm install\n")
-	git := exec.Command("git", "init", "-q", repo)
-	out, err := git.CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	gittest.Run(t, repo, "init", "-q")
 
 	findings, err := sfw.Check(repo)
 	require.NoError(t, err)

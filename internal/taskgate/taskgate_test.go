@@ -2,13 +2,13 @@ package taskgate_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/spin-stack/go-tools/internal/gittest"
 	"github.com/spin-stack/go-tools/internal/taskgate"
 )
 
@@ -62,13 +62,10 @@ jobs:
 	write(".github/workflows/README.md", "jobs:\n  x:\n    steps:\n      - run: make\n")
 	write(".github/workflows/old/ci.yml", "jobs:\n  x:\n    steps:\n      - run: make\n")
 	write(".github/ci.yml", "jobs:\n  x:\n    steps:\n      - run: make\n")
-	git := exec.Command("git", "init", "-q", repo)
-	out, err := git.CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	gittest.Run(t, repo, "init", "-q")
 	// Staged and then deleted: git lists it, and there is nothing to read.
 	write(".github/workflows/staged.yml", "jobs:\n  x:\n    steps:\n      - run: make\n")
-	out, err = exec.Command("git", "-C", repo, "add", ".github/workflows/staged.yml").CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	gittest.Run(t, repo, "add", ".github/workflows/staged.yml")
 	require.NoError(t, os.Remove(filepath.Join(repo, ".github/workflows/staged.yml")))
 
 	findings, err := taskgate.Check(repo, taskgate.Limits{}, nil)

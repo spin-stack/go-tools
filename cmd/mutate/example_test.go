@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/spin-stack/go-tools/internal/gittest"
 )
 
 // The example the site shows (site/src/content/docs/mutate.mdx) is this command run over
@@ -31,12 +33,8 @@ func TestTheExampleTheSiteShows(t *testing.T) {
 
 	repo := t.TempDir()
 	git := func(args ...string) {
-		cmd := exec.Command("git", append([]string{"-c", "user.name=example", "-c", "user.email=example@example.com", "-c", "commit.gpgsign=false"}, args...)...)
-		cmd.Dir = repo
 		// The machine's own git configuration has no say in what the example prints.
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "git %v: %s", args, out)
+		gittest.Run(t, repo, args...)
 	}
 	put := func(from, to string) {
 		raw, err := os.ReadFile(filepath.Join(example, from))

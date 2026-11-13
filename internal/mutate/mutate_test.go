@@ -3,7 +3,6 @@ package mutate_test
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/spin-stack/go-tools/internal/gittest"
 	"github.com/spin-stack/go-tools/internal/mutate"
 )
 
@@ -317,13 +317,9 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 	t.Chdir(dir)
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", args...)
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "git %s: %s", strings.Join(args, " "), out)
+		gittest.Run(t, dir, args...)
 	}
 	run("init", "-q", "-b", "main")
-	run("config", "user.email", "test@example.com")
-	run("config", "user.name", "test")
 
 	require.NoError(t, os.WriteFile("sample.go", source, 0o600))
 	require.NoError(t, os.WriteFile("sample_test.go", []byte("package sample\n"), 0o600))

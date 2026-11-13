@@ -2,12 +2,12 @@ package gate
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/spin-stack/go-tools/internal/gittest"
 	"github.com/spin-stack/go-tools/versions"
 )
 
@@ -25,9 +25,7 @@ func repo(t *testing.T, files map[string]string) string {
 		}
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
-		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		gittest.Run(t, root, args...)
 	}
 	return root
 }

@@ -2,7 +2,8 @@
 #
 #   task test         the Go tests, under the race detector, held to a coverage floor
 #   task lint         golangci-lint with spin's rules, at spin's version, this repository's own
-#                     gates run on itself: ctxlife, testquality, refs, sfw, taskgate, and actionlint
+#                     gates run on itself: ctxlife, testquality, refs, sfw, taskgate, testidentity,
+#                     and actionlint
 #   task mutate       break what the change against BASE (origin/main) touched, and ask the tests
 #   task coverage     coverage.out's numbers, to the terminal or the workflow run's summary
 #   task trace        where a workflow run's time went (ghatrace), to its summary and _output/ghatrace
@@ -62,6 +63,9 @@ tasks:
       - go run ./cmd/mutate -stale-exempts
       - go run ./cmd/sfw check
       - go run ./cmd/taskgate -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
+      # A commit since main whose author is a test's: what a test's git wrote into the checkout's
+      # config. On main, the range is empty.
+      - go run ./cmd/testidentity -base origin/main
       # A vulnerability the code calls and that has a fix fails, the standard library's too: the
       # answer is the upgrade. It asks vuln.go.dev, so lint needs the network.
       - go run ./cmd/vulngate ./...
