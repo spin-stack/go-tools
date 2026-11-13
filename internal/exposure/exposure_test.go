@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/spin-stack/go-tools/internal/exposure"
+	"github.com/spin-stack/go-tools/internal/gittest"
 )
 
 // Each kind finds what is someone's and passes over what is no one's: AWS's documented example
@@ -67,9 +67,9 @@ func TestARepositorysOwnKindsAreRead(t *testing.T) {
 func TestEveryRefIsReadAndAPullRequestsHeadToo(t *testing.T) {
 	dir := t.TempDir()
 	git := func(args ...string) string {
-		cmd := exec.Command("git", append([]string{"-c", "user.name=Ana", "-c", "user.email=ana@acme.io", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"}, args...)...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
+		cmd := gittest.Command(t, dir, append([]string{"-c", "init.defaultBranch=main"}, args...)...)
+		// The author whose address the scan reads, over gittest's own.
+		cmd.Env = append(cmd.Env, "GIT_AUTHOR_NAME=Ana", "GIT_AUTHOR_EMAIL=ana@acme.io", "GIT_COMMITTER_NAME=Ana", "GIT_COMMITTER_EMAIL=ana@acme.io")
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, "git %v: %s", args, out)
 		return strings.TrimSpace(string(out))

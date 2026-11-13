@@ -2,13 +2,13 @@ package taskgate_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/spin-stack/go-tools/internal/gittest"
 	"github.com/spin-stack/go-tools/internal/taskgate"
 )
 
@@ -20,8 +20,7 @@ func repo(t *testing.T, files map[string]string) string {
 		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o750))
 		require.NoError(t, os.WriteFile(filepath.Join(root, rel), []byte(body), 0o600))
 	}
-	out, err := exec.Command("git", "init", "-q", root).CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	gittest.Run(t, root, "init", "-q")
 	return root
 }
 
@@ -187,8 +186,7 @@ func TestAScriptATaskRunsIsNotAProgram(t *testing.T) {
 		"hack/jq.sh":                   "#!/bin/sh\ncurl x | jq .a\n",
 	})
 	// Staged and then deleted: git lists it, and there is nothing to read.
-	out, err := exec.Command("git", "-C", root, "add", "hack/staged.sh").CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	gittest.Run(t, root, "add", "hack/staged.sh")
 	require.NoError(t, os.Remove(filepath.Join(root, "hack/staged.sh")))
 	findings, err := taskgate.Check(root, taskgate.Limits{Script: 2}, nil)
 	require.NoError(t, err)
@@ -240,9 +238,7 @@ func TestASubmoduleATaskNamesIsNoScript(t *testing.T) {
 		"Taskfile.yml": "tasks:\n  oracle:\n    dir: reference\n    cmds:\n      - pnpm --dir reference install\n",
 	})
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "reference"), 0o750))
-	out, err := exec.Command("git", "-C", root, "update-index", "--add", "--cacheinfo",
-		"160000,5dc7533314b5ba7ec3875c30143dfe1aec644870,reference").CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	gittest.Run(t, root, "update-index", "--add", "--cacheinfo", "160000,5dc7533314b5ba7ec3875c30143dfe1aec644870,reference")
 	findings, err := taskgate.Check(root, taskgate.Limits{Block: 12, Script: 40}, nil)
 	require.NoError(t, err)
 	assert.Empty(t, findings)

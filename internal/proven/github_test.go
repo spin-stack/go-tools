@@ -6,13 +6,13 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/spin-stack/go-tools/internal/gittest"
 	"github.com/spin-stack/go-tools/internal/proven"
 )
 
@@ -114,9 +114,7 @@ func clone(t *testing.T) (root string, main []string, pr string) {
 	root = t.TempDir()
 	git := func(args ...string) string {
 		t.Helper()
-		out, err := exec.Command("git", append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...).CombinedOutput()
-		require.NoError(t, err, "git %v: %s", args, out)
-		return string(out)
+		return gittest.Run(t, root, args...)
 	}
 	git("init", "-q", "-b", "main")
 	for _, name := range []string{"one", "two", "three"} {

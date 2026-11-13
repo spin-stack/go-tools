@@ -16,6 +16,7 @@ export const sidebar = [
 			{ label: 'refs', slug: 'refs' },
 			{ label: 'vulngate', slug: 'vulngate' },
 			{ label: 'taskgate', slug: 'taskgate' },
+			{ label: 'testidentity', slug: 'testidentity' },
 			{ label: 'deadgate', slug: 'deadgate' },
 			{ label: 'linkweight', slug: 'linkweight' },
 			{ label: 'proven', slug: 'proven' },

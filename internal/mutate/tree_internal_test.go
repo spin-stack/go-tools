@@ -4,10 +4,11 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/spin-stack/go-tools/internal/gittest"
 )
 
 // A tree copies the module as git sees it - what it tracks and what it does not ignore - links a
@@ -202,11 +203,7 @@ func gitModule(t *testing.T) string {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "go.mod", ".gitignore", "doc.txt", "p/tracked.go", "p/link", "p/testdata"}} {
-		git := exec.Command("git", args...)
-		git.Dir = root
-		if out, err := git.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
+		gittest.Run(t, root, args...)
 	}
 	return root
 }

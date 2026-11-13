@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/spin-stack/go-tools/internal/allow"
+	"github.com/spin-stack/go-tools/internal/gittest"
 	"github.com/spin-stack/go-tools/internal/refs"
 )
 
@@ -234,11 +235,7 @@ func TestABuildOutputIsNotInTheTreeWhetherOrNotItWasBuilt(t *testing.T) {
 	root := tree(t, "The build copies it into `cmd/cli/web`, which is also named `cmd/cli/main.go`.\n")
 	git := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		gittest.Run(t, root, args...)
 	}
 	git("init", "-q")
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("cmd/cli/web/\n"), 0o600); err != nil {
