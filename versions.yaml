@@ -20,6 +20,15 @@
   track: github-release https://github.com/rhysd/actionlint
   note: task lint:workflows, the only thing that reads .github/ before GitHub does. spin's version.
 
+- name: go-licenses
+  kind: module
+  source: github.com/google/go-licenses/v2
+  version: v2.0.1
+  track: github-release https://github.com/google/go-licenses
+  note: >-
+    task release:build, which writes each archive's THIRD_PARTY_NOTICES with it. spin's version. A
+    bump is checked by diffing a THIRD_PARTY_NOTICES before and after it.
+
 - name: task
   kind: download
   source: https://github.com/go-task/task/releases/download/v{version}/task_linux_amd64.tar.gz

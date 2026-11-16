@@ -1,0 +1,3 @@
+{{- /* What internal/release/cmd/notices reads from go-licenses report: name, version, license, license file, a line each. */ -}}
+{{ range . }}{{ .Name }}	{{ .Version }}	{{ .LicenseName }}	{{ .LicensePath }}
+{{ end -}}
