@@ -137,6 +137,19 @@ tasks:
         cmd: >-
           CGO_ENABLED=0 GOOS={{index (splitList "/" .ITEM) 0}} GOARCH={{index (splitList "/" .ITEM) 1}}
           go build -trimpath -ldflags='-s -w' -o {{.OUT}}/release/{{replace "/" "_" .ITEM}}/ {{.COMMANDS}}
+      # Each archive's THIRD_PARTY_NOTICES (internal/release/cmd/notices says why), per platform: a
+      # module only one GOOS imports is in that archive alone. go-licenses is installed for this
+      # machine first, because go run under the archive's GOOS would build it for that one. The
+      # go-tools module itself is the LICENSE the notices point to.
+      - GOBIN={{.OUT}}/bin go install github.com/google/go-licenses/v2@$({{.VERSIONS}} version go-licenses)
+      - for: {var: PLATFORMS, split: ' '}
+        cmd: |
+          set -o pipefail
+          CGO_ENABLED=0 GOOS={{index (splitList "/" .ITEM) 0}} GOARCH={{index (splitList "/" .ITEM) 1}} \
+            {{.OUT}}/bin/go-licenses report --template internal/release/notices.tmpl \
+            --ignore github.com/spin-stack/go-tools {{.COMMANDS}} \
+            | go run ./internal/release/cmd/notices -go "$(go env GOVERSION)" -goroot "$(go env GOROOT)" \
+            > {{.OUT}}/release/{{replace "/" "_" .ITEM}}/THIRD_PARTY_NOTICES
       - for: {var: PLATFORMS, split: ' '}
         cmd: >-
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git show -s --format=%ct HEAD)"
