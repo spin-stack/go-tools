@@ -80,6 +80,21 @@ func TestASignedReleaseIsBelieved(t *testing.T) {
 	}
 }
 
+// An earlier build whose image is gone is still trusted: machines of it may still be running.
+func TestAnEarlierBuildNeedsNoImage(t *testing.T) {
+	r := published(t)
+	b := r.Roles["runner"].Builds["r1"]
+	b.Images = nil
+	r.Roles["runner"].Builds["r1"] = b
+	v, err := Verify(raw(t, r), rel, sums{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Roles["runner"].Trusted) != 2 {
+		t.Fatalf("trusted = %v", v.Roles["runner"].Trusted)
+	}
+}
+
 // r10 is newer than r9: revisions sort by number, not by text.
 func TestRevisionsSortByNumber(t *testing.T) {
 	r := published(t)
@@ -167,11 +182,11 @@ func TestWhatItsReleaseDidNotSignIsRefused(t *testing.T) {
 		"another release's statement": {edit: func(r *Release) {
 			r.Roles["runner"].Builds["r1"] = build(t, "v20261001.01", "runner", 'a')
 		}, says: "of v20261001.01"},
-		"no region": {edit: func(r *Release) {
-			b := r.Roles["runner"].Builds["r1"]
+		"no region for the newest": {edit: func(r *Release) {
+			b := r.Roles["runner"].Builds["r2"]
 			b.Images = nil
-			r.Roles["runner"].Builds["r1"] = b
-		}, says: "no region"},
+			r.Roles["runner"].Builds["r2"] = b
+		}, says: "r2 of the runner of v20261117.01, its newest build, is registered in no region"},
 		"a revision that is none": {edit: func(r *Release) { r.Roles["runner"].Builds["latest"] = build(t, rel, "runner", 'a') }, says: "no revision"},
 		"an unsigned revocation": {edit: func(r *Release) {
 			role := r.Roles["runner"]
