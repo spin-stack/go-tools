@@ -80,6 +80,21 @@ func TestASignedReleaseIsBelieved(t *testing.T) {
 	}
 }
 
+// A build's provenance is kept for an auditor and decides nothing.
+func TestAProvenanceIsCarried(t *testing.T) {
+	r := published(t)
+	b := r.Roles["runner"].Builds["r2"]
+	b.Provenance = []byte("bundle")
+	r.Roles["runner"].Builds["r2"] = b
+	v, err := Verify(raw(t, r), rel, sums{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(v.Roles["runner"].Newest.Provenance) != "bundle" {
+		t.Fatalf("provenance = %q", v.Roles["runner"].Newest.Provenance)
+	}
+}
+
 // An earlier build whose image is gone is still trusted: machines of it may still be running.
 func TestAnEarlierBuildNeedsNoImage(t *testing.T) {
 	r := published(t)
