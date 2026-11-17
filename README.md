@@ -25,7 +25,7 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`task`](https://spin-stack.github.io/go-tools/start/) | not a check: Task at the version `versions.yaml` pins, with every other go-tools command on its `PATH`, the tools at their latest release - both downloaded as binaries; the one command a repository's `go.mod` takes, so neither Task's modules nor the tools' are compiled or cached |
 | [`gencache`](https://spin-stack.github.io/go-tools/gencache/) | not a check: `go generate` with each mockgen directive answered from a cache when nothing its mock is made from has changed |
 | [`ghatrace`](https://spin-stack.github.io/go-tools/ghatrace/) | not a check: where a GitHub Actions run's time went - the critical path, each job's wait for a runner, its steps and the spans inside them - as the run's summary, an HTML page and a Perfetto trace, with nothing hosted |
-| [`provenance`, `sbom`, `attestgate`, `trustroot`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM |
+| [`provenance`, `sbom`, `attestgate`, `trustroot`, `sigcheck`, `catalog`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM; a signature by any workflow but the one named; a Spin OS image catalog its release did not sign |
 
 ```sh
 go get -tool github.com/spin-stack/go-tools/cmd/task   # and task in versions.yaml
@@ -34,7 +34,7 @@ go tool task mutate                                    # a task that runs `mutat
 
 [Getting started](https://spin-stack.github.io/go-tools/start/) has the `versions.yaml` entry.
 
-`versions`, `versions/upstream`, `versions/gate`, `provenance`, `attestgate`, `sbom`, `ghatrace` and
+`versions`, `versions/upstream`, `versions/gate`, `provenance`, `attestgate`, `sbom`, `ghatrace`, `sigcheck`, `catalog` and
 `trustroot` are also packages another repository imports; the rest is `internal/`.
 
 ## Working here

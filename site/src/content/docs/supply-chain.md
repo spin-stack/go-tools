@@ -76,3 +76,30 @@ Every repository gets the same root through its go-tools version. Renewing it is
 `go run ./cmd/trustroot -write` here, a commit, and a go-tools bump there. `go tool trustroot -check`
 fails when TUF serves anything else, byte for byte; it needs the network, and this repository's
 `task lint` runs it.
+
+## sigcheck: who signed it
+
+`sigcheck.Workflows(ref, workflows...)` is a policy that takes a Sigstore bundle only when it is a
+keyless signature over exactly the bytes asked about, by one of those GitHub Actions workflow files
+at exactly that ref, under `trustroot`'s root. There are no patterns: another branch, a pull
+request's merge ref or another workflow of the same repository does not pass.
+
+```go
+policy, err := sigcheck.Workflows("refs/heads/main",
+	"https://github.com/spin-stack/ami/.github/workflows/release.yml")
+sum := sha256.Sum256(statement)
+err = policy.Check(bundle, sum[:]) // nil only for that workflow on main, over these bytes
+```
+
+## catalog: which images a release boots
+
+The Spin OS image catalog is public data on spin-terraform-aws's `catalog` branch:
+`releases/<release>.json` has each role's builds by revision - the PCRs an instance measures, the
+signed statement of them, the image in each region - and `channels/<channel>.json` names a release.
+
+Nothing in it is believed for where it is. `catalog.Verify` answers a release's builds only when
+each build's statement is signed by spin-stack/ami's release workflow and says the PCRs the entry
+says, takes a revocation only as a signed statement, and refuses the whole file on anything else.
+`catalog.VerifyChannel` answers the release a signed channel statement names. Those PCRs are what
+an installation's KMS policy and its hosts' joins are held to, so a catalog someone else edited
+opens nothing.
