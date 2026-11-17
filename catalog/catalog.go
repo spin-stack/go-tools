@@ -91,6 +91,10 @@ type Build struct {
 	Statement []byte            `json:"statement"`
 	Bundle    []byte            `json:"bundle"`
 	Images    map[string]string `json:"images,omitempty"`
+	// Provenance is the disk's SLSA provenance bundle, attested by its release: who built the
+	// image, from which commit and of what. Nothing is decided by it; it is there for whoever
+	// audits a build, so a reader neither needs it nor believes it unchecked.
+	Provenance []byte `json:"provenance_bundle,omitempty"`
 }
 
 // Signed is a statement and the bundle that signs it.
