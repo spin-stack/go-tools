@@ -82,14 +82,15 @@ type Role struct {
 }
 
 // Build is one build of a role's image: the PCRs an instance of it measures, the statement of
-// them its release signed and the bundle that signs it, and the image registered in each region.
+// them its release signed and the bundle that signs it, and the image registered in each region -
+// which an earlier build, never booted again, may no longer name.
 type Build struct {
 	PCR4      string            `json:"pcr4"`
 	PCR7      string            `json:"pcr7"`
 	PCR12     string            `json:"pcr12"`
 	Statement []byte            `json:"statement"`
 	Bundle    []byte            `json:"bundle"`
-	Images    map[string]string `json:"images"`
+	Images    map[string]string `json:"images,omitempty"`
 }
 
 // Signed is a statement and the bundle that signs it.
@@ -241,6 +242,11 @@ func verifyRole(release, role string, r Role, check sigcheck.Checker) (VerifiedR
 		}
 		out.Newest = vb
 	}
+	// Only the newest build is booted, so only its images must be known: an earlier build's PCRs
+	// are trusted for the machines still running it, and its image may be gone.
+	if len(out.Newest.Images) == 0 {
+		return VerifiedRole{}, fmt.Errorf("%s of the %s of %s, its newest build, is registered in no region", out.Newest.Revision, role, release)
+	}
 	out.Revoked = revoked[out.Newest.Revision]
 	return out, nil
 }
@@ -250,9 +256,6 @@ func verifyBuild(release, role, rev string, b Build, check sigcheck.Checker) err
 		if !pcr.MatchString(p) {
 			return fmt.Errorf("%s of the %s of %s has a PCR %q that is not SHA-384 in lowercase hex", rev, role, release, p)
 		}
-	}
-	if len(b.Images) == 0 {
-		return fmt.Errorf("%s of the %s of %s is registered in no region", rev, role, release)
 	}
 	var s Statement
 	if err := verifySigned(Signed{Statement: b.Statement, Bundle: b.Bundle}, check, &s); err != nil {
