@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
+
+	"github.com/spin-stack/go-tools/internal/allow"
 )
 
 // Secrets is gitleaks' JSON report as findings, one for each secret it found, each of kind
@@ -37,22 +38,10 @@ func Secrets(report string, onDefault func(commit string) bool) ([]Finding, erro
 // allowlist's keys that answer nothing any more, sorted. A key answers a finding by its kind
 // and value, or by `<kind> *` for every value of the kind.
 func Explain(allowed map[string]bool, found []Finding) (unexplained []Finding, stale []string) {
-	used := map[string]bool{}
-	for _, f := range found {
-		switch k, any := f.Key(), f.Kind+" *"; {
-		case allowed[k]:
-			used[k] = true
-		case allowed[any]:
-			used[any] = true
-		default:
-			unexplained = append(unexplained, f)
+	return allow.Split(allowed, found, func(f Finding) string {
+		if allowed[f.Key()] {
+			return f.Key()
 		}
-	}
-	for k := range allowed {
-		if !used[k] {
-			stale = append(stale, k)
-		}
-	}
-	sort.Strings(stale)
-	return unexplained, stale
+		return f.Kind + " *"
+	})
 }
