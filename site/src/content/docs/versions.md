@@ -164,7 +164,9 @@ cannot be moved is listed in the body and fails the run, after the others are pr
 entry's `note` is in the body, as what to check before merging.
 
 A pull request opened with a workflow's own `GITHUB_TOKEN` starts no workflow: a repository whose
-checks must run on it opens it as a GitHub App, and commits as one.
+checks must run on it opens it as a GitHub App, and commits as one. The token is `GH_TOKEN`'s when
+it is set and `GITHUB_TOKEN`'s otherwise, as `gh` reads them, so the app's goes in `GH_TOKEN`. The
+pull request's link is printed, and added to the run's summary.
 
 ## The gate
 

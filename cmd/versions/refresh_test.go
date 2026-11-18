@@ -164,6 +164,8 @@ func TestARefreshProposesWhatMoved(t *testing.T) {
 	origin := inRepository(t, refreshFile())
 	f := &fakeGitHub{open: []pull{openPull(3, "refresh/versions-old"), openPull(4, "feature"), openPull(5, "refresh/kernel-1")}}
 	var out bytes.Buffer
+	summaryFile := filepath.Join(t.TempDir(), "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryFile)
 	now := time.Date(2026, 11, 18, 23, 0, 0, 0, time.FixedZone("ART", -3*3600))
 	r := refresher{file: "versions.yaml", git: runGit, gh: f.serve(t), label: "versions", base: "main", out: &out, now: now}
 	require.NoError(t, r.refresh(t.Context(), []string{"snapshot"}))
@@ -172,6 +174,9 @@ func TestARefreshProposesWhatMoved(t *testing.T) {
 	assert.Regexp(t, `^refresh/versions-[0-9a-f]{12}$`, branch)
 	assert.Equal(t, git(t, "rev-parse", "HEAD"), gittest.Run(t, origin, "rev-parse", branch), "pushed")
 	assert.Equal(t, "https://github.com/o/r/pull/9\n", out.String())
+	written, err := os.ReadFile(summaryFile)
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/o/r/pull/9\n", string(written), "the run's summary has it too")
 	require.Len(t, f.asked, 6)
 	assert.Equal(t, "GET /repos/o/r/pulls?head=o%3A"+strings.ReplaceAll(branch, "/", "%2F")+"&state=all", f.asked[0])
 	var created map[string]string
@@ -236,11 +241,16 @@ func TestTheRepositoryIsTheWorkflowsOrOrigins(t *testing.T) {
 	_, err = newGitHub(origin("https://gitlab.com/o/r"))
 	assert.ErrorContains(t, err, "is not a GitHub repository")
 
+	// GH_TOKEN first, as gh reads them: a workflow's GITHUB_TOKEN is its run's, which may only read.
 	t.Setenv("GITHUB_TOKEN", "workflow")
 	t.Setenv("GITHUB_REPOSITORY", "w/x")
 	g, err := newGitHub(origin("unused"))
 	require.NoError(t, err)
-	assert.Equal(t, &github{api: "https://api.github.com", repo: "w/x", token: "workflow"}, g)
+	assert.Equal(t, &github{api: "https://api.github.com", repo: "w/x", token: "gh"}, g)
+	t.Setenv("GH_TOKEN", "")
+	g, err = newGitHub(origin("unused"))
+	require.NoError(t, err)
+	assert.Equal(t, "workflow", g.token)
 }
 
 // GitHub refusing a request is an error that says what it was asked and what it answered.
