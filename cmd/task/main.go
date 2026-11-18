@@ -49,7 +49,15 @@ func run(ctx context.Context, args []string, base string, exec execFunc) error {
 	}
 	file, err := find(wd)
 	if err != nil {
-		return err
+		// Outside a repository that pins Task, the Task that is installed: so this command can be
+		// installed as `task` itself (go install .../cmd/task@latest into a directory ahead of the
+		// system's), and `task` runs the pinned one with the tools where a repository has a
+		// versions.yaml and the system's everywhere else.
+		other := elsewhere(os.Getenv("PATH"))
+		if other == "" {
+			return err
+		}
+		return exec(other, append([]string{other}, args...), os.Environ())
 	}
 	v, err := versions.Load(file)
 	if err != nil {
@@ -87,6 +95,28 @@ func withPath(env []string, path string) []string {
 		}
 	}
 	return append(out, "PATH="+path)
+}
+
+// elsewhere is the first executable named task on path that is not this program; "" when there
+// is none.
+func elsewhere(path string) string {
+	self, err := os.Executable()
+	if err != nil { // mutate-exempt: the running program always has a path on the platforms this runs on
+		return ""
+	}
+	me, err := os.Stat(self)
+	if err != nil { // mutate-exempt: the program that is running is there to stat
+		return ""
+	}
+	for _, dir := range filepath.SplitList(path) {
+		p := filepath.Join(dir, "task")
+		fi, err := os.Stat(p)
+		if err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 || os.SameFile(fi, me) {
+			continue
+		}
+		return p
+	}
+	return ""
 }
 
 // find is versions.yaml in dir or the nearest directory above it, as Task finds its Taskfile.

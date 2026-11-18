@@ -135,6 +135,8 @@ func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 // pins no Task, one that does not read, no go-tools release to be had.
 func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 	_, base := repository(t)
+	// No other Task to run in its place.
+	t.Setenv("PATH", t.TempDir())
 	for _, tc := range []struct {
 		name, file, base, says string
 	}{
@@ -166,4 +168,42 @@ func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 			t.Errorf("err = %v, exec'd %v", err, c.called)
 		}
 	})
+}
+
+// Where no versions.yaml is above, it is the next Task on the PATH that runs, as it was given -
+// never this program again, which would be a loop - and with none, the reason it cannot run.
+func TestOutsideARepositoryTheInstalledTaskRuns(t *testing.T) {
+	_, base := repository(t)
+	t.Chdir(t.TempDir())
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	me, aDir, notTask, system := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.Symlink(self, filepath.Join(me, "task")); err != nil {
+		t.Fatal(err)
+	}
+	for dir, mode := range map[string]os.FileMode{notTask: 0o644, system: 0o755} {
+		if err := os.WriteFile(filepath.Join(dir, "task"), []byte("#!/bin/sh\n"), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(aDir, "task"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", strings.Join([]string{filepath.Join(t.TempDir(), "none"), me, aDir, notTask, system}, string(os.PathListSeparator)))
+	var c call
+	if err := run(t.Context(), []string{"build", "X=1"}, base, c.exec); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(system, "task")
+	if !c.called || c.path != want || !slices.Equal(c.argv, []string{want, "build", "X=1"}) {
+		t.Errorf("exec'd %v %q %v; want %s with the arguments as given", c.called, c.path, c.argv, want)
+	}
+
+	t.Setenv("PATH", me)
+	c = call{}
+	if err := run(t.Context(), nil, base, c.exec); err == nil || !strings.Contains(err.Error(), "no versions.yaml here or above") || c.called {
+		t.Errorf("only this program on the PATH: err = %v, exec'd %v", err, c.called)
+	}
 }

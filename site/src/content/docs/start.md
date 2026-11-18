@@ -36,6 +36,16 @@ user's cache - Task held to its pin, the tools to the sha256 their release's `ch
 latest is asked at most every ten minutes, and a machine that cannot ask goes on with the one it
 has. Task's and the tools' own modules - about 450 together - are in no `go.mod` and no CI cache.
 
+To type `task` rather than `go tool task`, install the command as `task` in a directory that comes
+before the system's on your `PATH`:
+
+```sh
+GOBIN=~/.local/bin go install github.com/spin-stack/go-tools/cmd/task@latest
+```
+
+In a repository with a `versions.yaml` it runs the Task that file pins, with the tools; anywhere
+else it runs the next `task` on the `PATH`, as if it were not there.
+
 No repository bumps the tools: a release of go-tools is in every repository's next run. What a
 repository imports of go-tools as a library - `versions`, `provenance` - is `go.mod`'s. Each
 release is also tagged `v0.<YYYYMMDD>.<N>`, a module version, so Dependabot's `gomod` updates
