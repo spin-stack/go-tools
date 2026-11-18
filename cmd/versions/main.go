@@ -49,7 +49,8 @@ Usage:
   versions fetch   <name> <dir>       a download in dir, only as the bytes it pins, and its path
   versions newer   <name> <version>   <version> when it is newer than the pin, nothing when not
   versions check                      what is behind its upstream; exits 1 when anything is
-  versions bump    <name> [version]   pin an entry at a version, the newest by default
+  versions bump    <name> [version]   pin an entry at a version, the newest by default, and
+                                      every entry tracked with it at the same
 
 Every command takes -file, versions.yaml by default. Nothing is built by a bump: each entry's
 note says what it is checked with afterwards.
@@ -188,14 +189,23 @@ func bump(ctx context.Context, v *versions.Versions, file string, names []string
 	if err != nil {
 		return err
 	}
-	e, out, err := upstream.Bump(ctx, v, was.Name, version)
+	_, out, err := upstream.Bump(ctx, v, was.Name, version)
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(file, out, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", file, err)
 	}
-	fmt.Printf("%s: %s %s -> %s %s\n", e.Name, was.Version, was.Pin, e.Version, e.Pin)
+	// The entry named and every entry with it: what a commit of the bump moves.
+	bumped, err := versions.Parse(out)
+	if err != nil { // mutate-exempt: out is what Bump read back whole
+		return err
+	}
+	for i, e := range bumped.Entries {
+		if old := v.Entries[i]; e.Name == was.Name || e.Version != old.Version || e.Pin != old.Pin {
+			fmt.Printf("%s: %s %s -> %s %s\n", e.Name, old.Version, old.Pin, e.Version, e.Pin)
+		}
+	}
 	return nil
 }
 

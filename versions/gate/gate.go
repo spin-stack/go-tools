@@ -20,7 +20,8 @@ import (
 // Gate holds a repository to its versions.yaml: a digest or a commit written anywhere else is a
 // pin a bump does not move and check does not see; a Dockerfile's pin with a default of its own
 // is one a build can fall back to without anybody noticing; an entry nothing reads is a pin
-// nobody checks; an entry written so a bump cannot rewrite it in place is one that cannot move. A repository runs it from a test, so `go test` is what fails.
+// nobody checks; an entry written so a bump cannot rewrite it in place is one that cannot move;
+// an entry tracked with another and not at its version is a build of two releases. A repository runs it from a test, so `go test` is what fails.
 type Gate struct {
 	// Root is the repository's top, where versions.yaml is.
 	Root string
@@ -76,6 +77,18 @@ func (g Gate) Check() error {
 	for _, e := range v.Entries {
 		if _, err := v.Set(e.Name, e.Version, e.Pin); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	// An entry tracked with another is at what that one is at: a bump moves both, and a hand that
+	// moved one alone has written a build of two releases.
+	for _, e := range v.Entries {
+		leader, _, ok := e.With()
+		if !ok {
+			continue
+		}
+		if want, _ := v.Expected(e); e.Version != want {
+			errs = append(errs, fmt.Errorf("%s: %s is with %s, so it is at %q, not %q: versions bump %s moves both",
+				versions.File, e.Name, leader, want, e.Version, leader))
 		}
 	}
 	used := map[string]bool{}

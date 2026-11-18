@@ -143,7 +143,8 @@ It reads every file git lists, tracked or untracked and not ignored, and fails o
 - a Dockerfile `ARG` that is a pin (`_IMAGE`, `_VERSION`, `_COMMIT`, `_SHA256`, `_SNAPSHOT`) with a
   default, or with no entry to supply it;
 - an entry nothing reads;
-- an entry a bump could not rewrite in place.
+- an entry a bump could not rewrite in place;
+- an entry tracked `with` another that is not at its version.
 
 Excused: the files `Elsewhere` names, tests, `_output/`, dot-directories other than `.github`, and
 GitHub Actions pinned by commit (Dependabot moves those, as `go.sum` is Go's). An entry is read

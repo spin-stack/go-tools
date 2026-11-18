@@ -39,8 +39,8 @@ var errFollows = errors.New("versions: follows another")
 var errSeriesOver = errors.New("the series is over: the pin stays until a person names another")
 
 // newest is the version check says e could be at: the same for an image tracked by its digest,
-// or a branch, whose pin is what moves.
-func newest(ctx context.Context, e versions.Entry) (string, error) {
+// or a branch, whose pin is what moves; for an entry tracked with another, what that one is at in v.
+func newest(ctx context.Context, v *versions.Versions, e versions.Entry) (string, error) {
 	kind, arg, _ := strings.Cut(e.Track, " ")
 	switch kind {
 	case "github-release":
@@ -91,6 +91,8 @@ func newest(ctx context.Context, e versions.Entry) (string, error) {
 		return time.Now().UTC().Format("20060102") + "T000000Z", nil
 	case "follows":
 		return "", fmt.Errorf("%w: %s", errFollows, arg)
+	case "with":
+		return v.Expected(e)
 	}
 	return "", fmt.Errorf("versions: %s tracks %q, which check does not know", e.Name, e.Track)
 }
@@ -136,18 +138,29 @@ func resolve(ctx context.Context, e versions.Entry, version string) (string, err
 }
 
 // Bump is v's file with name pinned at version - the newest its track finds when version is "" -
-// and the entry as that file has it. Nothing is written: that is the caller's.
+// and the entry as that file has it. Every entry tracked with name moves in the same file, to
+// what name is then at: one moved without the other is a file the gate refuses, so they are one
+// bump. Nothing is written: that is the caller's.
 func Bump(ctx context.Context, v *versions.Versions, name, version string) (versions.Entry, []byte, error) {
 	e, err := v.Get(name)
 	if err != nil {
 		return versions.Entry{}, nil, err
 	}
+	followers := v.Followers(name)
 	// A new commit with the old archive's sum is a build that fails on the checksum, at best.
-	if e.Archive != "" {
-		return versions.Entry{}, nil, fmt.Errorf("versions: %s's archive is what a build's git writes of the commit, so it is bumped by hand: see its note", name)
+	for _, a := range append([]versions.Entry{e}, followers...) {
+		if a.Archive != "" {
+			return versions.Entry{}, nil, fmt.Errorf("versions: %s's archive is what a build's git writes of the commit, so it is bumped by hand: see its note", a.Name)
+		}
+	}
+	if leader, _, ok := e.With(); ok && version != "" {
+		// Parse refused a with that names no entry, so the expected version is always there.
+		if want, _ := v.Expected(e); version != want {
+			return versions.Entry{}, nil, fmt.Errorf("versions: %s is with %s, at %q: bump %s", name, leader, want, leader)
+		}
 	}
 	if version == "" {
-		version, err = newest(ctx, e)
+		version, err = newest(ctx, v, e)
 		switch {
 		case errors.Is(err, errSeriesOver):
 			version = e.Version
@@ -155,6 +168,28 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 			return versions.Entry{}, nil, fmt.Errorf("%w; name the version", err)
 		}
 	}
+	moved, out, err := pinAt(ctx, v, e, version)
+	if err != nil {
+		return versions.Entry{}, nil, err
+	}
+	for _, f := range followers {
+		next, err := versions.Parse(out)
+		if err != nil { // mutate-exempt: out is what Set or SetPins read back whole
+			return versions.Entry{}, nil, err
+		}
+		want, err := next.Expected(f)
+		if err != nil { // mutate-exempt: Parse refuses a file whose with names no entry
+			return versions.Entry{}, nil, err
+		}
+		if _, out, err = pinAt(ctx, next, f, want); err != nil {
+			return versions.Entry{}, nil, fmt.Errorf("versions: %s, with %s: %w", f.Name, name, err)
+		}
+	}
+	return moved, out, nil
+}
+
+// pinAt is v's file with e pinned at version, resolved as its kind is, and e as that file has it.
+func pinAt(ctx context.Context, v *versions.Versions, e versions.Entry, version string) (versions.Entry, []byte, error) {
 	if len(e.Pins) > 0 {
 		return bumpPins(ctx, v, e, version)
 	}
@@ -162,7 +197,7 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 	if err != nil {
 		return versions.Entry{}, nil, err
 	}
-	out, err := v.Set(name, version, pin)
+	out, err := v.Set(e.Name, version, pin)
 	if err != nil {
 		return versions.Entry{}, nil, err
 	}
@@ -535,7 +570,7 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 	var out []Status
 	for _, e := range v.Entries {
 		st := Status{Entry: e}
-		latest, err := newest(ctx, e)
+		latest, err := newest(ctx, v, e)
 		switch {
 		case errors.Is(err, errFollows):
 			st.Note = "follows " + strings.TrimPrefix(e.Track, "follows ") + ": " + e.Note

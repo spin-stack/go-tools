@@ -143,7 +143,7 @@ func TestTheNewestIsWhatTheTrackFinds(t *testing.T) {
 		{"a track check does not know", versions.Entry{Track: "rumour"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := newest(t.Context(), tc.entry)
+			got, err := newest(t.Context(), &versions.Versions{}, tc.entry)
 			if tc.want == "" && err == nil {
 				t.Fatalf("newest %q, want an error", got)
 			}
@@ -152,7 +152,7 @@ func TestTheNewestIsWhatTheTrackFinds(t *testing.T) {
 			}
 		})
 	}
-	_, err := newest(t.Context(), versions.Entry{Source: "https://example.com/a", Track: "github-release https://example.com/b"})
+	_, err := newest(t.Context(), &versions.Versions{}, versions.Entry{Source: "https://example.com/a", Track: "github-release https://example.com/b"})
 	if !strings.Contains(err.Error(), "https://example.com/b") {
 		t.Errorf("the track's repository is not the one asked: %v", err)
 	}
@@ -194,8 +194,12 @@ func TestCheckSaysWhereEachEntryStands(t *testing.T) {
 		Track: "commit " + r.dir + " master"}
 	follows := versions.Entry{Name: "f", Track: "follows spin", Note: "spin says"}
 	unknown := versions.Entry{Name: "u", Track: "rumour"}
+	// An entry with another is behind that one as the file has it, not its upstream: no network.
+	lead := versions.Entry{Name: "lead", Kind: versions.Date, Version: "v2", Track: "branch"}
+	withBehind := versions.Entry{Name: "with-behind", Kind: versions.Download, Version: "1", Track: "with lead"}
+	withAt := versions.Entry{Name: "with-at", Kind: versions.Download, Version: "v2", Track: "with lead"}
 
-	got := Check(t.Context(), &versions.Versions{Entries: []versions.Entry{git, moved, gone, image, download, current, atHead, unread, gitByCommit, follows, unknown}})
+	got := Check(t.Context(), &versions.Versions{Entries: []versions.Entry{git, moved, gone, image, download, current, atHead, unread, gitByCommit, follows, unknown, lead, withBehind, withAt}})
 	want := []struct {
 		newest string
 		behind bool
@@ -212,6 +216,9 @@ func TestCheckSaysWhereEachEntryStands(t *testing.T) {
 		{r.head, true, ""},
 		{"", false, "follows spin: spin says"},
 		{"", false, "which check does not know"},
+		{"v2", false, ""},
+		{"2", true, ""},
+		{"v2", false, ""},
 	}
 	for i, w := range want {
 		st := got[i]

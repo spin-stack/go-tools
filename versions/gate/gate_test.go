@@ -77,6 +77,14 @@ func TestTheGateSaysWhereAPinIsNotVersionsYAMLs(t *testing.T) {
 		{name: "an entry a bump cannot rewrite in place", change: func(f map[string]string) {
 			f[versions.File] = strings.Replace(f[versions.File], "version: '1'\n  pin: sha256:", "version: >-\n    1\n  pin: sha256:", 1)
 		}, want: []string{"go's version: not written on one line"}},
+		{name: "an entry tracked with another, at its version in its own spelling", change: func(f map[string]string) {
+			f[versions.File] += "- name: headers\n  kind: download\n  source: https://y/{version}\n  version: v1\n  pin: " + strings.Repeat("d", 64) + "\n  track: with kernel\n"
+			f["Taskfile.yml"] += "  - versions args headers\n"
+		}},
+		{name: "an entry tracked with another, moved alone", change: func(f map[string]string) {
+			f[versions.File] += "- name: headers\n  kind: download\n  source: https://y/{version}\n  version: '2'\n  pin: " + strings.Repeat("d", 64) + "\n  track: with kernel\n"
+			f["Taskfile.yml"] += "  - versions args headers\n"
+		}, want: []string{`headers is with kernel, so it is at "1", not "2": versions bump kernel moves both`}},
 		{name: "a read of no entry", change: func(f map[string]string) { f["Taskfile.yml"] += "  - versions version rust\n" },
 			want: []string{"Taskfile.yml reads rust"}},
 		{name: "a test's fixture is not a pin, and what it reads is read",

@@ -59,11 +59,11 @@ func TestTheNewestIsWhatThePageLinksTo(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	e := versions.Entry{Name: "icons", Source: "https://cdn/{version}/Icon-package_{version}.zip", Track: "page " + srv.URL}
-	if got, err := newest(t.Context(), e); err != nil || got != "07312026.abc" {
+	if got, err := newest(t.Context(), &versions.Versions{}, e); err != nil || got != "07312026.abc" {
 		t.Errorf("newest = %q, %v", got, err)
 	}
 	e.Source = "https://cdn/Other_{version}.zip"
-	if _, err := newest(t.Context(), e); err == nil {
+	if _, err := newest(t.Context(), &versions.Versions{}, e); err == nil {
 		t.Error("a page that links to no such file said a version")
 	}
 }
@@ -220,7 +220,7 @@ func TestKernelStaysInItsSeries(t *testing.T) {
 func TestAKernelSaysKernelOrgDidNotAnswer(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := newest(ctx, versions.Entry{Version: "7.2.8", Track: "kernel"})
+	_, err := newest(ctx, &versions.Versions{}, versions.Entry{Version: "7.2.8", Track: "kernel"})
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("%v, want kernel.org's request's error", err)
 	}
@@ -404,4 +404,88 @@ func TestABumpOfOnePlatformsPinsHashesItsFile(t *testing.T) {
 	if err != nil || e.Pins["linux/amd64"] != sumOf("linux") {
 		t.Errorf("bumped: %+v, %v", e, err)
 	}
+}
+
+// withLead is a release and two files of it: one by its version, spelled without the v, and one
+// named by the release's pin.
+const withLead = `- name: lead
+  kind: download
+  source: https://example.test/lead-{version}.tgz
+  version: v1.0
+  pin: ` + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + `
+  track: tags https://example.test/lead
+- name: utils
+  kind: download
+  source: https://example.test/utils-{version}.tgz
+  version: "1.0"
+  pin: ` + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" + `
+  track: with lead
+- name: by-pin
+  kind: download
+  source: https://example.test/by-pin-{version}.tgz
+  version: ` + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + `
+  pin: ` + "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" + `
+  track: with lead pin
+`
+
+// A bump of an entry moves every entry with it in the same file, each resolved at what the entry
+// is then at; one of them that cannot be resolved refuses the bump whole.
+func TestABumpMovesTheEntriesWithIt(t *testing.T) {
+	leadSum := sumOf("lead 2")
+	serve(t, map[string]string{
+		"https://example.test/lead-v2.0.tgz":              "lead 2",
+		"https://example.test/utils-2.0.tgz":              "utils 2",
+		"https://example.test/by-pin-" + leadSum + ".tgz": "by-pin 2",
+		"https://example.test/lead-v3.0.tgz":              "lead 3",
+	})
+	v, err := versions.Parse([]byte(withLead))
+	require.NoError(t, err)
+	e, out, err := Bump(t.Context(), v, "lead", "v2.0")
+	require.NoError(t, err)
+	assert.Equal(t, "v2.0", e.Version)
+	assert.Equal(t, leadSum, e.Pin)
+	bumped, err := versions.Parse(out)
+	require.NoError(t, err)
+	for name, want := range map[string][2]string{
+		"lead":   {"v2.0", leadSum},
+		"utils":  {"2.0", sumOf("utils 2")},
+		"by-pin": {leadSum, sumOf("by-pin 2")},
+	} {
+		got, err := bumped.Get(name)
+		require.NoError(t, err)
+		assert.Equal(t, want, [2]string{got.Version, got.Pin}, name)
+	}
+	// v3.0's utils is not published: neither moves.
+	_, _, err = Bump(t.Context(), v, "lead", "v3.0")
+	assert.ErrorContains(t, err, "utils, with lead")
+}
+
+// An entry with another is bumped to what that one is at, and to nothing else: another version is
+// the other's bump to make.
+func TestAnEntryWithAnotherIsBumpedToItsVersion(t *testing.T) {
+	serve(t, map[string]string{"https://example.test/utils-1.0.tgz": "utils 1"})
+	v, err := versions.Parse([]byte(withLead))
+	require.NoError(t, err)
+	e, _, err := Bump(t.Context(), v, "utils", "")
+	require.NoError(t, err)
+	assert.Equal(t, [2]string{"1.0", sumOf("utils 1")}, [2]string{e.Version, e.Pin})
+	_, _, err = Bump(t.Context(), v, "utils", "2.0")
+	assert.ErrorContains(t, err, `utils is with lead, at "1.0": bump lead`)
+}
+
+// An entry with another whose archive only a build can write is not moved by the other's bump:
+// the bump is refused before anything is resolved.
+func TestAnEntryWithAnArchiveStopsItsLeadersBump(t *testing.T) {
+	file := withLead + `- name: src
+  kind: git
+  source: https://example.test/src
+  version: v1.0
+  pin: ` + strings.Repeat("d", 40) + `
+  archive: ` + strings.Repeat("e", 64) + `
+  track: with lead
+`
+	v, err := versions.Parse([]byte(file))
+	require.NoError(t, err)
+	_, _, err = Bump(t.Context(), v, "lead", "v2.0")
+	assert.ErrorContains(t, err, "src's archive is what a build's git writes")
 }
