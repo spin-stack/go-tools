@@ -1,6 +1,6 @@
 // Command releasename says what release.yml makes of a commit, as lines for $GITHUB_OUTPUT:
 // `version=<the release that names it>` and `new=false` when it is released already, the next
-// name today and `new=true` otherwise.
+// name today and `new=true` otherwise; and `module=<its module version>`, the tag go.mod reads.
 //
 //	go run ./internal/release/cmd/releasename <commit>
 //
@@ -37,15 +37,19 @@ func run(args []string, w io.Writer, g gitFunc, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if v := release.Of(at); v != "" {
-		_, err := fmt.Fprintf(w, "version=%s\nnew=false\n", v)
+	v, isNew := release.Of(at), false
+	if v == "" {
+		all, err := g("tag", "--list")
+		if err != nil {
+			return err
+		}
+		v, isNew = release.Next(all, now), true
+	}
+	module, err := release.Module(v)
+	if err != nil { // mutate-exempt: Of and Next answer only names of the form Module reads
 		return err
 	}
-	all, err := g("tag", "--list")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "version=%s\nnew=true\n", release.Next(all, now))
+	_, err = fmt.Fprintf(w, "version=%s\nnew=%t\nmodule=%s\n", v, isNew, module)
 	return err
 }
 

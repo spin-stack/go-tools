@@ -29,8 +29,8 @@ func TestACommitIsItsReleaseOrTheNextOne(t *testing.T) {
 		at, all []string
 		want    string
 	}{
-		{"released", []string{"v20261110.02"}, []string{"v20261110.01", "v20261110.02", "v20261110.03"}, "version=v20261110.02\nnew=false\n"},
-		{"not yet", nil, []string{"v20261110.01", "v20261110.02"}, "version=v20261110.03\nnew=true\n"},
+		{"released", []string{"v20261110.02"}, []string{"v20261110.01", "v20261110.02", "v20261110.03"}, "version=v20261110.02\nnew=false\nmodule=v0.20261110.2\n"},
+		{"not yet", nil, []string{"v20261110.01", "v20261110.02"}, "version=v20261110.03\nnew=true\nmodule=v0.20261110.3\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer

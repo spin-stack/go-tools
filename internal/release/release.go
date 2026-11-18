@@ -2,9 +2,8 @@
 // day in UTC and which release of that day (spin's hack/releaseversion and docs/releases.md). A
 // release is made of main each time its gate passes, so a day can have several.
 //
-// A name of that form is no module version - semver is three numbers - so `go get` never takes
-// one of these tags for a version of the module, and a repository's go.mod goes on naming a
-// commit.
+// A name of that form is no module version - semver is three numbers - so each release is also
+// tagged as one (Module): what a repository's go.mod names, and what Dependabot moves.
 package release
 
 import (
@@ -32,6 +31,18 @@ func Next(tags []string, now time.Time) string {
 		}
 	}
 	return fmt.Sprintf("v%s.%02d", day, next)
+}
+
+// Module is the module version release is also tagged as: v0.<YYYYMMDD>.<N>, which Go and
+// Dependabot order as the releases are ordered. The sequence loses its leading zero, which semver
+// refuses. The day is the minor, not the major: a major past 1 is a module path that ends in it.
+func Module(release string) (string, error) {
+	m := name.FindStringSubmatch(release)
+	if m == nil {
+		return "", fmt.Errorf("release: %q is not v<YYYYMMDD>.<NN>", release)
+	}
+	seq, _ := strconv.Atoi(m[2]) //nolint:errcheck // two digits, by the pattern
+	return fmt.Sprintf("v0.%s.%d", m[1], seq), nil
 }
 
 // Of is the release among tags, the ones that point at a commit, that names it; "" when the

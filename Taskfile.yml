@@ -158,7 +158,7 @@ tasks:
       - cd {{.OUT}}/release && sha256sum go-tools_*.tar.gz > checksums.txt
 
   release:name:
-    desc: The release SHA is - released already, or the next v<YYYYMMDD>.<NN> today - as version= and new= for $GITHUB_OUTPUT.
+    desc: The release SHA is - released already, or the next v<YYYYMMDD>.<NN> today - and its module version, as version=, new= and module= for $GITHUB_OUTPUT.
     requires:
       vars: [SHA]
     cmds:
@@ -175,6 +175,22 @@ tasks:
         gh release create {{.VERSION}} {{.OUT}}/release/*.tar.gz {{.OUT}}/release/checksums.txt
         --target {{.SHA}} --title {{.VERSION}}
         --notes "Every go-tools command at {{.SHA}}, attested as built by release.yml. A repository's \`go tool task\` runs the latest."
+
+  release:module:
+    desc: Tag SHA as MODULE, its release's module version, unless it is already (GH_TOKEN).
+    # After the release, and on every run of a commit released already: a run that published and
+    # failed here is mended by the next, and a tag that names another commit is refused, never moved.
+    requires:
+      vars: [SHA, MODULE]
+    cmds:
+      - |
+        at=$(gh api "repos/{owner}/{repo}/git/ref/tags/{{.MODULE}}" --jq .object.sha 2>/dev/null || true)
+        if [ -z "$at" ]; then
+          gh api "repos/{owner}/{repo}/git/refs" -f ref="refs/tags/{{.MODULE}}" -f sha="{{.SHA}}" > /dev/null
+        elif [ "$at" != "{{.SHA}}" ]; then
+          echo "{{.MODULE}} names $at, not {{.SHA}}" >&2
+          exit 1
+        fi
 
   site:
     desc: Build the documentation site (site/, Astro Starlight) into site/dist; task site:dev serves it with live reload.

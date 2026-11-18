@@ -37,8 +37,9 @@ latest is asked at most every ten minutes, and a machine that cannot ask goes on
 has. Task's and the tools' own modules - about 450 together - are in no `go.mod` and no CI cache.
 
 No repository bumps the tools: a release of go-tools is in every repository's next run. What a
-repository imports of go-tools as a library - `versions`, `provenance` - is `go.mod`'s, moved by
-`go get github.com/spin-stack/go-tools@<commit>` as any dependency is.
+repository imports of go-tools as a library - `versions`, `provenance` - is `go.mod`'s. Each
+release is also tagged `v0.<YYYYMMDD>.<N>`, a module version, so Dependabot's `gomod` updates
+move it as any dependency, and `go get github.com/spin-stack/go-tools@latest` takes the newest.
 
 ## Run them where developers already run checks
 
