@@ -24,7 +24,9 @@ type Gate struct {
 	// Root is the repository, relative to the test that runs the gate.
 	Root string
 	// UploadTasks and AttestTasks are task names a step runs (`task <name>`) that publish, or
-	// that attest what is published.
+	// that attest what is published. A name with a space in it is a command of the repository's
+	// own a step runs instead, by its words: "spin-os image publish" is a step that runs
+	// `spin-os image publish ...`, as taskgate's -command lets a step be.
 	UploadTasks, AttestTasks []string
 	// SelfAttesting are task names that attest only what they upload themselves - a task that
 	// packs, attests and pushes - so a step running one is attested and attests no later step.
@@ -72,9 +74,20 @@ var (
 	mainRef        = regexp.MustCompile(`github\.ref\s*==\s*'refs/heads/main'`)
 )
 
-// runsTask is whether run starts `task <name>`, flags before the name or not.
+// runsTask is whether run starts `task <name>`, flags before the name or not - or, for a name
+// that is a command's words, whether run runs that command.
 func runsTask(run string, names []string) bool {
 	for _, n := range names {
+		if words := strings.Fields(n); len(words) > 1 {
+			quoted := make([]string, len(words))
+			for i, w := range words {
+				quoted[i] = regexp.QuoteMeta(w)
+			}
+			if regexp.MustCompile(`(^|[\s;&|(])` + strings.Join(quoted, `\s+`) + `(\s|$)`).MatchString(run) {
+				return true
+			}
+			continue
+		}
 		if regexp.MustCompile(`\btask\s+(-\S+\s+)*` + regexp.QuoteMeta(n) + `(\s|$)`).MatchString(run) {
 			return true
 		}
