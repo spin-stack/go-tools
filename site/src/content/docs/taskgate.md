@@ -16,7 +16,7 @@ lines, and the scripts a task calls to being scripts - a program that *decides* 
 what it reads has an answer a test could hold, and belongs in Go.
 
 ```sh
-go tool taskgate [-allow file] [-task path] [-max-lines n] [-max-script-lines n] [dir]
+go tool taskgate [-allow file] [-task path] [-command cmd]... [-max-lines n] [-max-script-lines n] [dir]
 ```
 
 ## What a step looks like
@@ -46,6 +46,20 @@ only CI does.
 A step passes when its `run:` is a single `task ...` or `go tool task ...` line, with whatever
 arguments and variables it is given. It fails on a second line, on `&&`, `||`, `;` or `|` after the
 task, and on output redirected with `>`.
+
+## Or the repository's own command
+
+A repository whose interface is a command of its own - spin-ami's `spin-os build`, `spin-os
+upgrade` - names it with `-command`, one flag for each way a step spells it:
+
+```sh
+go tool taskgate -command "go run ./cmd/spin-os" -command spin-os
+```
+
+A step that is one invocation of it passes as a task does: the same command a developer types,
+whose logic is Go with tests. The rule is the task's: one command, with nothing around it - a `|`,
+`&&` or `>` after it is a finding. The verb it names is not looked up: the command refuses one it
+does not have, the first time the step runs.
 
 ## The task is one the Taskfile has
 

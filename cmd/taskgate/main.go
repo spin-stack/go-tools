@@ -3,7 +3,11 @@
 // CI does is written once, in the Taskfile, a developer runs the same thing, and what decides
 // anything is Go with a test:
 //
-//	go tool taskgate [-allow file] [-task path] [-max-lines n] [-max-script-lines n] [dir]
+//	go tool taskgate [-allow file] [-task path] [-command cmd]... [-max-lines n] [-max-script-lines n] [dir]
+//
+// -command is a command of the repository's own that a step may be instead of a task, as it is
+// spelled at the start of the step - `go run ./cmd/spin-os`, or `spin-os` where a step put it on
+// the PATH - one flag each. A step that runs it runs it once and nothing else, as a task's does.
 //
 // -allow names what is allowed on purpose, one `<key>  # why` a line: a step as
 // `<file>/<job>/<step>` (a composite action's without the job), a Taskfile's block as
@@ -28,6 +32,11 @@ func main() {
 	task := flag.String("task", "task", "the Task binary that lists the Taskfile's tasks")
 	maxLines := flag.Int("max-lines", 12, "lines of shell a task's own cmd or sh may hold; 0 is any")
 	maxScript := flag.Int("max-script-lines", 40, "lines of shell a script a task runs may hold; 0 is any")
+	var commands []string
+	flag.Func("command", "a command of the repository's own a step may be instead of a task (repeatable)", func(c string) error {
+		commands = append(commands, c)
+		return nil
+	})
 	flag.Parse()
 	root := "."
 	if flag.NArg() > 0 {
@@ -43,7 +52,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	findings, err := taskgate.Check(root, taskgate.Limits{Block: *maxLines, Script: *maxScript}, known)
+	findings, err := taskgate.Check(root, taskgate.Limits{Block: *maxLines, Script: *maxScript}, known, commands...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -59,5 +68,5 @@ func main() {
 		fmt.Printf("taskgate: %d finding(s), %d stale exemption(s)\n", len(unexplained), len(stale))
 		os.Exit(1)
 	}
-	fmt.Printf("OK: every workflow step runs a task the Taskfile has, and every task is commands (%d exempt).\n", len(allowed))
+	fmt.Printf("OK: every workflow step runs a task the Taskfile has or one of the repository's commands, and every task is commands (%d exempt).\n", len(allowed))
 }
