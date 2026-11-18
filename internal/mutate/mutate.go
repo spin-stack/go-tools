@@ -676,6 +676,20 @@ const (
 // targetedTimeout is how long the tests that reach a mutated line may take.
 const targetedTimeout = "1m"
 
+// testArgs are a test binary's flags: every test under timeout, or only those named, under
+// targetedTimeout. The few tests that reach the line ran in a fraction of timeout unmutated: an
+// edit that makes one loop for ever is refused as soon as targetedTimeout runs out, not after the
+// package's whole allowance.
+func testArgs(timeout string, only []string) []string {
+	// mutate-exempt: which allowance a run gets; only a test an edit hangs tells them apart, and
+	// only after a minute of it.
+	if len(only) == 0 {
+		return []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout", timeout}
+	}
+	return []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout", targetedTimeout,
+		"-test.run", "^(" + strings.Join(only, "|") + ")$"}
+}
+
 // Asked is how one mutation is put to the tests.
 type Asked struct {
 	// Overlay is the file Overlay made, which has the mutation built in the file's place; empty
@@ -735,15 +749,6 @@ func Run(m Mutation, a Asked) (Outcome, string, error) {
 	}
 	var said strings.Builder
 	for _, set := range runs {
-		timeout := a.Timeout
-		// mutate-exempt: which allowance a run gets; only a test an edit hangs tells them apart,
-		// and only after a minute of it.
-		if len(set.only) > 0 {
-			// The few tests that reach the line, which ran in a fraction of this unmutated: an edit
-			// that makes one loop for ever is refused as soon as this runs out, not after the
-			// package's whole allowance.
-			timeout = targetedTimeout
-		}
 		list := exec.Command("go", append([]string{"list", "-f", "{{.ImportPath}} {{.Dir}}"}, set.pkgs...)...) //nolint:gosec // go list over this repository's packages
 		list.Dir = set.dir
 		listed, err := output("listing", list)
@@ -752,7 +757,7 @@ func Run(m Mutation, a Asked) (Outcome, string, error) {
 		}
 		for line := range strings.SplitSeq(strings.TrimSpace(string(listed)), "\n") {
 			path, pkgDir, _ := strings.Cut(line, " ")
-			outcome, err := runPackage(tree, path, pkgDir, set.dir, set.what, set.only, timeout, a.Overlay, &said)
+			outcome, err := runPackage(tree, path, pkgDir, set.dir, set.what, set.only, a.Timeout, a.Overlay, &said)
 			if err != nil || outcome != Survived {
 				return outcome, said.String(), err
 			}
@@ -785,11 +790,7 @@ func runPackage(tree *Tree, path, pkgDir, dir, what string, only []string, timeo
 	if _, err := os.Stat(bin); err != nil {
 		return Survived, nil //nolint:nilerr // no test binary: the package has no tests
 	}
-	args = []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout", timeout}
-	if len(only) > 0 {
-		args = append(args, "-test.run", "^("+strings.Join(only, "|")+")$")
-	}
-	run := exec.Command(bin, args...) //nolint:gosec // a test binary this run built
+	run := exec.Command(bin, testArgs(timeout, only)...) //nolint:gosec // a test binary this run built
 	run.Env = testEnv()
 	var runErr error
 	if err := tree.in(pkgDir, func(at, tmp string) {

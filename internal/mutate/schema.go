@@ -366,16 +366,7 @@ func writeSchema(dir string, ms []Mutation, work string) (string, error) {
 // switched on, stopping at the first test that fails: only, when it names any, and every test
 // when it is nil.
 func Ask(tree *Tree, bin, dir string, id int, timeout string, only []string) (Outcome, string, error) {
-	// mutate-exempt: which allowance a run gets; only a test an edit hangs tells them apart, and
-	// only after a minute of it.
-	if len(only) > 0 {
-		timeout = targetedTimeout
-	}
-	args := []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout", timeout}
-	if len(only) > 0 {
-		args = append(args, "-test.run", "^("+strings.Join(only, "|")+")$")
-	}
-	cmd := exec.Command(bin, args...) //nolint:gosec // a test binary this run built
+	cmd := exec.Command(bin, testArgs(timeout, only)...) //nolint:gosec // a test binary this run built
 	cmd.Env = testEnv(switchEnv + "=" + strconv.Itoa(id))
 	var (
 		out      []byte
