@@ -64,13 +64,11 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 	results := make(chan result)
 	var wg sync.WaitGroup
 	for i, dir := range dirs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			p := pkgRun{dir: dir, work: filepath.Join(work, strconv.Itoa(i)), timeout: timeout, slots: slots,
 				builds: b, importers: importers[filepath.ToSlash(dir)], results: results, out: w}
 			p.run(byDir[dir], covers)
-		}()
+		})
 	}
 	go func() { wg.Wait(); close(results) }()
 
@@ -147,17 +145,13 @@ func (p pkgRun) run(ms []Mutation, covers *coverages) {
 	}
 	var wg sync.WaitGroup
 	for _, m := range s.Built {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			outcome, err := p.built(m, s, c)
 			p.results <- result{m: m, outcome: outcome, err: err}
-		}()
+		})
 	}
 	for i, m := range s.Alone {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// Measured before a slot is taken: the measuring takes slots of its own, and holding
 			// one while waiting on the others is how a budget of one never finishes.
 			reaching := covers.of(p.dir)
@@ -165,7 +159,7 @@ func (p pkgRun) run(ms []Mutation, covers *coverages) {
 			defer func() { p.slots <- tree }()
 			outcome, err := runAlone(m, filepath.Join(p.work, "alone-"+strconv.Itoa(i)), p.timeout, reaching, p.importers, tree, p.out)
 			p.results <- result{m: m, outcome: outcome, err: err}
-		}()
+		})
 	}
 	wg.Wait()
 }

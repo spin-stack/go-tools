@@ -157,9 +157,9 @@ func Dpkg(raw []byte, distro string) ([]cdx.Component, error) {
 // has gone out of step with the build.
 func Apk(raw []byte, distro string, only []string) (shipped, built []cdx.Component, err error) {
 	seen := map[string]bool{}
-	for _, block := range strings.Split(string(raw), "\n\n") {
+	for block := range strings.SplitSeq(string(raw), "\n\n") {
 		var name, version, arch string
-		for _, line := range strings.Split(block, "\n") {
+		for line := range strings.SplitSeq(block, "\n") {
 			k, v, _ := strings.Cut(line, ":")
 			switch k {
 			case "P":

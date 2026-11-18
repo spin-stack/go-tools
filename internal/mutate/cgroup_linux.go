@@ -75,7 +75,7 @@ func takeOver(dir string) error {
 		if readErr != nil {
 			return readErr
 		}
-		for _, pid := range strings.Fields(string(procs)) {
+		for pid := range strings.FieldsSeq(string(procs)) {
 			// ESRCH: gone since it was listed, which leaves nothing to move.
 			if err := set(lead, "cgroup.procs", pid); err != nil && !errors.Is(err, syscall.ESRCH) {
 				return err

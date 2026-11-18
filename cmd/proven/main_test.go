@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/spin-stack/go-tools/internal/gittest"
-	"github.com/spin-stack/go-tools/internal/proven"
 )
 
 // stdout is what f printed to os.Stdout.
@@ -307,12 +306,12 @@ func TestTestsAreWhatTheAnsweringRunsLogged(t *testing.T) {
 			{Workflow: "kvm.yml", ID: 30, URL: "u30", Conclusion: "failure", Head: f.main[1]},
 		},
 		Tests: []evidenceOf{
-			{Test: proven.Test{Name: "TestA", Passed: true, Seconds: 1.5}, evidenceJob: fleet},
-			{Test: proven.Test{Name: "TestA", Passed: true, Seconds: 1.4}, evidenceJob: evidenceJob{Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"}},
-			{Test: proven.Test{Name: "TestB", Passed: false, Seconds: 2}, evidenceJob: evidenceJob{Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"}},
+			{Name: "TestA", Passed: true, Seconds: 1.5, evidenceJob: fleet},
+			{Name: "TestA", Passed: true, Seconds: 1.4, Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"},
+			{Name: "TestB", Passed: false, Seconds: 2, Workflow: "kvm.yml", Run: 30, Job: "e2e-verify:1/1"},
 		},
 		// What job 42's test timed, beside the machine it ran on.
-		Measures: []evidenceMeasure{{Measure: proven.Measure{Name: "boot_to_running_ms", Value: 12345}, evidenceJob: fleet}},
+		Measures: []evidenceMeasure{{Name: "boot_to_running_ms", Value: 12345, evidenceJob: fleet}},
 	}, got)
 	assert.Contains(t, f.asked, "/repos/o/r/actions/jobs/41/logs", "a job whose log is gone is asked, and says nothing")
 

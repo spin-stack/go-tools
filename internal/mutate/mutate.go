@@ -66,7 +66,7 @@ func Changed(base string) (map[string]map[int]bool, error) {
 	}
 	changed := map[string]map[int]bool{}
 	file := ""
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		switch {
 		case strings.HasPrefix(line, "+++ b/"):
 			file = strings.TrimPrefix(line, "+++ b/")
@@ -92,7 +92,7 @@ func Changed(base string) (map[string]map[int]bool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading what is not committed yet: %w", err)
 	}
-	for _, path := range strings.Fields(string(untracked)) {
+	for path := range strings.FieldsSeq(string(untracked)) {
 		if !asked(path) {
 			continue
 		}
@@ -119,7 +119,7 @@ func asked(path string) bool {
 	if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 		return false
 	}
-	for _, dir := range strings.Split(pathpkg.Dir(path), "/") {
+	for dir := range strings.SplitSeq(pathpkg.Dir(path), "/") {
 		if dir == "testdata" || strings.HasPrefix(dir, ".") && dir != "." || strings.HasPrefix(dir, "_") {
 			return false
 		}
@@ -750,7 +750,7 @@ func Run(m Mutation, a Asked) (Outcome, string, error) {
 		if err != nil {
 			return 0, said.String(), fmt.Errorf("mutate: listing %s: %w", strings.Join(set.pkgs, " "), err)
 		}
-		for _, line := range strings.Split(strings.TrimSpace(string(listed)), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(string(listed)), "\n") {
 			path, pkgDir, _ := strings.Cut(line, " ")
 			outcome, err := runPackage(tree, path, pkgDir, set.dir, set.what, set.only, timeout, a.Overlay, &said)
 			if err != nil || outcome != Survived {
@@ -857,7 +857,7 @@ func Importers() (map[string][]string, error) {
 // path it or its tests import.
 func importersFrom(prefix, listing string) map[string][]string {
 	byDir := map[string][]string{}
-	for _, line := range strings.Split(listing, "\n") {
+	for line := range strings.SplitSeq(listing, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 || !strings.HasPrefix(fields[0], prefix) {
 			continue

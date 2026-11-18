@@ -184,7 +184,7 @@ func moduleFiles(root string) ([]string, error) {
 			return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 		}
 		ignored := slices.Contains(args, "--ignored")
-		for _, path := range strings.Split(string(said), "\x00") {
+		for path := range strings.SplitSeq(string(said), "\x00") {
 			dir := strings.HasSuffix(path, "/")
 			// An ignored file is a build's or a run's output, which no test reads in place of
 			// the source; a directory may be what one does read, node_modules or a checkout.

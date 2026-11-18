@@ -136,8 +136,7 @@ func trimDots(skipped []string) []string {
 // sh is a command's standard output; what it said on standard error is in the error.
 func sh(name string, args ...string) (string, error) {
 	out, err := exec.Command(name, args...).Output() //nolint:gosec // go and the deadcode binary the caller names, over its own module
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(exit.Stderr)))
 	}
 	if err != nil {

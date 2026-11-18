@@ -39,8 +39,7 @@ import (
 
 func main() {
 	err := run(context.Background(), os.Args[1:]) // mutate-exempt: main's way in; run is what the tests drive
-	var exit exitError
-	if errors.As(err, &exit) {
+	if exit, ok := errors.AsType[exitError](err); ok {
 		os.Exit(int(exit))
 	}
 	if err != nil { // mutate-exempt: main's way out; run is what the tests drive
@@ -337,7 +336,7 @@ func withJSON(argv []string) []string {
 // go test command in one argument.
 func verbose(args []string) bool {
 	for _, a := range args {
-		for _, word := range strings.Fields(a) {
+		for word := range strings.FieldsSeq(a) {
 			switch strings.TrimLeft(word, "-") {
 			case "v", "v=true", "test.v", "test.v=true":
 				return true

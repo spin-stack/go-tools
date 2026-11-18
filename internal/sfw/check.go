@@ -245,7 +245,7 @@ func commands(k kind, raw []byte) ([]shell.Line, error) {
 func segments(text string) []string {
 	text = strings.NewReplacer("$(", "\n", "`", "\n", ")", "\n", "&&", "\n", "||", "\n", ";", "\n", "|", "\n").Replace(text)
 	var out []string
-	for _, s := range strings.Split(text, "\n") {
+	for s := range strings.SplitSeq(text, "\n") {
 		s = strings.TrimSpace(s)
 		s = strings.TrimSpace(strings.TrimPrefix(s, "RUN "))
 		if s != "" {

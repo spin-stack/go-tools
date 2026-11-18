@@ -512,8 +512,7 @@ func abs(dir, file string) string {
 }
 
 func stderr(err error) error {
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		return fmt.Errorf("%w: %s", err, bytes.TrimSpace(ee.Stderr))
 	}
 	return err

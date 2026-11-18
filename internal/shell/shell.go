@@ -23,8 +23,8 @@ func Lines(text string, first int) []Line {
 		if strings.HasPrefix(strings.TrimSpace(l), "#") {
 			continue
 		}
-		if strings.HasSuffix(l, "\\") {
-			cur.WriteString(strings.TrimSuffix(l, "\\") + " ")
+		if before, ok := strings.CutSuffix(l, "\\"); ok {
+			cur.WriteString(before + " ")
 			continue
 		}
 		cur.WriteString(l)

@@ -89,7 +89,7 @@ func TestTheExampleTheSiteShows(t *testing.T) {
 func abridged(out string) string {
 	var head, edits, tail []string
 	verdict := false
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		switch {
 		case verdict:
 			tail = append(tail, line)

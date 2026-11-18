@@ -238,7 +238,7 @@ func listModule(root string) (*moduleGraph, error) {
 	dirOf := map[string]string{}
 	type row struct{ dir, imports, tests string }
 	var rows []row
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		fields := strings.Split(line, "\t")
 		if len(fields) != 4 {
 			continue
@@ -248,7 +248,7 @@ func listModule(root string) (*moduleGraph, error) {
 	}
 	local := func(paths string) []string {
 		var dirs []string
-		for _, p := range strings.Fields(paths) {
+		for p := range strings.FieldsSeq(paths) {
 			if d, ok := dirOf[p]; ok {
 				dirs = append(dirs, d)
 			}
