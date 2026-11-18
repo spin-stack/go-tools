@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -168,4 +169,39 @@ func TestFetchPrintsWhereThePinnedFileIs(t *testing.T) {
 	out = stdout(t, func() { err = run(t.Context(), []string{"fetch", "-file", file, "other", dir}) })
 	require.ErrorContains(t, err, "other is not what versions.yaml pins")
 	assert.Empty(t, out)
+}
+
+// A bump says each entry it moved: the one named, and every one tracked with it, and no other.
+func TestABumpSaysEveryEntryItMoved(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "versions.yaml")
+	require.NoError(t, os.WriteFile(file, []byte(`- name: snapshot
+  kind: date
+  version: 20260101T000000Z
+  track: today
+- name: other
+  kind: date
+  version: 20260101T000000Z
+  track: today
+- name: mirror
+  kind: date
+  version: 20260101T000000Z
+  track: with snapshot
+`), 0o600))
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"bump", "-file", file, "snapshot", "20270101T000000Z"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "snapshot: 20260101T000000Z  -> 20270101T000000Z \nmirror: 20260101T000000Z  -> 20270101T000000Z \n", out)
+	v, err := versions.Load(file)
+	require.NoError(t, err)
+	mirror, err := v.Get("mirror")
+	require.NoError(t, err)
+	assert.Equal(t, "20270101T000000Z", mirror.Version)
+
+	// Named alone, the newest its track finds; named with a version and one word more, refused.
+	today := time.Now().UTC().Format("20060102") + "T000000Z"
+	out = stdout(t, func() { err = run(t.Context(), []string{"bump", "-file", file, "snapshot"}) })
+	require.NoError(t, err)
+	assert.Contains(t, out, "mirror: 20270101T000000Z  -> "+today)
+	err = run(t.Context(), []string{"bump", "-file", file, "snapshot", today, "x"})
+	assert.ErrorContains(t, err, "bump: <name> [version]")
 }

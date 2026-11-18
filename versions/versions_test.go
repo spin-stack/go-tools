@@ -3,6 +3,7 @@ package versions
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -303,5 +304,85 @@ func TestABumpRewritesEachPlatformsPinInPlace(t *testing.T) {
 	}
 	if _, err := v.SetPins("none", "1", nil); err == nil {
 		t.Error("an entry the file does not have was bumped")
+	}
+}
+
+// with names the entry another is moved with: one the file has, not the entry itself, and not
+// one that is itself with another; its pin only when it has one.
+func TestAnEntryWithAnotherNamesOneThatMovesOnItsOwn(t *testing.T) {
+	lead := "- name: lead\n  kind: download\n  source: https://x/{version}\n  version: v1.2\n  pin: " + strings.Repeat("a", 64) + "\n  track: tags x\n"
+	date := "- name: day\n  kind: date\n  version: '20260101'\n  track: today\n"
+	follower := func(name, track string) string {
+		return "- name: " + name + "\n  kind: download\n  source: https://y/{version}\n  version: '1'\n  pin: " + strings.Repeat("b", 64) + "\n  track: " + track + "\n"
+	}
+	for _, tc := range []struct{ name, file, want string }{
+		{"with no name", lead + follower("f", "with"), `the track "with" is not with <name> or with <name> pin`},
+		{"a word that is not pin", lead + follower("f", "with lead commit"), `the track "with lead commit" is not`},
+		{"one word too many", lead + follower("f", "with lead pin x"), `the track "with lead pin x" is not`},
+		{"itself", lead + follower("f", "with f"), "f is with itself"},
+		{"an entry the file does not have", lead + follower("f", "with nothing"), "f is with nothing: versions: there is no nothing"},
+		{"a chain", lead + follower("f", "with lead") + follower("g", "with f"), "g is with f, which is with another"},
+		{"the pin of one that has none", date + follower("f", "with day pin"), "f is with day's pin, and day has none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.file))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	// Not at the other's version is still a file: a bump has to read it to move them.
+	if _, err := Parse([]byte(lead + follower("f", "with lead") + follower("g", "with lead pin"))); err != nil {
+		t.Errorf("entries with another: %v", err)
+	}
+}
+
+// An entry with another is at that one's version, spelled with a v only when its own is, or at its
+// pin; the entries with one are in the file's order, and an entry with none has no expected version.
+func TestAnEntryWithAnotherIsAtItsVersionOrPin(t *testing.T) {
+	v, err := Parse([]byte(`- name: lead
+  kind: git
+  source: https://x/lead
+  version: v3.54.0
+  pin: ` + strings.Repeat("c", 40) + `
+  track: tags x
+- name: bare
+  kind: download
+  source: https://y/{version}
+  version: 3.0.0
+  pin: ` + strings.Repeat("a", 64) + `
+  track: with lead
+- name: commit
+  kind: download
+  source: https://z/{version}
+  version: x
+  pin: ` + strings.Repeat("b", 64) + `
+  track: with lead pin
+- name: spelled
+  kind: download
+  source: https://w/{version}
+  version: v0
+  pin: ` + strings.Repeat("d", 64) + `
+  track: with lead
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"bare": "3.54.0", "commit": strings.Repeat("c", 40), "spelled": "v3.54.0"} {
+		e, _ := v.Get(name)
+		if got, err := v.Expected(e); err != nil || got != want {
+			t.Errorf("%s: %q, %v; want %q", name, got, err, want)
+		}
+	}
+	lead, _ := v.Get("lead")
+	if got, err := v.Expected(lead); err == nil {
+		t.Errorf("an entry with a track of its own is at %q", got)
+	}
+	var names []string
+	for _, f := range v.Followers("lead") {
+		names = append(names, f.Name)
+	}
+	if !slices.Equal(names, []string{"bare", "commit", "spelled"}) || len(v.Followers("bare")) != 0 {
+		t.Errorf("followers of lead: %v", names)
 	}
 }

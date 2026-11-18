@@ -43,7 +43,9 @@ description: Every kind of entry versions.yaml takes, the build arguments each b
 | `pypi` | the package's newest on PyPI |
 | `page <url>` | the first file the page links to named as `source`'s, with `{version}` the version |
 | `today` | today's date |
-| `follows <name>` | another entry's: `check` reports it for a person to read |
+| `with <name>` | `<name>`'s version, spelled with a `v` only when this entry's is: two files of one release, such as VictoriaMetrics and its vmutils. A bump of `<name>` moves this entry in the same file, and the gate fails while they differ |
+| `with <name> pin` | `<name>`'s pin: a file named by another's commit, such as the VS Code server of a VS Code release |
+| `follows <name>` | another entry's, by a relation the file cannot compute, or another repository's: `check` reports it for a person to read |
 
 The format only grows. Every repository that uses go-tools reads the same file format, so a field,
 a kind or a track is added, never renamed.
@@ -64,3 +66,26 @@ a kind or a track is added, never renamed.
 A bump downloads every platform's file of the new version and rewrites each pin where it is
 written; a release that lacks one of them is refused whole. The platforms are the ones the entry
 lists: adding one is an edit, not a bump.
+
+## An entry with another
+
+```yaml title="versions.yaml"
+- name: victoriametrics
+  kind: download
+  source: https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/{version}/victoria-metrics-linux-amd64-{version}.tar.gz
+  version: v1.155.0
+  pin: ...
+  track: github-release https://github.com/VictoriaMetrics/VictoriaMetrics
+
+- name: vmutils
+  kind: download
+  source: https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/{version}/vmutils-linux-amd64-{version}.tar.gz
+  version: v1.155.0
+  pin: ...
+  track: with victoriametrics
+```
+
+`versions bump victoriametrics` pins both, and says each it moved. `versions bump vmutils` takes
+victoriametrics' version and refuses any other. The entry named is one with a track of its own: a
+chain of `with` is refused as the file is read, and so is one whose entry is not in it. An entry
+with an `archive` is bumped by hand, so it refuses the bump of the entry it is with.

@@ -220,10 +220,86 @@ func Parse(raw []byte) (*Versions, error) {
 		seen[e.Name] = true
 		errs = append(errs, e.validate())
 	}
+	for _, e := range v.Entries {
+		errs = append(errs, v.validateWith(e))
+	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+// With is the entry e is moved with, and whether e's version is that entry's pin rather than its
+// version: track `with <name>`, or `with <name> pin`. ok is false for any other track.
+func (e Entry) With() (name string, pin, ok bool) {
+	kind, arg, _ := strings.Cut(e.Track, " ")
+	if kind != "with" {
+		return "", false, false
+	}
+	name, form, _ := strings.Cut(arg, " ")
+	return name, form == "pin", true
+}
+
+// validateWith is an entry tracked with another whose version the file can say: the other is in
+// it, is not the entry itself, and is moved by a track of its own, since a chain is one a bump
+// would have to walk and a cycle one it never ends. Whether the two agree is not asked here: a
+// file in which they do not is one a bump has to be able to read, to move them.
+func (v *Versions) validateWith(e Entry) error {
+	name, pin, ok := e.With()
+	if !ok {
+		return nil
+	}
+	_, arg, _ := strings.Cut(e.Track, " ")
+	if form := strings.Fields(arg); len(form) == 0 || len(form) > 2 || (len(form) == 2 && form[1] != "pin") {
+		return fmt.Errorf("versions: %s: the track %q is not with <name> or with <name> pin", e.Name, e.Track)
+	}
+	if name == e.Name {
+		return fmt.Errorf("versions: %s is with itself", e.Name)
+	}
+	leader, err := v.Get(name)
+	if err != nil {
+		return fmt.Errorf("versions: %s is with %s: %w", e.Name, name, err)
+	}
+	if _, _, chained := leader.With(); chained {
+		return fmt.Errorf("versions: %s is with %s, which is with another: name that one", e.Name, name)
+	}
+	if pin && leader.Pin == "" {
+		return fmt.Errorf("versions: %s is with %s's pin, and %s has none", e.Name, name, name)
+	}
+	return nil
+}
+
+// Expected is the version an entry tracked with another is at: the other's pin, or its version
+// spelled as e spells its own, with a leading v when e's has one. Upstream writes v3.54.0 in a
+// tag and 3.54.0 in a file name, and two entries of the same release say it each their own way.
+func (v *Versions) Expected(e Entry) (string, error) {
+	name, pin, ok := e.With()
+	if !ok {
+		return "", fmt.Errorf("versions: %s is not tracked with another entry", e.Name)
+	}
+	leader, err := v.Get(name)
+	if err != nil {
+		return "", err
+	}
+	if pin {
+		return leader.Pin, nil
+	}
+	version := strings.TrimPrefix(leader.Version, "v")
+	if strings.HasPrefix(e.Version, "v") {
+		version = "v" + version
+	}
+	return version, nil
+}
+
+// Followers are the entries tracked with name, in the file's order.
+func (v *Versions) Followers(name string) []Entry {
+	var out []Entry
+	for _, e := range v.Entries {
+		if leader, _, ok := e.With(); ok && leader == name {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // Get is the entry named name.
