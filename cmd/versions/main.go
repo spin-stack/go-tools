@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spin-stack/go-tools/versions"
 	"github.com/spin-stack/go-tools/versions/upstream"
@@ -51,6 +52,10 @@ Usage:
   versions check                      what is behind its upstream; exits 1 when anything is
   versions bump    <name> [version]   pin an entry at a version, the newest by default, and
                                       every entry tracked with it at the same
+  versions refresh <name>...          bump each to its newest, a commit each, and say what moved;
+                                      -propose pushes them as refresh/<label>-<sum> and opens
+                                      the pull request (GITHUB_TOKEN or GH_TOKEN), once per set,
+                                      closing the open one it supersedes (-label, -base)
 
 Every command takes -file, versions.yaml by default. Nothing is built by a bump: each entry's
 note says what it is checked with afterwards.
@@ -69,6 +74,9 @@ func run(ctx context.Context, argv []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	file := fs.String("file", versions.File, "the versions.yaml to read")
+	propose := fs.Bool("propose", false, "refresh: open a pull request of what moved")
+	label := fs.String("label", "versions", "refresh: the name of the branches it proposes")
+	base := fs.String("base", "main", "refresh: the branch the pull request is into")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Print(usage)
@@ -109,6 +117,9 @@ func run(ctx context.Context, argv []string) error {
 		return check(ctx, v)
 	case "bump":
 		return bump(ctx, v, *file, names)
+	case "refresh":
+		r := refresher{file: *file, git: runGit, label: *label, base: *base, out: os.Stdout, now: time.Now()}
+		return refresh(ctx, r, *propose, names)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		return fmt.Errorf("unknown command %q", cmd)

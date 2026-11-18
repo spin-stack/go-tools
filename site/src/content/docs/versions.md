@@ -124,6 +124,48 @@ for the digest. It builds nothing, and the entry's `note` says what to run befor
 `GITHUB_TOKEN`, when set, is sent to api.github.com, which answers only sixty unauthenticated
 requests an hour.
 
+## A refresh, on a schedule
+
+`refresh` is the bump a workflow runs: each entry named moved to its newest, one commit each, and
+with `-propose`, those commits pushed and opened as one pull request.
+
+```yaml title="Taskfile.yml"
+refresh:
+  desc: Propose what is behind of the entries a build checks, as one pull request.
+  cmds:
+    - versions refresh -propose go kernel wolfi-base grype
+```
+
+```yaml title=".github/workflows/refresh.yml"
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@<commit> # v7.0.1
+      - uses: actions/setup-go@<commit> # v7.0.0
+        with:
+          go-version-file: go.mod
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go tool task refresh
+```
+
+The branch is `refresh/<label>-<the file's sum>`, so a set of versions is proposed once: open,
+merged or closed by a person who said no to it, it is not asked again. A new set closes the open
+pull request of the same `-label` it supersedes, with a comment that says which. An entry that
+cannot be moved is listed in the body and fails the run, after the others are proposed. Each
+entry's `note` is in the body, as what to check before merging.
+
+A pull request opened with a workflow's own `GITHUB_TOKEN` starts no workflow: a repository whose
+checks must run on it opens it as a GitHub App, and commits as one.
+
 ## The gate
 
 A file only stays the single source of truth if something enforces it. Add this test:
