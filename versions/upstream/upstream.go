@@ -53,7 +53,7 @@ func newest(ctx context.Context, v *versions.Versions, e versions.Entry) (string
 		if err != nil {
 			return "", err
 		}
-		return releaseVersion(tag, prefix, strings.HasPrefix(e.Version, "v"))
+		return releaseVersion(tag, prefix, e)
 	case "go":
 		return newestGo(ctx, e.Version)
 	case "kernel":
@@ -377,20 +377,29 @@ func sha256Of(ctx context.Context, url string) (string, error) {
 	return sum, nil
 }
 
-// releaseVersion is a release's tag as the pin spells a version: prefix taken off, for a
-// repository whose releases are named prefix<version> (cli-1.4.2 beside a library's tags), and the v
-// its tags have only when the pin has one, since a download's URL may add it. A tag that does not
-// start with prefix is no release of the kind the entry pins.
-func releaseVersion(tag, prefix string, withV bool) (string, error) {
+// releaseVersion is a release's tag as e spells a version: prefix taken off, for a repository
+// whose releases are named prefix<version> (cli-1.4.2 beside a library's tags), and the v its tags
+// have only when e's version has one, since a download's URL may add it. An image keeps what its
+// tag says after the version - v2.15.0-alpine is a variant of the release v2.15.0, and the newest
+// is the same variant of the next, not the image without it. A tag that does not start with prefix
+// is no release of the kind the entry pins.
+func releaseVersion(tag, prefix string, e versions.Entry) (string, error) {
 	version, ok := strings.CutPrefix(tag, prefix)
 	if !ok {
 		return "", fmt.Errorf("versions: the newest release, %s, is not %s<version>", tag, prefix)
 	}
-	if !withV {
+	if !strings.HasPrefix(e.Version, "v") {
 		version = strings.TrimPrefix(version, "v")
+	}
+	if m := variant.FindStringSubmatch(e.Version); m != nil && e.Kind == versions.Image {
+		version += m[1]
 	}
 	return version, nil
 }
+
+// variant is what an image's tag says after its version: -alpine of v2.15.0-alpine, nothing of
+// v2.15.0.
+var variant = regexp.MustCompile(`^v?[0-9]+(?:\.[0-9]+)*(.*)$`)
 
 func githubRelease(ctx context.Context, repo string) (string, error) {
 	path, ok := strings.CutPrefix(repo, "https://github.com/")

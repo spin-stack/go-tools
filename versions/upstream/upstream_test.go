@@ -291,24 +291,31 @@ func TestAPinnedFileIsOnlyThePinnedBytes(t *testing.T) {
 	require.ErrorContains(t, err, "go is a image, not a download")
 }
 
-// A release's tag is the version the pin spells: a prefix the track names taken off, and a v kept
-// only when the pin has one.
+// A release's tag is the version the pin spells: a prefix the track names taken off, a v kept only
+// when the pin has one, and an image's variant - what its tag says after the version - kept too.
 func TestAReleasesTagIsTheVersionThePinSpells(t *testing.T) {
 	for _, tc := range []struct {
 		tag, prefix string
-		withV       bool
+		pinned      versions.Entry
 		want        string
 	}{
-		{"v3.54.0", "", false, "3.54.0"},
-		{"v3.54.0", "", true, "v3.54.0"},
-		{"bin-20261109.193146", "bin-", false, "20261109.193146"},
-		{"bin-v2", "bin-", true, "v2"},
+		{"v3.54.0", "", versions.Entry{Version: "3.53.0"}, "3.54.0"},
+		{"v3.54.0", "", versions.Entry{Version: "v3.53.0"}, "v3.54.0"},
+		{"bin-20261109.193146", "bin-", versions.Entry{Version: "20261108.1"}, "20261109.193146"},
+		{"bin-v2", "bin-", versions.Entry{Version: "v1"}, "v2"},
+		{"v2.16.0", "", versions.Entry{Kind: versions.Image, Version: "v2.15.0-alpine"}, "v2.16.0-alpine"},
+		{"v2.16.0", "", versions.Entry{Kind: versions.Image, Version: "v2.15.0"}, "v2.16.0"},
+		{"1.0.5", "", versions.Entry{Kind: versions.Image, Version: "1.0.4-slim"}, "1.0.5-slim"},
+		// Only an image's tag names a variant: a download's -linux is no part of its version.
+		{"v2.16.0", "", versions.Entry{Kind: versions.Download, Version: "v2.15.0-linux"}, "v2.16.0"},
+		// A tag that does not start with a version has no variant to keep.
+		{"v2.16.0", "", versions.Entry{Kind: versions.Image, Version: "latest"}, "2.16.0"},
 	} {
-		if got, err := releaseVersion(tc.tag, tc.prefix, tc.withV); err != nil || got != tc.want {
-			t.Errorf("%s with %q: %q, %v; want %q", tc.tag, tc.prefix, got, err, tc.want)
+		if got, err := releaseVersion(tc.tag, tc.prefix, tc.pinned); err != nil || got != tc.want {
+			t.Errorf("%s with %q for %s: %q, %v; want %q", tc.tag, tc.prefix, tc.pinned.Version, got, err, tc.want)
 		}
 	}
-	if _, err := releaseVersion("v3.54.0", "bin-", false); err == nil {
+	if _, err := releaseVersion("v3.54.0", "bin-", versions.Entry{Version: "3.53.0"}); err == nil {
 		t.Error("a release that is not bin-<version> was read as one")
 	}
 }
