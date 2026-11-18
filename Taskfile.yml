@@ -183,9 +183,9 @@ tasks:
     requires:
       vars: [SHA, MODULE]
     cmds:
+      # gh prints a 404's body on stdout and exits 1: its status says there is no tag, not its output.
       - |
-        at=$(gh api "repos/{owner}/{repo}/git/ref/tags/{{.MODULE}}" --jq .object.sha 2>/dev/null || true)
-        if [ -z "$at" ]; then
+        if ! at=$(gh api "repos/{owner}/{repo}/git/ref/tags/{{.MODULE}}" --jq .object.sha 2>/dev/null); then
           gh api "repos/{owner}/{repo}/git/refs" -f ref="refs/tags/{{.MODULE}}" -f sha="{{.SHA}}" > /dev/null
         elif [ "$at" != "{{.SHA}}" ]; then
           echo "{{.MODULE}} names $at, not {{.SHA}}" >&2
