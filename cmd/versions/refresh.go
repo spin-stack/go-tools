@@ -129,7 +129,7 @@ func (r refresher) pending() string { return "refresh/" + r.label + "-pending" }
 func (r refresher) propose(ctx context.Context, start string, all []moved, failed []error) error {
 	if len(all) == 0 {
 		_, err := fmt.Fprintln(r.out, "refresh: every entry is at its newest")
-		return errors.Join(err, r.back(start))
+		return errors.Join(err, r.back(start, r.pending()))
 	}
 	raw, err := os.ReadFile(r.file)
 	if err != nil {
@@ -144,7 +144,7 @@ func (r refresher) propose(ctx context.Context, start string, all []moved, faile
 		if err == nil {
 			_, err = fmt.Fprintf(r.out, "refresh: %s was proposed already: %s\n", branch, was)
 		}
-		return errors.Join(err, r.back(start))
+		return errors.Join(err, r.back(start, branch))
 	}
 	if _, err := r.git("push", "-q", "-f", "origin", branch); err != nil {
 		return err
@@ -153,22 +153,36 @@ func (r refresher) propose(ctx context.Context, start string, all []moved, faile
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(r.out, pr.URL); err != nil {
+	if err := r.say(pr.URL); err != nil {
 		return err
 	}
 	return r.gh.supersede(ctx, "refresh/"+r.label+"-", branch, pr)
 }
 
-// back returns to the branch the refresh started on and drops the one it made for nothing.
-func (r refresher) back(start string) error {
-	cur, err := r.git("rev-parse", "--abbrev-ref", "HEAD")
+// say prints line, and in a workflow adds it to the run's summary, where the pull request is
+// found without opening the step's log.
+func (r refresher) say(line string) error {
+	if _, err := fmt.Fprintln(r.out, line); err != nil {
+		return err
+	}
+	path := os.Getenv("GITHUB_STEP_SUMMARY")
+	if path == "" {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // the path the runner gives
 	if err != nil {
 		return err
 	}
+	_, err = fmt.Fprintln(f, line)
+	return errors.Join(err, f.Close())
+}
+
+// back returns to the branch the refresh started on and drops made, the one it made for nothing.
+func (r refresher) back(start, made string) error {
 	if _, err := r.git("switch", "-q", start); err != nil {
 		return err
 	}
-	_, err = r.git("branch", "-q", "-D", cur)
+	_, err := r.git("branch", "-q", "-D", made)
 	return err
 }
 
@@ -235,11 +249,12 @@ type pull struct {
 var remote = regexp.MustCompile(`github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$`)
 
 // newGitHub is the repository GITHUB_REPOSITORY names in a workflow, or origin's elsewhere, as
-// GITHUB_TOKEN or GH_TOKEN.
+// GH_TOKEN or GITHUB_TOKEN, in gh's order: a workflow sets GITHUB_TOKEN to the run's own token,
+// which may only read, and hands an app's token as GH_TOKEN for what is to start the checks.
 func newGitHub(git func(...string) (string, error)) (*github, error) {
-	token := cmp.Or(os.Getenv("GITHUB_TOKEN"), os.Getenv("GH_TOKEN"))
+	token := cmp.Or(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN"))
 	if token == "" {
-		return nil, errors.New("refresh: -propose opens a pull request as GITHUB_TOKEN or GH_TOKEN, and neither is set")
+		return nil, errors.New("refresh: -propose opens a pull request as GH_TOKEN or GITHUB_TOKEN, and neither is set")
 	}
 	repo := os.Getenv("GITHUB_REPOSITORY")
 	if repo == "" {

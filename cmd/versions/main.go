@@ -54,7 +54,7 @@ Usage:
                                       every entry tracked with it at the same
   versions refresh <name>...          bump each to its newest, a commit each, and say what moved;
                                       -propose pushes them as refresh/<label>-<sum> and opens
-                                      the pull request (GITHUB_TOKEN or GH_TOKEN), once per set,
+                                      the pull request (GH_TOKEN or GITHUB_TOKEN), once per set,
                                       closing the open one it supersedes (-label, -base)
 
 Every command takes -file, versions.yaml by default. Nothing is built by a bump: each entry's
