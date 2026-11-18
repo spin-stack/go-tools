@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -27,9 +28,7 @@ type GitHub struct {
 // head_sha, as the API names them - newest first.
 func (g GitHub) Runs(ctx context.Context, workflow string, query url.Values, limit int) ([]Run, error) {
 	q := url.Values{}
-	for k, v := range query {
-		q[k] = v
-	}
+	maps.Copy(q, query)
 	q.Set("per_page", strconv.Itoa(limit))
 	var page struct {
 		Runs []Run `json:"workflow_runs"`
@@ -231,7 +230,7 @@ func FirstParent(ctx context.Context, root, sha string, n int) ([]Commit, error)
 		return nil, fmt.Errorf("git log %s in %s: %w", sha, root, err)
 	}
 	var commits []Commit
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if h, t, ok := strings.Cut(line, " "); ok {
 			commits = append(commits, Commit{SHA: h, Tree: t})
 		}

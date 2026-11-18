@@ -270,11 +270,11 @@ func globResolves(root, pattern string) bool {
 
 // literalPrefix is the directory part of the pattern before its first wildcard.
 func literalPrefix(pattern string) string {
-	i := strings.IndexByte(pattern, '*')
-	if i < 0 { // mutate-exempt: a pattern starts with a top-level directory, so a * is never at 0
+	before, _, ok := strings.Cut(pattern, "*")
+	if !ok { // mutate-exempt: a pattern starts with a top-level directory, so a * is never at 0
 		return pattern
 	}
-	if j := strings.LastIndexByte(pattern[:i], '/'); j >= 0 {
+	if j := strings.LastIndexByte(before, '/'); j >= 0 {
 		return pattern[:j]
 	}
 	return "."

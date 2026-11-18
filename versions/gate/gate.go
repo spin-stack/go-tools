@@ -91,7 +91,7 @@ func (g Gate) Check() error {
 		for _, re := range reads {
 			// mutate-exempt: any n below zero is every match.
 			for _, m := range re.FindAllStringSubmatch(files[rel], -1) {
-				for _, n := range strings.Fields(m[1]) {
+				for n := range strings.FieldsSeq(m[1]) {
 					if _, err := v.Get(n); err != nil && !used[n] {
 						errs = append(errs, fmt.Errorf("%s reads %s: %w", rel, n, err))
 					}

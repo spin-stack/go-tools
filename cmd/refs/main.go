@@ -122,8 +122,7 @@ func taskLister(root string, task []string) refs.TaskLister {
 		cmd.Env = append(os.Environ(), "NO_COLOR=1")
 		out, err := cmd.Output()
 		if err != nil {
-			var exit *exec.ExitError
-			if errors.As(err, &exit) {
+			if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 				return nil, fmt.Errorf("refs: %s -d %s --list-all --json --no-status: %w\n%s", strings.Join(task, " "), dir, err, exit.Stderr)
 			}
 			return nil, fmt.Errorf("refs: running %s: %w", strings.Join(task, " "), err)
@@ -152,7 +151,7 @@ func git(root string, args ...string) ([]string, error) {
 		return nil, fmt.Errorf("refs: git %s: %w", strings.Join(args, " "), err)
 	}
 	var lines []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line != "" {
 			lines = append(lines, line)
 		}

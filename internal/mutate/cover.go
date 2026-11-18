@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"cmp"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,7 +93,7 @@ func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
 		return nil, fmt.Errorf("mutate: listing %s's tests: %w", dir, err)
 	}
 	var tests []string
-	for _, name := range strings.Fields(string(listed)) {
+	for name := range strings.FieldsSeq(string(listed)) {
 		if strings.HasPrefix(name, "Test") {
 			tests = append(tests, name)
 		}
@@ -149,9 +150,7 @@ func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
 				c.failing[test] = true
 			}
 			// Every profile of one binary counts the same blocks.
-			for file, s := range blocks {
-				c.blocks[file] = s
-			}
+			maps.Copy(c.blocks, blocks)
 			for file, s := range spans {
 				if c.reached[file] == nil {
 					c.reached[file] = map[string][]span{}

@@ -212,14 +212,13 @@ func patches(dir string, each func(commit, file string, kind added, line string)
 func lines(dir string, args ...string) ([]string, error) {
 	raw, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(exit.Stderr)))
 		}
 		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	var out []string
-	for _, l := range strings.Split(string(raw), "\n") {
+	for l := range strings.SplitSeq(string(raw), "\n") {
 		if l != "" {
 			out = append(out, l)
 		}

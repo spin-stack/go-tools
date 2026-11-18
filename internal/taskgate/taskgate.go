@@ -92,7 +92,7 @@ func Check(root string, limits Limits, known map[string]bool) ([]Finding, error)
 	}
 	listed := map[string]bool{}
 	var workflows, taskfiles []string
-	for _, rel := range strings.Fields(string(out)) {
+	for rel := range strings.FieldsSeq(string(out)) {
 		listed[rel] = true
 		switch {
 		case workflow(rel):
@@ -259,7 +259,7 @@ func isTask(line string) bool {
 	if !strings.HasPrefix(line+" ", "task ") {
 		return false
 	}
-	for _, w := range strings.Fields(line) {
+	for w := range strings.FieldsSeq(line) {
 		// One command: a second one after it is shell around the task, not the task.
 		if w == "&&" || w == "||" || w == ";" || w == "|" || strings.HasPrefix(w, ">") {
 			return false

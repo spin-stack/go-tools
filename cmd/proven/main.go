@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 
@@ -273,11 +274,8 @@ func base(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, ref, m
 	}
 	var passed []proven.Run
 	for _, r := range runs {
-		for _, e := range events {
-			if r.Event == e {
-				passed = append(passed, r)
-				break
-			}
+		if slices.Contains(events, r.Event) {
+			passed = append(passed, r)
 		}
 	}
 	history, err := proven.FirstParent(ctx, ".", sha, depth)

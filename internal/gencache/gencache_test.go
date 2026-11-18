@@ -2,6 +2,7 @@ package gencache
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,9 +121,7 @@ func newModule(t *testing.T, extra map[string]string) string {
 	mod = []byte("module example.com/m" + string(mod[bytes.IndexByte(mod, '\n'):]))
 	files := map[string]string{"go.mod": string(mod), "go.sum": string(sum)}
 	for _, set := range []map[string]string{fixture, extra} {
-		for name, body := range set {
-			files[name] = body
-		}
+		maps.Copy(files, set)
 	}
 	writeTree(t, dir, files)
 	return dir

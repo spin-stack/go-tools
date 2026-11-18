@@ -256,7 +256,7 @@ func isShell(rel string, raw []byte) bool {
 // are scripts is read from the files.
 func called(rel, line string, listed map[string]bool) []string {
 	var out []string
-	for _, w := range strings.Fields(line) {
+	for w := range strings.FieldsSeq(line) {
 		w = strings.Trim(w, `"'()$;&|`)
 		for _, p := range []string{path.Join(path.Dir(rel), w), path.Clean(w)} {
 			if listed[p] {
