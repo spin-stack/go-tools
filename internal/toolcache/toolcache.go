@@ -10,8 +10,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -63,7 +61,7 @@ func install(ctx context.Context, e versions.Entry, root, goos, goarch string) (
 	if err != nil {
 		return "", fmt.Errorf("toolcache: %s: %w", e.Name, err)
 	}
-	if got, err := sum(archive.Name()); err != nil || got != e.Pin {
+	if got, err := fetch.FileSum(archive.Name()); err != nil || got != e.Pin {
 		return "", errors.Join(err, fmt.Errorf("toolcache: %s is not what versions.yaml pins: its SHA-256 is %s", e.URL(), got))
 	}
 	part, err := os.MkdirTemp(filepath.Dir(dir), e.Pin+".*.part")
@@ -241,17 +239,4 @@ func write(target string, r io.Reader, mode fs.FileMode) error {
 	}
 	_, err = io.Copy(out, r) //nolint:gosec // an archive this package checked against its pin, not one a stranger sent
 	return errors.Join(err, out.Close())
-}
-
-func sum(p string) (string, error) {
-	f, err := os.Open(p) //nolint:gosec // the archive this package just downloaded
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }() // read-only
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }

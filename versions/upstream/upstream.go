@@ -270,7 +270,7 @@ func PinnedFile(ctx context.Context, e versions.Entry, dir string) (string, erro
 		return "", err
 	}
 	file := filepath.Join(dir, path.Base(e.URL()))
-	if got, err := fileSum(file); err == nil && got == e.Pin {
+	if got, err := fetch.FileSum(file); err == nil && got == e.Pin {
 		return file, nil
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -288,7 +288,7 @@ func PinnedFile(ctx context.Context, e versions.Entry, dir string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("versions: %s: %w", e.Name, err)
 	}
-	got, err := fileSum(part.Name())
+	got, err := fetch.FileSum(part.Name())
 	if err != nil { // mutate-exempt: the file this function just wrote and closed
 		return "", fmt.Errorf("versions: %w", err)
 	}
@@ -299,20 +299,6 @@ func PinnedFile(ctx context.Context, e versions.Entry, dir string) (string, erro
 		return "", fmt.Errorf("versions: %w", err)
 	}
 	return file, nil
-}
-
-// fileSum is the SHA-256 of the file at p.
-func fileSum(p string) (string, error) {
-	f, err := os.Open(p) //nolint:gosec // the cache's own file
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }() // read-only
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func run(ctx context.Context, name string, args ...string) (string, error) {
