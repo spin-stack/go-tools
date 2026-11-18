@@ -5,6 +5,7 @@ package ghatrace
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,12 +51,8 @@ func Record(s Span) error {
 	if path == "" {
 		return nil
 	}
-	if s.Runner == "" {
-		s.Runner = os.Getenv("RUNNER_NAME")
-	}
-	if s.Job == "" {
-		s.Job = os.Getenv("GITHUB_JOB")
-	}
+	s.Runner = cmp.Or(s.Runner, os.Getenv("RUNNER_NAME"))
+	s.Job = cmp.Or(s.Job, os.Getenv("GITHUB_JOB"))
 	line, err := json.Marshal(s)
 	if err != nil {
 		return err
