@@ -6,6 +6,8 @@ package fetch
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -336,4 +338,18 @@ func cause(ctx context.Context, err error) error {
 		return context.Cause(ctx)
 	}
 	return err
+}
+
+// FileSum is the SHA-256 of the file at p, in hex: what a pin names, for the file a fetch wrote.
+func FileSum(p string) (string, error) {
+	f, err := os.Open(p) //nolint:gosec // a file the caller fetched, to check against its pin
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }() // read-only
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

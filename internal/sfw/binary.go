@@ -6,15 +6,13 @@ package sfw
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 
+	"github.com/spin-stack/go-tools/internal/fetch"
 	"github.com/spin-stack/go-tools/versions"
 	"github.com/spin-stack/go-tools/versions/upstream"
 )
@@ -38,7 +36,7 @@ func Entry(v *versions.Versions, goos, goarch string) (versions.Entry, error) {
 func Binary(ctx context.Context, e versions.Entry, cache string) (string, error) {
 	dir := filepath.Join(cache, e.Pin)
 	path := filepath.Join(dir, "sfw")
-	switch sum, err := sha256File(path); {
+	switch sum, err := fetch.FileSum(path); {
 	case err == nil && sum == e.Pin:
 		return path, nil
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
@@ -72,17 +70,4 @@ func Binary(ctx context.Context, e versions.Entry, cache string) (string, error)
 		return "", fmt.Errorf("sfw: %w", err)
 	}
 	return path, nil
-}
-
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path) //nolint:gosec // the cache's own file, under a directory named by its pin
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }() // read-only
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
