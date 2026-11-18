@@ -16,12 +16,13 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -349,12 +350,7 @@ func (r *run) key(ctx context.Context, s step) (string, string) {
 			dirs[dep] = q.Dir
 		}
 	}
-	names := make([]string, 0, len(dirs))
-	for name := range dirs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(dirs)) {
 		own, err := r.dirHash(dirs[name], tests)
 		if err != nil {
 			return "", "a file it reads cannot be read"

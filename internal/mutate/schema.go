@@ -7,10 +7,12 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -325,11 +327,7 @@ func writeSchema(dir string, ms []Mutation, work string) (string, error) {
 	for _, m := range ms {
 		byFile[m.File] = append(byFile[m.File], m)
 	}
-	files := make([]string, 0, len(byFile))
-	for file := range byFile {
-		files = append(files, file)
-	}
-	sort.Strings(files)
+	files := slices.Sorted(maps.Keys(byFile))
 	replace := map[string]string{}
 	for i, file := range files {
 		source, err := os.ReadFile(file) //nolint:gosec // a file of this repository's diff
