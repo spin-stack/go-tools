@@ -316,7 +316,9 @@ func TestAnEntryWithAnotherNamesOneThatMovesOnItsOwn(t *testing.T) {
 		return "- name: " + name + "\n  kind: download\n  source: https://y/{version}\n  version: '1'\n  pin: " + strings.Repeat("b", 64) + "\n  track: " + track + "\n"
 	}
 	for _, tc := range []struct{ name, file, want string }{
-		{"with no name", lead + follower("f", "with"), `the track "with" is not with <name> or with <name> pin`},
+		{"with no name", lead + follower("f", "with"), `the track "with" is not with [owner/repo] <name> [pin]`},
+		{"a repository and no name", lead + follower("f", "with o/r"), `the track "with o/r" is not with [owner/repo] <name> [pin]`},
+		{"a repository that is not owner/repo", lead + follower("f", "with o/r/x lead"), `"o/r/x" is not a GitHub repository`},
 		{"a word that is not pin", lead + follower("f", "with lead commit"), `the track "with lead commit" is not`},
 		{"one word too many", lead + follower("f", "with lead pin x"), `the track "with lead pin x" is not`},
 		{"itself", lead + follower("f", "with f"), "f is with itself"},
@@ -331,9 +333,18 @@ func TestAnEntryWithAnotherNamesOneThatMovesOnItsOwn(t *testing.T) {
 			}
 		})
 	}
-	// Not at the other's version is still a file: a bump has to read it to move them.
-	if _, err := Parse([]byte(lead + follower("f", "with lead") + follower("g", "with lead pin"))); err != nil {
-		t.Errorf("entries with another: %v", err)
+	// Not at the other's version is still a file: a bump has to read it to move them. Another
+	// repository's entry is not this file's to have.
+	v, err := Parse([]byte(lead + follower("f", "with lead") + follower("g", "with lead pin") + follower("h", "with spin-stack/spin lead pin")))
+	if err != nil {
+		t.Fatalf("entries with another: %v", err)
+	}
+	h, _ := v.Get("h")
+	if got, err := v.Expected(h); err == nil || !strings.Contains(err.Error(), "h is with spin-stack/spin's lead, which this file does not have") {
+		t.Errorf("an entry with another repository's, from this file: %q, %v", got, err)
+	}
+	if names := v.Followers("lead"); len(names) != 2 {
+		t.Errorf("followers of lead, another repository's lead included: %v", names)
 	}
 }
 

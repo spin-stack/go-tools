@@ -3,6 +3,7 @@ package upstream
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -469,6 +470,9 @@ func TestAnEntryWithAnotherIsBumpedToItsVersion(t *testing.T) {
 	e, _, err := Bump(t.Context(), v, "utils", "")
 	require.NoError(t, err)
 	assert.Equal(t, [2]string{"1.0", sumOf("utils 1")}, [2]string{e.Version, e.Pin})
+	e, _, err = Bump(t.Context(), v, "utils", "1.0")
+	require.NoError(t, err, "named at the version it is with")
+	assert.Equal(t, sumOf("utils 1"), e.Pin)
 	_, _, err = Bump(t.Context(), v, "utils", "2.0")
 	assert.ErrorContains(t, err, `utils is with lead, at "1.0": bump lead`)
 }
@@ -488,4 +492,78 @@ func TestAnEntryWithAnArchiveStopsItsLeadersBump(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = Bump(t.Context(), v, "lead", "v2.0")
 	assert.ErrorContains(t, err, "src's archive is what a build's git writes")
+}
+
+// contents is what GitHub's contents API answers for a file: its bytes in base64, wrapped as the
+// API wraps them.
+func contents(file string) string {
+	b64 := base64.StdEncoding.EncodeToString([]byte(file))
+	return `{"encoding":"base64","content":"` + b64[:10] + `\n` + b64[10:] + `"}`
+}
+
+const spinFile = `- name: grafana
+  kind: download
+  source: https://example.test/grafana-{version}.tgz
+  version: 13.4.0
+  pin: ` + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" + `
+  track: github-release https://github.com/grafana/grafana
+- name: day
+  kind: date
+  version: 20260101T000000Z
+  track: today
+`
+
+const withSpin = `- name: grafana
+  kind: download
+  source: https://example.test/g-{version}
+  version: v13.3.0
+  pin: ` + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" + `
+  track: with spin-stack/spin grafana
+`
+
+// An entry with another repository's is at what that repository's versions.yaml says now, read
+// through GitHub's API: check says it is behind, a bump takes it, and another version is refused.
+func TestAnEntryWithAnotherRepositorysMovesWithIt(t *testing.T) {
+	serve(t, map[string]string{
+		"https://api.github.com/repos/spin-stack/spin/contents/versions.yaml": contents(spinFile),
+		"https://example.test/g-v13.4.0":                                      "grafana 13.4",
+	})
+	v, err := versions.Parse([]byte(withSpin))
+	require.NoError(t, err)
+	st := Check(t.Context(), v)
+	require.Len(t, st, 1)
+	assert.Equal(t, "v13.4.0", st[0].Newest)
+	assert.True(t, st[0].Behind, st[0].Note)
+
+	e, _, err := Bump(t.Context(), v, "grafana", "")
+	require.NoError(t, err)
+	assert.Equal(t, [2]string{"v13.4.0", sumOf("grafana 13.4")}, [2]string{e.Version, e.Pin})
+	_, _, err = Bump(t.Context(), v, "grafana", "v13.5.0")
+	assert.ErrorContains(t, err, `grafana is with spin-stack/spin's grafana, at "v13.4.0": it moves when that one does`)
+}
+
+// Another repository's file that cannot be read, or read as one, or that lacks what the entry
+// takes of it, is an error that says which: never a version.
+func TestAnotherRepositorysFileIsReadOrRefused(t *testing.T) {
+	api := "https://api.github.com/repos/spin-stack/spin/contents/versions.yaml"
+	for _, tc := range []struct{ name, answer, track, want string }{
+		{"not there, or private with no token", "", "with spin-stack/spin grafana", "GITHUB_TOKEN or GH_TOKEN"},
+		{"not base64", `{"encoding":"none","content":""}`, "with spin-stack/spin grafana", `came as "none", not base64`},
+		{"not base64 at all", `{"encoding":"base64","content":"%%%"}`, "with spin-stack/spin grafana", "spin-stack/spin's versions.yaml: illegal base64"},
+		{"no versions.yaml", contents("- name: x\n"), "with spin-stack/spin grafana", "spin-stack/spin's versions:"},
+		{"no such entry", contents(spinFile), "with spin-stack/spin qemu", "there is no qemu"},
+		{"the pin of one that has none", contents(spinFile), "with spin-stack/spin day pin", "grafana is with day's pin, and day has none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{}
+			if tc.answer != "" {
+				files[api] = tc.answer
+			}
+			serve(t, files)
+			v, err := versions.Parse([]byte(strings.Replace(withSpin, "with spin-stack/spin grafana", tc.track, 1)))
+			require.NoError(t, err)
+			_, err = newest(t.Context(), v, v.Entries[0])
+			assert.ErrorContains(t, err, tc.want)
+		})
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -92,7 +93,7 @@ func newest(ctx context.Context, v *versions.Versions, e versions.Entry) (string
 	case "follows":
 		return "", fmt.Errorf("%w: %s", errFollows, arg)
 	case "with":
-		return v.Expected(e)
+		return newestWith(ctx, v, e)
 	}
 	return "", fmt.Errorf("versions: %s tracks %q, which check does not know", e.Name, e.Track)
 }
@@ -153,10 +154,17 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 			return versions.Entry{}, nil, fmt.Errorf("versions: %s's archive is what a build's git writes of the commit, so it is bumped by hand: see its note", a.Name)
 		}
 	}
-	if leader, _, ok := e.With(); ok && version != "" {
-		// Parse refused a with that names no entry, so the expected version is always there.
-		if want, _ := v.Expected(e); version != want {
-			return versions.Entry{}, nil, fmt.Errorf("versions: %s is with %s, at %q: bump %s", name, leader, want, leader)
+	if a, ok, _ := e.With(); ok && version != "" {
+		want, err := newest(ctx, v, e)
+		if err != nil {
+			return versions.Entry{}, nil, err
+		}
+		switch {
+		case version == want:
+		case a.Repo != "":
+			return versions.Entry{}, nil, fmt.Errorf("versions: %s is with %s's %s, at %q: it moves when that one does", name, a.Repo, a.Name, want)
+		default:
+			return versions.Entry{}, nil, fmt.Errorf("versions: %s is with %s, at %q: bump %s", name, a.Name, want, a.Name)
 		}
 	}
 	if version == "" {
@@ -316,6 +324,48 @@ func run(ctx context.Context, name string, args ...string) (string, error) {
 		return "", fmt.Errorf("versions: %s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return string(out), nil
+}
+
+// newestWith is what an entry tracked with another is at: that one's, in v or in its repository's
+// file as it is now.
+func newestWith(ctx context.Context, v *versions.Versions, e versions.Entry) (string, error) {
+	a, _, err := e.With()
+	switch {
+	case err != nil: // mutate-exempt: Parse refused a with track of no form, and v is parsed
+		return "", err
+	case a.Repo == "":
+		return v.Expected(e)
+	}
+	other, err := repositoryFile(ctx, a.Repo)
+	if err != nil {
+		return "", err
+	}
+	return versions.ExpectedIn(e, other)
+}
+
+// repositoryFile is the versions.yaml at the default branch of a GitHub repository, owner/repo,
+// read through the API so that GITHUB_TOKEN or GH_TOKEN reaches a private one: what that
+// repository pins now, which a release of it made later will carry.
+func repositoryFile(ctx context.Context, repo string) (*versions.Versions, error) {
+	var file struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := getJSON(ctx, "https://api.github.com/repos/"+repo+"/contents/"+versions.File, &file); err != nil {
+		return nil, fmt.Errorf("%w (a private repository is read with GITHUB_TOKEN or GH_TOKEN)", err)
+	}
+	if file.Encoding != "base64" {
+		return nil, fmt.Errorf("versions: %s's %s came as %q, not base64", repo, versions.File, file.Encoding)
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(file.Content, "\n", ""))
+	if err != nil {
+		return nil, fmt.Errorf("versions: %s's %s: %w", repo, versions.File, err)
+	}
+	v, err := versions.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s's %w", repo, err)
+	}
+	return v, nil
 }
 
 func getJSON(ctx context.Context, url string, into any) error {
