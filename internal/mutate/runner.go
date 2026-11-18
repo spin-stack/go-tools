@@ -23,6 +23,8 @@ type Tally struct {
 	// Wrote are the files the tests left, changed or removed where they ran, by their paths in
 	// the source, which none of them was written to (Tree).
 	Wrote []string
+	// Broken are the tests that fail with nothing broken, as "<package dir>: <test>", sorted.
+	Broken []string
 }
 
 // result is what the tests did about one mutation.
@@ -113,6 +115,23 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 	if len(t.Wrote) > 0 {
 		_, _ = fmt.Fprintf(w, "  the tests left or changed these in their copy of the module, and not in the source: %s\n",
 			strings.Join(t.Wrote, ", "))
+	}
+	// Every package's coverage is measured by now: each run asked for it before its first edit.
+	for dir, c := range covers.by {
+		if c.c != nil {
+			for test := range c.c.failing {
+				t.Broken = append(t.Broken, dir+": "+test)
+			}
+		}
+	}
+	slices.Sort(t.Broken)
+	// After every edit was asked, so the run says all it can first. A test that fails with nothing
+	// broken is asked about no edit, so what it would have refused is let through, and the run
+	// that reports it and passes is a green check over a failing test.
+	if len(t.Broken) > 0 && firstErr == nil {
+		firstErr = fmt.Errorf("mutate: %d test(s) fail with nothing broken, so no edit was asked of them: %s. "+
+			"Each failed in this run's copy of the module, as said above: fix it so that it passes there",
+			len(t.Broken), strings.Join(t.Broken, ", "))
 	}
 	return t, firstErr
 }

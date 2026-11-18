@@ -157,7 +157,16 @@ cache that keeps a pull request's refused edits for its next run.
 | `-cache` | none | a directory to keep refused edits in between runs |
 | `-stale-exempts` | | report and fail on `mutate-exempt` reasons over nothing |
 
-It exits 0 when every edit was refused, 1 when one survived, and 2 when it could not run.
+It exits 0 when every edit was refused, 1 when one survived, and 2 when it could not run or a test
+failed with nothing broken.
+
+### A test that fails with nothing broken
+
+Before it breaks anything, `mutate` runs each test once in its copy of the module. A test that
+fails there can't refuse an edit, since it fails whatever the edit, so no edit is asked of it. The
+run still asks every edit and prints the test's output, then exits 2 naming the package and the
+test. A pass here would be a green check over a failing test. The fix is the test's: what it reads
+that the copy doesn't have, or a path it shares with a test run beside it.
 
 ### Tests that need an environment
 
@@ -183,8 +192,10 @@ the copy: a test with a long name that binds a unix socket in its `t.TempDir()` 
 
 The copy holds what git sees: tracked files and files git doesn't ignore. Directories git ignores
 (`node_modules`, a build's output) and repositories nested in the module are linked rather than
-copied, so tests can read them, but those are shared. Outside a git work tree, the copy is every
-file under the module's root. Packages are still built from your checkout, and only their tests run
+copied, so tests can read them, but those are shared. The copy is a git repository of its own with
+every file it holds staged, never your checkout's `.git`: a test that asks git which files the
+module has gets the same answer as in your checkout. Outside a git work tree, the copy is every
+file under the module's root, and no repository. Packages are still built from your checkout, and only their tests run
 in the copy.
 
 When the tests leave files behind, or change or remove one, the run's report lists them. Those
