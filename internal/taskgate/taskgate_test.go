@@ -170,3 +170,35 @@ echo '{"tasks":[{"name":"lint","aliases":["l"]},{"name":"e2e:up","aliases":[]}]}
 		})
 	}
 }
+
+// A step may be one of the repository's own commands instead of a task, given with what it takes;
+// the same command with shell around it, a command that only begins like one, or a command not
+// named is a Step as any other shell is.
+func TestAStepMayBeTheRepositorysOwnCommand(t *testing.T) {
+	root := repo(t, map[string]string{
+		".github/workflows/ci.yml": `on: push
+jobs:
+  gate:
+    steps:
+      - run: go run ./cmd/spin-os upgrade --propose
+      - run: spin-os build runner --secureboot ${{ inputs.sb }}
+      - run: spin-os
+      - run: go run ./cmd/spin-os scan | tee out
+      - run: spin-osx build
+      - run: go run ./cmd/other build
+`,
+	})
+	findings, err := taskgate.Check(root, taskgate.Limits{}, nil, "go run ./cmd/spin-os", "spin-os")
+	require.NoError(t, err)
+	var got []string
+	for _, f := range findings {
+		got = append(got, f.Key())
+	}
+	assert.ElementsMatch(t, []string{
+		".github/workflows/ci.yml/gate/#4",
+		".github/workflows/ci.yml/gate/#5",
+		".github/workflows/ci.yml/gate/#6",
+	}, got)
+	require.NotEmpty(t, findings)
+	assert.Contains(t, findings[0].String(), "one of the repository's own commands (-command)")
+}

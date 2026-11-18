@@ -52,7 +52,7 @@ func (s Step) Key() string {
 }
 
 func (s Step) String() string {
-	return fmt.Sprintf("%s:%d: step %q runs %q: a step is one `task <name>`, and what it does is that task in the Taskfile, where a developer runs it too",
+	return fmt.Sprintf("%s:%d: step %q runs %q: a step is one `task <name>`, or one of the repository's own commands (-command), which a developer runs too",
 		s.File, s.Line, s.Step, s.Run)
 }
 
@@ -84,8 +84,9 @@ type Limits struct {
 // Check is every finding under root: in the workflows and composite actions, the Taskfiles and
 // the scripts their tasks run - what git lists, tracked or untracked and not ignored. known is
 // every name the root's Taskfile answers to (Tasks); a step naming another is Missing. Nil asks
-// nothing of the names.
-func Check(root string, limits Limits, known map[string]bool) ([]Finding, error) {
+// nothing of the names. commands are the repository's own commands a step may be instead of a
+// task (`go run ./cmd/spin-os`, `spin-os`): one invocation of one of them, as a task is one.
+func Check(root string, limits Limits, known map[string]bool, commands ...string) ([]Finding, error) {
 	out, err := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
 	if err != nil {
 		return nil, fmt.Errorf("taskgate: listing %s: %w", root, err)
@@ -107,7 +108,7 @@ func Check(root string, limits Limits, known map[string]bool) ([]Finding, error)
 		if err != nil {
 			return nil, err
 		}
-		found, calls, err := steps(rel, raw)
+		found, calls, err := steps(rel, raw, commands)
 		if err != nil {
 			return nil, fmt.Errorf("taskgate: %s: %w", rel, err)
 		}
@@ -149,7 +150,7 @@ func workflow(rel string) bool {
 
 // steps is the findings of one file - a workflow's jobs' steps, or a composite action's - and
 // each task a step that is one task names, for Check to look up.
-func steps(rel string, raw []byte) ([]Step, []Missing, error) {
+func steps(rel string, raw []byte, commands []string) ([]Step, []Missing, error) {
 	top, err := document(raw)
 	if err != nil || top == nil {
 		return nil, nil, err
@@ -157,12 +158,12 @@ func steps(rel string, raw []byte) ([]Step, []Missing, error) {
 	var out []Step
 	var calls []Missing
 	if runs := field(top, "runs"); runs != nil {
-		found, named := judge(rel, "", field(runs, "steps"))
+		found, named := judge(rel, "", field(runs, "steps"), commands)
 		out, calls = append(out, found...), append(calls, named...)
 	}
 	if jobs := field(top, "jobs"); jobs != nil && jobs.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(jobs.Content); i += 2 {
-			found, named := judge(rel, jobs.Content[i].Value, field(jobs.Content[i+1], "steps"))
+			found, named := judge(rel, jobs.Content[i].Value, field(jobs.Content[i+1], "steps"), commands)
 			out, calls = append(out, found...), append(calls, named...)
 		}
 	}
@@ -185,7 +186,7 @@ func document(raw []byte) (*yaml.Node, error) {
 }
 
 // judge is the findings of one job's steps, and the tasks its steps that are one task name.
-func judge(rel, job string, steps *yaml.Node) ([]Step, []Missing) {
+func judge(rel, job string, steps *yaml.Node, commands []string) ([]Step, []Missing) {
 	if steps == nil || steps.Kind != yaml.SequenceNode {
 		return nil, nil
 	}
@@ -209,6 +210,9 @@ func judge(rel, job string, steps *yaml.Node) ([]Step, []Missing) {
 			for _, t := range taskNames(lines[0].Text) {
 				calls = append(calls, Missing{Step: at, Task: t})
 			}
+			continue
+		}
+		if len(lines) == 1 && isCommand(lines[0].Text, commands) {
 			continue
 		}
 		at.Run = strings.TrimSpace(run.Value)
@@ -256,11 +260,23 @@ func firstLine(n *yaml.Node) int {
 // with what it is given.
 func isTask(line string) bool {
 	line = strings.TrimPrefix(line, "go tool ")
-	if !strings.HasPrefix(line+" ", "task ") {
-		return false
+	return strings.HasPrefix(line+" ", "task ") && alone(line)
+}
+
+// isCommand is a line that runs one of the repository's own commands and nothing else, with what
+// it is given: the command is the program a developer runs too, as a task is.
+func isCommand(line string, commands []string) bool {
+	for _, c := range commands {
+		if strings.HasPrefix(line+" ", c+" ") && alone(line) {
+			return true
+		}
 	}
+	return false
+}
+
+// alone is a line that is one command: a second one after it is shell around the command.
+func alone(line string) bool {
 	for w := range strings.FieldsSeq(line) {
-		// One command: a second one after it is shell around the task, not the task.
 		if w == "&&" || w == "||" || w == ";" || w == "|" || strings.HasPrefix(w, ">") {
 			return false
 		}
