@@ -265,9 +265,7 @@ func span(ctx context.Context, args []string) error {
 	if len(argv) == 0 {
 		return errors.New("span: a command is needed after --")
 	}
-	if *name == "" {
-		*name = strings.Join(argv, " ")
-	}
+	*name = cmp.Or(*name, strings.Join(argv, " "))
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // the command the caller asked to run
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return timed(cmd, *name, nil)

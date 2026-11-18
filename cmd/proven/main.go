@@ -14,6 +14,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -96,12 +97,10 @@ func run(ctx context.Context, argv []string) error {
 	} else if *sha == "HEAD" {
 		return fmt.Errorf("-sha or GITHUB_SHA names the commit; HEAD: %w", err)
 	}
-	gh := proven.GitHub{API: "https://api.github.com", Repo: *repo, Token: os.Getenv("GH_TOKEN")}
-	if api := os.Getenv("GITHUB_API_URL"); api != "" {
-		gh.API = api
-	}
-	if gh.Token == "" {
-		gh.Token = os.Getenv("GITHUB_TOKEN")
+	gh := proven.GitHub{
+		API:   cmp.Or(os.Getenv("GITHUB_API_URL"), "https://api.github.com"),
+		Repo:  *repo,
+		Token: cmp.Or(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN")),
 	}
 	trees := proven.TreesOf(".", gh)
 	ev := strings.Split(*events, ",")
