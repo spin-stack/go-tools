@@ -24,7 +24,8 @@ import (
 // The copy is the module as git sees it: its tracked files and those it does not ignore, so a
 // test reads testdata/ and ../../docs as it would in place. A directory git ignores (node_modules,
 // a build's output) and a repository nested in the module are linked, not copied: read as they
-// are, and shared. Outside a git work tree it is every file under the module's root. The tests
+// are, and shared. It is a git repository of its own, those files staged (copyModule says why).
+// Outside a git work tree it is every file under the module's root. The tests
 // are built where the sources are, and only run here.
 type Tree struct {
 	dir    string
@@ -148,7 +149,7 @@ type treeFile struct {
 }
 
 func copyModule(src, dst string) (*treeCopy, error) {
-	files, err := moduleFiles(src)
+	files, inGit, err := moduleFiles(src)
 	if err != nil {
 		return nil, err
 	}
@@ -161,16 +162,33 @@ func copyModule(src, dst string) (*treeCopy, error) {
 			return nil, err
 		}
 	}
+	if !inGit {
+		return c, nil
+	}
+	// A repository of its own, every file the copy holds in its index: a test that asks git what
+	// the module holds - a gate over the files git lists - is answered as in the checkout. Without
+	// one it is told "not a git repository", fails with nothing broken, and refuses no edit. Never
+	// the checkout's own .git: a test's git that lands there writes into what every worktree
+	// commits from.
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
+		git := exec.Command("git", args...)
+		git.Dir = dst
+		if _, err := output("listing", git); err != nil {
+			return nil, fmt.Errorf("git %s in the copy: %w", strings.Join(args, " "), err)
+		}
+	}
 	return c, nil
 }
 
 // moduleFiles is what of the module under root is copied, by its path from root: what git
-// tracks or does not ignore, and each directory it ignores whole, which is linked.
-func moduleFiles(root string) ([]string, error) {
+// tracks or does not ignore, and each directory it ignores whole, which is linked; and whether
+// root is in a git work tree, which is what said so.
+func moduleFiles(root string) ([]string, bool, error) {
 	inside := exec.Command("git", "rev-parse", "--is-inside-work-tree")
 	inside.Dir = root
 	if _, err := output("listing", inside); err != nil {
-		return walkFiles(root)
+		files, err := walkFiles(root)
+		return files, false, err
 	}
 	var out []string
 	for _, args := range [][]string{
@@ -181,7 +199,7 @@ func moduleFiles(root string) ([]string, error) {
 		list.Dir = root
 		said, err := output("listing", list)
 		if err != nil {
-			return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+			return nil, false, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 		}
 		ignored := slices.Contains(args, "--ignored")
 		for path := range strings.SplitSeq(string(said), "\x00") {
@@ -194,7 +212,7 @@ func moduleFiles(root string) ([]string, error) {
 			out = append(out, filepath.FromSlash(strings.TrimSuffix(path, "/")))
 		}
 	}
-	return out, nil
+	return out, true, nil
 }
 
 // walkFiles is every file under root but git's own.
@@ -305,6 +323,11 @@ func (c *treeCopy) reset(wrote func(rel string)) error {
 		rel, err := filepath.Rel(c.dst, path)
 		if err != nil || rel == "." {
 			return err
+		}
+		if rel == ".git" {
+			// The copy's own repository, which no source file is: what a test does to it is
+			// not put back - one that needs a repository to change makes its own.
+			return fs.SkipDir
 		}
 		if d.IsDir() {
 			if c.dirs[rel] {

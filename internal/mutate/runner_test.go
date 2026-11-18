@@ -93,7 +93,8 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 
 // A test that fails with nothing broken refuses no edit: the coverage the run measures first says
 // so, for an edit in the package's binary and for one built alone. Asked anyway, it would refuse
-// every edit, and a change would pass the gate on a broken test.
+// every edit, and a change would pass the gate on a broken test. And the run fails naming it, once
+// every edit was asked: passing, it is a green check over a test that fails.
 func TestATestThatAlwaysFailsRefusesNothing(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
@@ -110,10 +111,12 @@ func TestATestThatAlwaysFailsRefusesNothing(t *testing.T) {
 	}
 	var said strings.Builder
 	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
-	require.NoError(t, err)
+	require.Error(t, err, "a run with a test that fails with nothing broken passed")
+	assert.Contains(t, err.Error(), dir+": TestBroken")
+	assert.Equal(t, []string{dir + ": TestBroken"}, tally.Broken)
 	assert.Contains(t, said.String(), dir+": 1 edit(s) in one binary, 1 built alone", "One's literal in the binary, Wide's alone")
 	assert.Zero(t, tally.Killed, "a test broken regardless refused an edit: %s", said.String())
-	assert.Len(t, tally.Survived, 2, "%s", said.String())
+	assert.Len(t, tally.Survived, 2, "every edit is still asked, and said: %s", said.String())
 }
 
 // A package with no tests of its own is asked through the packages that import it, each built

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/spin-stack/go-tools/internal/gittest"
@@ -67,6 +68,10 @@ func TestATreeIsTheModuleAsGitSeesItPutBackAfterEachRun(t *testing.T) {
 // A run's temporary directory is empty, its own and gone once it returns, and short enough that
 // a test with a long name binds a socket in its t.TempDir() there, however deep the tree is.
 func TestARunsTemporaryDirectoryTakesASocketFromATestWithALongName(t *testing.T) {
+	// The run's directory is made under TMPDIR, as short as a runner's here. Under mutate's own
+	// run TMPDIR is already a run's directory, 17 bytes deeper, and this socket's path would be
+	// over the 108 bytes one may have: a failure of where the test ran, not of what it holds.
+	t.Setenv("TMPDIR", "/tmp")
 	root := gitModule(t)
 	tree := NewTree(filepath.Join(t.TempDir(), "trees", "12", "a-tree-as-deep-as-a-runner-makes-it"))
 	var tmps []string
@@ -253,5 +258,33 @@ func putBack(t *testing.T, root, dir string) {
 		if got, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(got) != body {
 			t.Errorf("%s is %q (%v) in the copy after the run, want it put back", name, got, err)
 		}
+	}
+}
+
+// A test that asks git what the module holds is answered in the copy as in the checkout: the copy
+// is a repository of its own with every file it holds staged, which no run's reset takes away or
+// names as written. Without one, a gate over the files git lists fails with nothing broken.
+func TestATestThatAsksGitWhatTheModuleHoldsIsAnsweredInTheCopy(t *testing.T) {
+	root := gitModule(t)
+	tree := NewTree(t.TempDir())
+	listing := []string{"ls-files", "--cached", "--others", "--exclude-standard"}
+	// Sorted: the checkout lists what it tracks before what it does not, and the copy tracks all.
+	sorted := func(listed string) string {
+		lines := strings.Split(listed, "\n")
+		slices.Sort(lines)
+		return strings.Join(lines, "\n")
+	}
+	want := sorted(gittest.Run(t, filepath.Join(root, "p"), listing...))
+	for range 2 {
+		if err := tree.in(filepath.Join(root, "p"), func(at, _ string) {
+			if got := sorted(gittest.Run(t, at, listing...)); got != want {
+				t.Errorf("git in the copy lists\n%s\nnot the checkout's\n%s", got, want)
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := tree.Wrote(); len(got) != 0 {
+		t.Errorf("the copy's own repository was named as written by a run: %v", got)
 	}
 }
