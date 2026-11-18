@@ -13,7 +13,6 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
-	"sync"
 )
 
 // Cache keeps the edits a run's tests refused, so the next run over the same code does not ask
@@ -30,9 +29,7 @@ import (
 // Only refusals are kept. A survivor fails the run and is the next one's question; an edit that
 // did not build costs a failed build, which is what asking the cache would save.
 type Cache struct {
-	dir string
-
-	mu      sync.Mutex
+	dir     string
 	modules map[string]*moduleGraph // by the module's root
 	digests map[string]string       // a package directory's files, by directory
 	keys    map[int]string          // by Mutation.ID, from Known for Keep
@@ -54,9 +51,7 @@ func (c *Cache) Known(chosen []Mutation, importers map[string][]string) (fresh, 
 		if err != nil {
 			return nil, nil, err
 		}
-		c.mu.Lock()
 		c.keys[m.ID] = key
-		c.mu.Unlock()
 		if _, err := os.Stat(c.path(key)); err == nil {
 			refused = append(refused, m)
 			continue
@@ -69,9 +64,7 @@ func (c *Cache) Known(chosen []Mutation, importers map[string][]string) (fresh, 
 // Keep records each of refused, which Known was asked about, as refused.
 func (c *Cache) Keep(refused []Mutation) error {
 	for _, m := range refused {
-		c.mu.Lock()
 		key, ok := c.keys[m.ID]
-		c.mu.Unlock()
 		if !ok {
 			return fmt.Errorf("mutate: %s was not looked up in the cache", m)
 		}
@@ -142,9 +135,7 @@ func toolVersion() string {
 
 // dirDigest is the files directly in dir, and everything under its testdata, by name and content.
 func (c *Cache) dirDigest(dir string) (string, error) {
-	c.mu.Lock()
 	digest, ok := c.digests[dir]
-	c.mu.Unlock()
 	if ok {
 		return digest, nil
 	}
@@ -174,9 +165,7 @@ func (c *Cache) dirDigest(dir string) (string, error) {
 		return "", fmt.Errorf("mutate: the cache: %w", err)
 	}
 	digest = hex.EncodeToString(h.Sum(nil))
-	c.mu.Lock()
 	c.digests[dir] = digest
-	c.mu.Unlock()
 	return digest, nil
 }
 
@@ -203,9 +192,7 @@ type moduleGraph struct {
 
 // module is the graph of the module dir is in, listed once.
 func (c *Cache) module(dir string) (*moduleGraph, error) {
-	c.mu.Lock()
 	g, ok := c.modules[dir]
-	c.mu.Unlock()
 	if ok {
 		return g, nil
 	}
@@ -213,17 +200,13 @@ func (c *Cache) module(dir string) (*moduleGraph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mutate: the cache: %w", err)
 	}
-	c.mu.Lock()
 	g, ok = c.modules[root]
-	c.mu.Unlock()
 	if !ok {
 		if g, err = listModule(root); err != nil {
 			return nil, err
 		}
 	}
-	c.mu.Lock()
 	c.modules[root], c.modules[dir] = g, g
-	c.mu.Unlock()
 	return g, nil
 }
 
