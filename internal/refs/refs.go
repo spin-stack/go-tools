@@ -24,6 +24,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -151,7 +152,7 @@ func Check(o Options) ([]Finding, error) {
 	}
 
 	sort.Slice(found, func(i, j int) bool { return found[i].Key() < found[j].Key() })
-	return dedupe(found), nil
+	return slices.CompactFunc(found, func(a, b Finding) bool { return a.Key() == b.Key() }), nil
 }
 
 func taskNames(o Options, rootTasks []string, dir string) (map[string]bool, error) {
@@ -298,17 +299,6 @@ func globRegexp(pattern string) (*regexp.Regexp, error) {
 	}
 	b.WriteString(`$`)
 	return regexp.Compile(b.String())
-}
-
-func dedupe(in []Finding) []Finding {
-	var out []Finding
-	for i, f := range in {
-		if i > 0 && in[i-1].Key() == f.Key() {
-			continue
-		}
-		out = append(out, f)
-	}
-	return out
 }
 
 // TaskCommand is how to run the Task a TaskLister asks: exe when one is named, else the Task the

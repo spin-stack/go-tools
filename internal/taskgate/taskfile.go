@@ -5,7 +5,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -103,7 +103,8 @@ func tasks(root string, files []string, listed map[string]bool, limits Limits) (
 				}
 			}
 		}
-		s.Reads = unique(s.Reads)
+		slices.Sort(s.Reads)
+		s.Reads = slices.Compact(s.Reads)
 		if (limits.Script > 0 && s.Lines > limits.Script) || len(s.Reads) > 0 {
 			findings = append(findings, *s)
 		}
@@ -265,18 +266,5 @@ func called(rel, line string, listed map[string]bool) []string {
 			}
 		}
 	}
-	return out
-}
-
-func unique(words []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, w := range words {
-		if !seen[w] {
-			seen[w] = true
-			out = append(out, w)
-		}
-	}
-	sort.Strings(out)
 	return out
 }
