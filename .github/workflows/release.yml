@@ -1,5 +1,6 @@
 # go-tools' release, named as spin-stack names releases: v<YYYYMMDD>.<NN>, the day in UTC and which
-# release of that day (internal/release). Made of main each time CI passes on it - the commit that
+# release of that day (internal/release), and tagged v0.<YYYYMMDD>.<N> too: the module version a
+# repository's go.mod names and Dependabot moves. Made of main each time CI passes on it - the commit that
 # passed, not whatever main is when this starts - and published last: a release is its files, built
 # and attested here, then the tag. What a repository's `go tool task` (cmd/task) runs is the latest.
 name: Release
@@ -76,3 +77,12 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
           VERSION: ${{ steps.name.outputs.version }}
         run: task release:publish
+
+      # On every run, a commit released already included: what a failed run left untagged is
+      # tagged by the next.
+      - name: Its module version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          MODULE: ${{ steps.name.outputs.module }}
+        run: task release:module
