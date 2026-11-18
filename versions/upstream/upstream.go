@@ -329,11 +329,9 @@ func run(ctx context.Context, name string, args ...string) (string, error) {
 // newestWith is what an entry tracked with another is at: that one's, in v or in its repository's
 // file as it is now.
 func newestWith(ctx context.Context, v *versions.Versions, e versions.Entry) (string, error) {
-	a, _, err := e.With()
-	switch {
-	case err != nil: // mutate-exempt: Parse refused a with track of no form, and v is parsed
-		return "", err
-	case a.Repo == "":
+	// A with track of no form has no Repo, and Expected says what is wrong with it.
+	a, _, _ := e.With()
+	if a.Repo == "" {
 		return v.Expected(e)
 	}
 	other, err := repositoryFile(ctx, a.Repo)

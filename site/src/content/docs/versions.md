@@ -152,8 +152,13 @@ jobs:
       - uses: actions/setup-go@<commit> # v7.0.0
         with:
           go-version-file: go.mod
+      # A runner has no git identity, and refresh commits each entry it moves.
       - env:
           GITHUB_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: go tool task refresh
 ```
 
