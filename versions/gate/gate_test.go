@@ -81,6 +81,10 @@ func TestTheGateSaysWhereAPinIsNotVersionsYAMLs(t *testing.T) {
 			f[versions.File] += "- name: headers\n  kind: download\n  source: https://y/{version}\n  version: v1\n  pin: " + strings.Repeat("d", 64) + "\n  track: with kernel\n"
 			f["Taskfile.yml"] += "  - versions args headers\n"
 		}},
+		{name: "an entry tracked with another repository's, which is check's to read", change: func(f map[string]string) {
+			f[versions.File] += "- name: headers\n  kind: download\n  source: https://y/{version}\n  version: '9'\n  pin: " + strings.Repeat("d", 64) + "\n  track: with spin-stack/spin kernel\n"
+			f["Taskfile.yml"] += "  - versions args headers\n"
+		}},
 		{name: "an entry tracked with another, moved alone", change: func(f map[string]string) {
 			f[versions.File] += "- name: headers\n  kind: download\n  source: https://y/{version}\n  version: '2'\n  pin: " + strings.Repeat("d", 64) + "\n  track: with kernel\n"
 			f["Taskfile.yml"] += "  - versions args headers\n"

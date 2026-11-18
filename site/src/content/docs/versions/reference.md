@@ -45,6 +45,7 @@ description: Every kind of entry versions.yaml takes, the build arguments each b
 | `today` | today's date |
 | `with <name>` | `<name>`'s version, spelled with a `v` only when this entry's is: two files of one release, such as VictoriaMetrics and its vmutils. A bump of `<name>` moves this entry in the same file, and the gate fails while they differ |
 | `with <name> pin` | `<name>`'s pin: a file named by another's commit, such as the VS Code server of a VS Code release |
+| `with <owner/repo> <name> [pin]` | the same, of `<name>` in that GitHub repository's `versions.yaml` as its default branch has it now, read through the API (`GITHUB_TOKEN` or `GH_TOKEN` for a private one): `check` says when it moved, and a bump takes it. The gate reads no network, so it does not hold this one |
 | `follows <name>` | another entry's, by a relation the file cannot compute, or another repository's: `check` reports it for a person to read |
 
 The format only grows. Every repository that uses go-tools reads the same file format, so a field,
@@ -89,3 +90,8 @@ lists: adding one is an edit, not a bump.
 victoriametrics' version and refuses any other. The entry named is one with a track of its own: a
 chain of `with` is refused as the file is read, and so is one whose entry is not in it. An entry
 with an `archive` is bumped by hand, so it refuses the bump of the entry it is with.
+
+An entry can be with another repository's: spin-ami rebuilds the Grafana spin lays, at the tag spin
+pins, so its entry is `with spin-stack/spin grafana`. When spin moves Grafana, spin-ami's
+`versions check` says its own is behind, and `versions bump grafana` takes the version spin's file
+has, spelled as spin-ami's entry spells its own.

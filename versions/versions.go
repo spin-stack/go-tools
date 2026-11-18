@@ -229,59 +229,94 @@ func Parse(raw []byte) (*Versions, error) {
 	return v, nil
 }
 
-// With is the entry e is moved with, and whether e's version is that entry's pin rather than its
-// version: track `with <name>`, or `with <name> pin`. ok is false for any other track.
-func (e Entry) With() (name string, pin, ok bool) {
+// Along is what an entry tracked with another is moved with: the entry Name, in this file or, when
+// Repo is set, in the versions.yaml of that GitHub repository (owner/repo); and whether it takes
+// that entry's pin rather than its version.
+type Along struct {
+	Repo, Name string
+	Pin        bool
+}
+
+// repository is a GitHub repository as a with track names one: owner/repo.
+var repository = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
+
+// With is what e is moved with: track `with [owner/repo] <name> [pin]`. ok is false for any other
+// track, and err says a with track that is none of those forms.
+func (e Entry) With() (a Along, ok bool, err error) {
 	kind, arg, _ := strings.Cut(e.Track, " ")
 	if kind != "with" {
-		return "", false, false
+		return Along{}, false, nil
 	}
-	name, form, _ := strings.Cut(arg, " ")
-	return name, form == "pin", true
+	form := strings.Fields(arg)
+	if len(form) > 0 && strings.Contains(form[0], "/") {
+		if !repository.MatchString(form[0]) {
+			return Along{}, true, fmt.Errorf("versions: %s: %q is not a GitHub repository, owner/repo", e.Name, form[0])
+		}
+		a.Repo, form = form[0], form[1:]
+	}
+	if len(form) == 0 || len(form) > 2 || (len(form) == 2 && form[1] != "pin") {
+		return Along{}, true, fmt.Errorf("versions: %s: the track %q is not with [owner/repo] <name> [pin]", e.Name, e.Track)
+	}
+	a.Name, a.Pin = form[0], len(form) == 2
+	return a, true, nil
 }
 
 // validateWith is an entry tracked with another whose version the file can say: the other is in
 // it, is not the entry itself, and is moved by a track of its own, since a chain is one a bump
-// would have to walk and a cycle one it never ends. Whether the two agree is not asked here: a
-// file in which they do not is one a bump has to be able to read, to move them.
+// would have to walk and a cycle one it never ends. One in another repository's file is read only
+// by check and bump, which reach it. Whether the two agree is not asked here: a file in which they
+// do not is one a bump has to be able to read, to move them.
 func (v *Versions) validateWith(e Entry) error {
-	name, pin, ok := e.With()
-	if !ok {
-		return nil
+	a, ok, err := e.With()
+	if !ok || err != nil || a.Repo != "" {
+		return err
 	}
-	_, arg, _ := strings.Cut(e.Track, " ")
-	if form := strings.Fields(arg); len(form) == 0 || len(form) > 2 || (len(form) == 2 && form[1] != "pin") {
-		return fmt.Errorf("versions: %s: the track %q is not with <name> or with <name> pin", e.Name, e.Track)
-	}
-	if name == e.Name {
+	if a.Name == e.Name {
 		return fmt.Errorf("versions: %s is with itself", e.Name)
 	}
-	leader, err := v.Get(name)
+	leader, err := v.Get(a.Name)
 	if err != nil {
-		return fmt.Errorf("versions: %s is with %s: %w", e.Name, name, err)
+		return fmt.Errorf("versions: %s is with %s: %w", e.Name, a.Name, err)
 	}
-	if _, _, chained := leader.With(); chained {
-		return fmt.Errorf("versions: %s is with %s, which is with another: name that one", e.Name, name)
+	if _, chained, _ := leader.With(); chained {
+		return fmt.Errorf("versions: %s is with %s, which is with another: name that one", e.Name, a.Name)
 	}
-	if pin && leader.Pin == "" {
-		return fmt.Errorf("versions: %s is with %s's pin, and %s has none", e.Name, name, name)
+	if a.Pin && leader.Pin == "" {
+		return fmt.Errorf("versions: %s is with %s's pin, and %s has none", e.Name, a.Name, a.Name)
 	}
 	return nil
 }
 
-// Expected is the version an entry tracked with another is at: the other's pin, or its version
-// spelled as e spells its own, with a leading v when e's has one. Upstream writes v3.54.0 in a
-// tag and 3.54.0 in a file name, and two entries of the same release say it each their own way.
+// Expected is the version an entry tracked with another in this file is at: see ExpectedIn.
 func (v *Versions) Expected(e Entry) (string, error) {
-	name, pin, ok := e.With()
-	if !ok {
+	a, ok, err := e.With()
+	switch {
+	case err != nil:
+		return "", err
+	case !ok:
 		return "", fmt.Errorf("versions: %s is not tracked with another entry", e.Name)
+	case a.Repo != "":
+		return "", fmt.Errorf("versions: %s is with %s's %s, which this file does not have", e.Name, a.Repo, a.Name)
 	}
-	leader, err := v.Get(name)
+	return ExpectedIn(e, v)
+}
+
+// ExpectedIn is the version e is at when the file it is with is file: the other's pin, or its
+// version spelled as e spells its own, with a leading v when e's has one. Upstream writes v3.54.0
+// in a tag and 3.54.0 in a file name, and two entries of the same release say it each their own way.
+func ExpectedIn(e Entry, file *Versions) (string, error) {
+	a, ok, err := e.With()
+	if err != nil || !ok {
+		return "", cmp.Or(err, fmt.Errorf("versions: %s is not tracked with another entry", e.Name))
+	}
+	leader, err := file.Get(a.Name)
 	if err != nil {
 		return "", err
 	}
-	if pin {
+	if a.Pin {
+		if leader.Pin == "" {
+			return "", fmt.Errorf("versions: %s is with %s's pin, and %s has none", e.Name, a.Name, a.Name)
+		}
 		return leader.Pin, nil
 	}
 	version := strings.TrimPrefix(leader.Version, "v")
@@ -291,11 +326,11 @@ func (v *Versions) Expected(e Entry) (string, error) {
 	return version, nil
 }
 
-// Followers are the entries tracked with name, in the file's order.
+// Followers are the entries tracked with name in this file, in the file's order.
 func (v *Versions) Followers(name string) []Entry {
 	var out []Entry
 	for _, e := range v.Entries {
-		if leader, _, ok := e.With(); ok && leader == name {
+		if a, ok, _ := e.With(); ok && a.Repo == "" && a.Name == name {
 			out = append(out, e)
 		}
 	}

@@ -81,16 +81,7 @@ func (g Gate) Check() error {
 	}
 	// An entry tracked with another is at what that one is at: a bump moves both, and a hand that
 	// moved one alone has written a build of two releases.
-	for _, e := range v.Entries {
-		leader, _, ok := e.With()
-		if !ok {
-			continue
-		}
-		if want, _ := v.Expected(e); e.Version != want {
-			errs = append(errs, fmt.Errorf("%s: %s is with %s, so it is at %q, not %q: versions bump %s moves both",
-				versions.File, e.Name, leader, want, e.Version, leader))
-		}
-	}
+	errs = append(errs, apart(v)...)
 	used := map[string]bool{}
 	for _, rel := range slices.Sorted(maps.Keys(files)) {
 		// A test's digests are fixtures, but what it reads of versions.yaml is read.
@@ -116,6 +107,23 @@ func (g Gate) Check() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// apart is each entry tracked with another in the file that is not at that one's version. One with
+// another repository's entry is check's: the gate reaches nothing over the network.
+func apart(v *versions.Versions) []error {
+	var errs []error
+	for _, e := range v.Entries {
+		a, ok, _ := e.With()
+		if !ok || a.Repo != "" {
+			continue
+		}
+		if want, _ := v.Expected(e); e.Version != want {
+			errs = append(errs, fmt.Errorf("%s: %s is with %s, so it is at %q, not %q: versions bump %s moves both",
+				versions.File, e.Name, a.Name, want, e.Version, a.Name))
+		}
+	}
+	return errs
 }
 
 // TaskCommand is the go-tools command a go.mod takes as `go tool task`: Task at versions.yaml's
