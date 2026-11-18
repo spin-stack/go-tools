@@ -289,13 +289,7 @@ func (v *Versions) validateWith(e Entry) error {
 
 // Expected is the version an entry tracked with another in this file is at: see ExpectedIn.
 func (v *Versions) Expected(e Entry) (string, error) {
-	a, ok, err := e.With()
-	switch {
-	case err != nil:
-		return "", err
-	case !ok:
-		return "", fmt.Errorf("versions: %s is not tracked with another entry", e.Name)
-	case a.Repo != "":
+	if a, _, _ := e.With(); a.Repo != "" {
 		return "", fmt.Errorf("versions: %s is with %s's %s, which this file does not have", e.Name, a.Repo, a.Name)
 	}
 	return ExpectedIn(e, v)
