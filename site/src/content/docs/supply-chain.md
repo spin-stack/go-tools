@@ -53,6 +53,10 @@ fails on a step that publishes without a step before it, in the same job, that a
 - **attesting** is `cosign attest-blob --type slsaprovenance1`, or a task in `AttestTasks`, run
   unconditionally and with `id-token: write`.
 
+A name in either list with a space in it is a command of the repository's own, matched by its words
+wherever a step runs it: `"spin-os image publish"` is a step that runs `spin-os image publish ...`,
+as taskgate's `-command` lets a step be the repository's command rather than a task.
+
 `RequireSBOM` also demands a `cosign attest-blob --type cyclonedx`. `NotPublished` excuses a step by
 `<file>/<job>/<step>` with its reason, and an excuse that matches nothing fails. `MainOnly` holds
 release workflows to no push trigger and every job on `refs/heads/main`.
