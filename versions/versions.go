@@ -230,18 +230,22 @@ func Parse(raw []byte) (*Versions, error) {
 }
 
 // Along is what an entry tracked with another is moved with: the entry Name, in this file or, when
-// Repo is set, in the versions.yaml of that GitHub repository (owner/repo); and whether it takes
-// that entry's pin rather than its version.
+// Repo is set, in the versions.yaml of that GitHub repository (owner/repo) - at its default branch,
+// or at its latest release when Released (owner/repo@release); and whether it takes that entry's
+// pin rather than its version.
 type Along struct {
 	Repo, Name string
+	Released   bool
 	Pin        bool
 }
 
 // repository is a GitHub repository as a with track names one: owner/repo.
 var repository = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
 
-// With is what e is moved with: track `with [owner/repo] <name> [pin]`. ok is false for any other
-// track, and err says a with track that is none of those forms.
+// With is what e is moved with: track `with [owner/repo[@release]] <name> [pin]`. ok is false for
+// any other track, and err says a with track that is none of those forms. @release is for an
+// entry whose file is built with that repository's release rather than its main: one moved to
+// what main says before a release carries it would not match what it is built with.
 func (e Entry) With() (a Along, ok bool, err error) {
 	kind, arg, _ := strings.Cut(e.Track, " ")
 	if kind != "with" {
@@ -249,13 +253,14 @@ func (e Entry) With() (a Along, ok bool, err error) {
 	}
 	form := strings.Fields(arg)
 	if len(form) > 0 && strings.Contains(form[0], "/") {
-		if !repository.MatchString(form[0]) {
-			return Along{}, true, fmt.Errorf("versions: %s: %q is not a GitHub repository, owner/repo", e.Name, form[0])
+		repo, ref, at := strings.Cut(form[0], "@")
+		if !repository.MatchString(repo) || (at && ref != "release") {
+			return Along{}, true, fmt.Errorf("versions: %s: %q is not a GitHub repository, owner/repo or owner/repo@release", e.Name, form[0])
 		}
-		a.Repo, form = form[0], form[1:]
+		a.Repo, a.Released, form = repo, at, form[1:]
 	}
 	if len(form) == 0 || len(form) > 2 || (len(form) == 2 && form[1] != "pin") {
-		return Along{}, true, fmt.Errorf("versions: %s: the track %q is not with [owner/repo] <name> [pin]", e.Name, e.Track)
+		return Along{}, true, fmt.Errorf("versions: %s: the track %q is not with [owner/repo[@release]] <name> [pin]", e.Name, e.Track)
 	}
 	a.Name, a.Pin = form[0], len(form) == 2
 	return a, true, nil

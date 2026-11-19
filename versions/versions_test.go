@@ -316,9 +316,11 @@ func TestAnEntryWithAnotherNamesOneThatMovesOnItsOwn(t *testing.T) {
 		return "- name: " + name + "\n  kind: download\n  source: https://y/{version}\n  version: '1'\n  pin: " + strings.Repeat("b", 64) + "\n  track: " + track + "\n"
 	}
 	for _, tc := range []struct{ name, file, want string }{
-		{"with no name", lead + follower("f", "with"), `the track "with" is not with [owner/repo] <name> [pin]`},
-		{"a repository and no name", lead + follower("f", "with o/r"), `the track "with o/r" is not with [owner/repo] <name> [pin]`},
+		{"with no name", lead + follower("f", "with"), `the track "with" is not with [owner/repo[@release]] <name> [pin]`},
+		{"a repository and no name", lead + follower("f", "with o/r"), `the track "with o/r" is not with [owner/repo[@release]] <name> [pin]`},
 		{"a repository that is not owner/repo", lead + follower("f", "with o/r/x lead"), `"o/r/x" is not a GitHub repository`},
+		{"a repository at a branch", lead + follower("f", "with o/r@main lead"), `"o/r@main" is not a GitHub repository, owner/repo or owner/repo@release`},
+		{"a repository's release that is not one", lead + follower("f", "with o/r/x@release lead"), `"o/r/x@release" is not a GitHub repository`},
 		{"a word that is not pin", lead + follower("f", "with lead commit"), `the track "with lead commit" is not`},
 		{"one word too many", lead + follower("f", "with lead pin x"), `the track "with lead pin x" is not`},
 		{"itself", lead + follower("f", "with f"), "f is with itself"},
