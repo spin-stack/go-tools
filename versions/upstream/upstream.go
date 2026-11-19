@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -320,22 +321,36 @@ func newestWith(ctx context.Context, v *versions.Versions, e versions.Entry) (st
 	if a.Repo == "" {
 		return v.Expected(e)
 	}
-	other, err := repositoryFile(ctx, a.Repo)
+	other, err := repositoryFile(ctx, a.Repo, a.Released)
 	if err != nil {
 		return "", err
 	}
 	return versions.ExpectedIn(e, other)
 }
 
-// repositoryFile is the versions.yaml at the default branch of a GitHub repository, owner/repo,
-// read through the API so that GITHUB_TOKEN or GH_TOKEN reaches a private one: what that
-// repository pins now, which a release of it made later will carry.
-func repositoryFile(ctx context.Context, repo string) (*versions.Versions, error) {
+// repositoryFile is the versions.yaml of a GitHub repository, owner/repo, read through the API so
+// that GITHUB_TOKEN or GH_TOKEN reaches a private one: at its default branch, what that repository
+// pins now, which a release of it made later will carry; or, released, at its latest release's
+// tag, what a build of that release has.
+func repositoryFile(ctx context.Context, repo string, released bool) (*versions.Versions, error) {
+	at := ""
+	if released {
+		var rel struct {
+			Tag string `json:"tag_name"`
+		}
+		if err := getJSON(ctx, "https://api.github.com/repos/"+repo+"/releases/latest", &rel); err != nil {
+			return nil, fmt.Errorf("%s's latest release: %w (a private repository is read with GITHUB_TOKEN or GH_TOKEN)", repo, err)
+		}
+		if rel.Tag == "" {
+			return nil, fmt.Errorf("versions: %s's latest release has no tag", repo)
+		}
+		at = "?ref=" + url.QueryEscape(rel.Tag)
+	}
 	var file struct {
 		Content  string `json:"content"`
 		Encoding string `json:"encoding"`
 	}
-	if err := getJSON(ctx, "https://api.github.com/repos/"+repo+"/contents/"+versions.File, &file); err != nil {
+	if err := getJSON(ctx, "https://api.github.com/repos/"+repo+"/contents/"+versions.File+at, &file); err != nil {
 		return nil, fmt.Errorf("%w (a private repository is read with GITHUB_TOKEN or GH_TOKEN)", err)
 	}
 	if file.Encoding != "base64" {

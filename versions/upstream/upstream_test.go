@@ -549,6 +549,43 @@ func TestAnEntryWithAnotherRepositorysMovesWithIt(t *testing.T) {
 	assert.ErrorContains(t, err, `grafana is with spin-stack/spin's grafana, at "v13.4.0": it moves when that one does`)
 }
 
+// An entry with another repository's release is at what the versions.yaml of its latest release's
+// tag says, not its main's: a build of that release is what the entry is built with.
+func TestAnEntryWithAnotherRepositorysReleaseMovesWithItsRelease(t *testing.T) {
+	released := strings.Replace(spinFile, "version: 13.4.0", "version: 13.3.1", 1)
+	serve(t, map[string]string{
+		"https://api.github.com/repos/spin-stack/spin/releases/latest":                       `{"tag_name": "v0.9.0+1"}`,
+		"https://api.github.com/repos/spin-stack/spin/contents/versions.yaml?ref=v0.9.0%2B1": contents(released),
+		"https://api.github.com/repos/spin-stack/spin/contents/versions.yaml":                contents(spinFile),
+		"https://example.test/g-v13.3.1":                                                     "grafana 13.3.1",
+	})
+	v, err := versions.Parse([]byte(strings.Replace(withSpin, "with spin-stack/spin grafana", "with spin-stack/spin@release grafana", 1)))
+	require.NoError(t, err)
+	e, _, err := Bump(t.Context(), v, "grafana", "")
+	require.NoError(t, err)
+	assert.Equal(t, [2]string{"v13.3.1", sumOf("grafana 13.3.1")}, [2]string{e.Version, e.Pin})
+}
+
+// A repository whose latest release cannot be read, or has no tag, gives no version.
+func TestAnotherRepositorysReleaseIsReadOrRefused(t *testing.T) {
+	for _, tc := range []struct{ name, answer, want string }{
+		{"no release, or private with no token", "", "spin-stack/spin's latest release: versions:"},
+		{"a release with no tag", `{"tag_name": ""}`, "spin-stack/spin's latest release has no tag"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{"https://api.github.com/repos/spin-stack/spin/contents/versions.yaml": contents(spinFile)}
+			if tc.answer != "" {
+				files["https://api.github.com/repos/spin-stack/spin/releases/latest"] = tc.answer
+			}
+			serve(t, files)
+			v, err := versions.Parse([]byte(strings.Replace(withSpin, "with spin-stack/spin grafana", "with spin-stack/spin@release grafana", 1)))
+			require.NoError(t, err)
+			_, err = newest(t.Context(), v, v.Entries[0])
+			assert.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
 // Another repository's file that cannot be read, or read as one, or that lacks what the entry
 // takes of it, is an error that says which: never a version.
 func TestAnotherRepositorysFileIsReadOrRefused(t *testing.T) {
