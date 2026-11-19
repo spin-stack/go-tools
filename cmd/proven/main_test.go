@@ -484,3 +484,17 @@ func TestReleaseIsRefusedOnAPassThatLeftALaneOut(t *testing.T) {
 	require.ErrorIs(t, err, errRefused)
 	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree without running e2e-suites (u4): not a release's proof\n", out)
 }
+
+// A run that failed is asked nothing of its lanes: it proves nothing either way, and says why as
+// a failure, not as a lane it left out.
+func TestAFailedRunIsNotAskedWhichLanesItRan(t *testing.T) {
+	f := setup(t)
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"tree", "-sha", f.main[0], "-ran", "e2e-verify"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml did not pass on "+f.main[0]+"'s tree (failure): u6: every lane\nproven=false\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[0], "-also", "", "-ran", "e2e-verify"}) })
+	require.ErrorIs(t, err, errRefused)
+	assert.Equal(t, "::error::ci.yml did not pass on "+f.main[0]+"'s tree (failure): u6\n", out)
+}
