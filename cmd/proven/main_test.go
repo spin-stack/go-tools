@@ -494,7 +494,9 @@ func TestAFailedRunIsNotAskedWhichLanesItRan(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ci.yml did not pass on "+f.main[0]+"'s tree (failure): u6: every lane\nproven=false\n", out)
 
-	out = stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[0], "-also", "", "-ran", "e2e-verify"}) })
+	out = stdout(t, func() {
+		err = run(t.Context(), []string{"release", "-sha", f.main[0], "-also", "", "-ran", "e2e-verify"})
+	})
 	require.ErrorIs(t, err, errRefused)
 	assert.Equal(t, "::error::ci.yml did not pass on "+f.main[0]+"'s tree (failure): u6\n", out)
 }
