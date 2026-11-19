@@ -30,6 +30,7 @@ export const sidebar = [
 			{ label: 'sfw', slug: 'sfw' },
 			{ label: 'Provenance and SBOMs', slug: 'supply-chain' },
 			{ label: 'exposure', slug: 'exposure' },
+			{ label: 'planguard', slug: 'planguard' },
 		],
 	},
 	{ label: 'Doing less work', items: [{ label: 'gencache', slug: 'gencache' }] },
