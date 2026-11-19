@@ -215,6 +215,74 @@ func TestARefreshProposesASetOnce(t *testing.T) {
 	assert.Equal(t, "main", git(t, "branch", "--format=%(refname:short)"))
 }
 
+// majorFile is two entries tracked with others already moved: one within its major, one to the
+// next.
+const majorFile = `- name: two
+  kind: date
+  version: v2.1.0
+  track: today
+- name: one
+  kind: date
+  version: v1.4.0
+  track: today
+- name: next
+  kind: date
+  version: v1.9.0
+  track: with two
+- name: patch
+  kind: date
+  version: v1.0.0
+  track: with one
+`
+
+// A bump to another major is not committed: it is said as a person's, and the rest still move.
+func TestARefreshLeavesANewMajorToAPerson(t *testing.T) {
+	inRepository(t, majorFile)
+	var out bytes.Buffer
+	r := refresher{file: "versions.yaml", git: runGit, label: "versions", base: "main", out: &out}
+	require.NoError(t, r.refresh(t.Context(), []string{"next", "patch"}))
+	assert.Equal(t, "versions: patch v1.4.0", git(t, "log", "-1", "--format=%s"))
+	assert.Equal(t, "2", git(t, "rev-list", "--count", "HEAD"), "one commit, for patch")
+	assert.Empty(t, git(t, "status", "--porcelain"))
+	assert.Contains(t, out.String(), "| patch | v1.0.0 | v1.4.0 |")
+	assert.Contains(t, out.String(), "a person's to move (versions bump <name>):\n\n- next: v1.9.0 to v2.1.0\n")
+	assert.NotContains(t, out.String(), "| next |")
+}
+
+// A proposing refresh whose only move is a new major opens nothing, says it, and is back where it
+// started.
+func TestARefreshOfOnlyANewMajorProposesNothing(t *testing.T) {
+	inRepository(t, majorFile)
+	f := &fakeGitHub{}
+	var out bytes.Buffer
+	r := refresher{file: "versions.yaml", git: runGit, gh: f.serve(t), label: "versions", base: "main", out: &out}
+	start := git(t, "rev-parse", "HEAD")
+	require.NoError(t, r.refresh(t.Context(), []string{"next"}))
+	assert.Equal(t, "Nothing moved.\n\nA new major version, a person's to move (versions bump <name>):\n\n- next: v1.9.0 to v2.1.0\n", out.String())
+	assert.Empty(t, f.asked)
+	assert.Equal(t, start, git(t, "rev-parse", "HEAD"))
+	assert.Equal(t, "main", git(t, "branch", "--format=%(refname:short)"))
+}
+
+// A major is the first number, after a v; a date's or a name's is none to cross.
+func TestAMajorIsTheFirstNumber(t *testing.T) {
+	for _, c := range []struct {
+		from, to string
+		want     bool
+	}{
+		{"v13.3.0", "v14.0.0", true},
+		{"13.3.0", "13.3.1", false},
+		{"1.27.4-bookworm", "2.0.0-trixie", true},
+		{"v0.9.3", "v0.10.0", false},
+		{"20260101T000000Z", "20270101T000000Z", false},
+		{"999.1.0", "1000.0.0", false},
+		{"latest", "latest", false},
+		{"main", "v2.0.0", false},
+	} {
+		assert.Equal(t, c.want, otherMajor(c.from, c.to), "%s to %s", c.from, c.to)
+	}
+}
+
 // One entry's pull request is named for its move.
 func TestOneEntrysRefreshIsNamedForIt(t *testing.T) {
 	assert.Equal(t, "versions: kernel 7.3.6", title([]moved{{name: "kernel", to: "7.3.6"}}, time.Now()))
