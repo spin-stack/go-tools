@@ -15,6 +15,8 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,21 +60,25 @@ func (r refresher) refresh(ctx context.Context, names []string) error {
 			return err
 		}
 	}
-	var all []moved
+	var all, held []moved
 	var failed []error
 	for _, name := range names {
-		m, err := r.move(ctx, name)
+		m, major, err := r.move(ctx, name)
 		if err != nil {
 			failed = append(failed, fmt.Errorf("%s: %w", name, err))
+			continue
+		}
+		if major {
+			held = append(held, m...)
 			continue
 		}
 		all = append(all, m...)
 	}
 	if r.gh == nil {
-		_, err := io.WriteString(r.out, summary(all, failed))
+		_, err := io.WriteString(r.out, summary(all, held, failed))
 		return errors.Join(append(failed, err)...)
 	}
-	return errors.Join(append(failed, r.propose(ctx, start, all, failed))...)
+	return errors.Join(append(failed, r.propose(ctx, start, all, held, failed))...)
 }
 
 // refresh is the command: r, opening a pull request when propose says to.
@@ -90,34 +96,60 @@ func refresh(ctx context.Context, r refresher, propose bool, names []string) err
 }
 
 // move bumps one entry and commits what moved, the entries with it included; nothing when it is
-// at its newest.
-func (r refresher) move(ctx context.Context, name string) ([]moved, error) {
+// at its newest. A bump that crosses a major version is not written, and major says so: what
+// would have moved is a person's decision, since a schedule that merges what its checks pass
+// would otherwise take a new major the day it is tagged.
+func (r refresher) move(ctx context.Context, name string) (m []moved, major bool, err error) {
 	v, err := versions.Load(r.file)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	e, out, err := upstream.Bump(ctx, v, name, "")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	after, err := versions.Parse(out)
 	if err != nil { // mutate-exempt: out is what Bump read back whole
-		return nil, err
+		return nil, false, err
 	}
-	var m []moved
 	for i, a := range after.Entries {
 		if b := v.Entries[i]; a.Version != b.Version || a.Pin != b.Pin {
 			m = append(m, moved{a.Name, b.Version, a.Version, a.Note})
 		}
 	}
 	if len(m) == 0 {
-		return nil, nil
+		return nil, false, nil
+	}
+	if slices.ContainsFunc(m, func(x moved) bool { return otherMajor(x.from, x.to) }) {
+		return m, true, nil
 	}
 	if err := os.WriteFile(r.file, out, 0o644); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	_, err = r.git("commit", "-q", "-m", "versions: "+e.Name+" "+e.Version, "--", r.file)
-	return m, err
+	return m, false, err
+}
+
+// leading is a version's first number, after a v.
+var leading = regexp.MustCompile(`^v?([0-9]+)`)
+
+// otherMajor is whether to's first number is not from's. A version with none (a branch, latest)
+// has no major to cross, and neither has a date: a snapshot's or a firmware's first number is
+// its year, which a schedule moves every January.
+func otherMajor(from, to string) bool {
+	a, okA := firstNumber(from)
+	b, okB := firstNumber(to)
+	return okA && okB && a != b
+}
+
+// firstNumber is the version's first number, when it has one that is not a year.
+func firstNumber(version string) (int, bool) {
+	m := leading.FindStringSubmatch(version)
+	if m == nil {
+		return 0, false // mutate-exempt: a number with false, which no caller reads
+	}
+	n, err := strconv.Atoi(m[1])
+	return n, err == nil && n < 1000
 }
 
 // pending is the branch a proposing refresh moves entries on, named for what it holds once it has.
@@ -126,9 +158,13 @@ func (r refresher) pending() string { return "refresh/" + r.label + "-pending" }
 // propose pushes what moved as refresh/<label>-<sum of the file> and opens its pull request,
 // closing the open ones of the same label it supersedes. A branch named for what it holds is
 // proposed once: a person who closed it said no to that set, and it is not asked again.
-func (r refresher) propose(ctx context.Context, start string, all []moved, failed []error) error {
+func (r refresher) propose(ctx context.Context, start string, all, held []moved, failed []error) error {
 	if len(all) == 0 {
-		_, err := fmt.Fprintln(r.out, "refresh: every entry is at its newest")
+		said := "refresh: every entry is at its newest\n"
+		if len(held) > 0 {
+			said = summary(all, held, nil)
+		}
+		_, err := io.WriteString(r.out, said)
 		return errors.Join(err, r.back(start, r.pending()))
 	}
 	raw, err := os.ReadFile(r.file)
@@ -149,7 +185,7 @@ func (r refresher) propose(ctx context.Context, start string, all []moved, faile
 	if _, err := r.git("push", "-q", "-f", "origin", branch); err != nil {
 		return err
 	}
-	pr, err := r.gh.create(ctx, r.base, branch, title(all, r.now), summary(all, failed))
+	pr, err := r.gh.create(ctx, r.base, branch, title(all, r.now), summary(all, held, failed))
 	if err != nil {
 		return err
 	}
@@ -194,13 +230,16 @@ func title(all []moved, now time.Time) string {
 	return fmt.Sprintf("versions: %d pins as of %s", len(all), now.UTC().Format("2006-01-02"))
 }
 
-// summary is what moved, what each note says to check, and what could not be moved: the pull
-// request's body, or what a refresh without one prints.
-func summary(all []moved, failed []error) string {
+// summary is what moved, what each note says to check, what is a new major and so a person's,
+// and what could not be moved: the pull request's body, or what a refresh without one prints.
+func summary(all, held []moved, failed []error) string {
 	var b strings.Builder
-	if len(all) == 0 {
+	switch {
+	case len(all) == 0 && len(held) == 0:
 		b.WriteString("Every entry is at its newest.\n")
-	} else {
+	case len(all) == 0:
+		b.WriteString("Nothing moved.\n")
+	default:
 		b.WriteString("| entry | from | to |\n|---|---|---|\n")
 		for _, m := range all {
 			fmt.Fprintf(&b, "| %s | %s | %s |\n", m.name, m.from, m.to)
@@ -208,6 +247,12 @@ func summary(all []moved, failed []error) string {
 		b.WriteString("\nWhat each one's note says to check before merging:\n\n")
 		for _, m := range all {
 			fmt.Fprintf(&b, "- **%s**: %s\n", m.name, cmp.Or(m.note, "no note"))
+		}
+	}
+	if len(held) > 0 {
+		b.WriteString("\nA new major version, a person's to move (versions bump <name>):\n\n")
+		for _, h := range held {
+			fmt.Fprintf(&b, "- %s: %s to %s\n", h.name, h.from, h.to)
 		}
 	}
 	if len(failed) > 0 {

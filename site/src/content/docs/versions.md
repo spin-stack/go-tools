@@ -168,6 +168,11 @@ pull request of the same `-label` it supersedes, with a comment that says which.
 cannot be moved is listed in the body and fails the run, after the others are proposed. Each
 entry's `note` is in the body, as what to check before merging.
 
+A bump to another major version - the first number of the version, `v13.3.0` to `v14.0.0` - is
+not committed: the body lists it as a person's, who moves it with `versions bump <name>`, and the
+run does not fail for it. A schedule would otherwise take a new major the day it is tagged. A
+version whose first number is a year, such as a snapshot's date, has no major to cross.
+
 A pull request opened with a workflow's own `GITHUB_TOKEN` starts no workflow: a repository whose
 checks must run on it opens it as a GitHub App, and commits as one. The token is `GH_TOKEN`'s when
 it is set and `GITHUB_TOKEN`'s otherwise, as `gh` reads them, so the app's goes in `GH_TOKEN`. The

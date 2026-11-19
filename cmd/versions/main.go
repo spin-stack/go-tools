@@ -52,7 +52,8 @@ Usage:
   versions check                      what is behind its upstream; exits 1 when anything is
   versions bump    <name> [version]   pin an entry at a version, the newest by default, and
                                       every entry tracked with it at the same
-  versions refresh <name>...          bump each to its newest, a commit each, and say what moved;
+  versions refresh <name>...          bump each to its newest, a commit each, and say what moved
+                                      and what is a new major, left for a person;
                                       -propose pushes them as refresh/<label>-<sum> and opens
                                       the pull request (GH_TOKEN or GITHUB_TOKEN), once per set,
                                       closing the open one it supersedes (-label, -base)
