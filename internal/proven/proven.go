@@ -29,14 +29,18 @@ type Run struct {
 }
 
 // completed is the status of a run that is over, whatever it concluded.
-const completed = "completed"
+const (
+	completed = "completed"
+	// success is a run's or a job's conclusion when it passed.
+	success = "success"
+)
 
 // Passed is a run that finished and succeeded.
-func (r Run) Passed() bool { return r.Status == completed && r.Conclusion == "success" }
+func (r Run) Passed() bool { return r.Status == completed && r.Conclusion == success }
 
 // Finished is a run that ran to an answer, success or failure: a cancelled run answered nothing.
 func (r Run) Finished() bool {
-	return r.Status == completed && (r.Conclusion == "success" || r.Conclusion == "failure")
+	return r.Status == completed && (r.Conclusion == success || r.Conclusion == "failure")
 }
 
 // Commit is one commit with its tree.
@@ -128,7 +132,7 @@ func Judge(sha, workflow string, answer Run, found bool, also string, alsoRuns [
 	case !found:
 		v.OK = false
 		v.Lines = append(v.Lines, "::error::"+workflow+" never finished on "+sha+"'s tree: dispatch it on main (or on the branch it came from)")
-	case answer.Conclusion != "success":
+	case answer.Conclusion != success:
 		v.OK = false
 		v.Lines = append(v.Lines, "::error::"+workflow+" did not pass on "+sha+"'s tree ("+answer.Conclusion+"): "+answer.URL)
 	default:
@@ -165,4 +169,30 @@ func Times(log string) []string {
 		out = append(out, m[2]+" "+strings.TrimSpace(m[1]))
 	}
 	return out
+}
+
+// Ran is whether a run's jobs ran each of prefixes - a job whose name starts with it - and every
+// such job succeeded; when not, the first prefix it did not, for a person to read. A gate that
+// leaves lanes out for a change that cannot reach them still passes, and a pass of that run is
+// no proof of a lane it skipped: asked of what it ran, it is.
+func Ran(jobs []Job, prefixes []string) (bool, string) {
+	for _, p := range prefixes {
+		if p == "" {
+			continue
+		}
+		seen := false
+		for _, j := range jobs {
+			if !strings.HasPrefix(j.Name, p) {
+				continue
+			}
+			if j.Conclusion != success {
+				return false, p
+			}
+			seen = true
+		}
+		if !seen {
+			return false, p
+		}
+	}
+	return true, ""
 }

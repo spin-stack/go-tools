@@ -170,3 +170,32 @@ func TestEachTestsTimeInALog(t *testing.T) {
 	assert.Equal(t, []string{"12.50 TestA", "0.20 TestA/sub", "3 TestB"}, proven.Times(log))
 	assert.Empty(t, proven.Times("ok  \tpkg\t16.0s\n"))
 }
+
+// A pass is proof of the lanes the run ran: one that left a lane out, or skipped or failed one of
+// its jobs, proves nothing of it, and a tree it passed on still runs that lane.
+func TestARunProvesOnlyTheLanesItRan(t *testing.T) {
+	job := func(name, conclusion string) proven.Job { return proven.Job{Name: name, Conclusion: conclusion} }
+	full := []proven.Job{
+		job("checks", "success"), job("e2e-verify:1/3", "success"), job("e2e-verify:2/3", "success"),
+		job("e2e-suites", "success"),
+	}
+	for _, tc := range []struct {
+		name    string
+		jobs    []proven.Job
+		ran     []string
+		ok      bool
+		missing string
+	}{
+		{"every lane asked, all passed", full, []string{"e2e-verify", "e2e-suites"}, true, ""},
+		{"nothing asked", nil, nil, true, ""},
+		{"a lane left out", full[:1], []string{"e2e-verify"}, false, "e2e-verify"},
+		{"a shard skipped", append(full[:2:2], job("e2e-verify:2/3", "skipped")), []string{"e2e-verify"}, false, "e2e-verify"},
+		{"the second asked, absent", full[:3], []string{"e2e-verify", "e2e-suites"}, false, "e2e-suites"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, missing := proven.Ran(tc.jobs, tc.ran)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.missing, missing)
+		})
+	}
+}

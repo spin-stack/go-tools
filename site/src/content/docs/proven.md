@@ -44,6 +44,11 @@ it does not - a pull request's head is nowhere in a checkout of main.
 finished on it; a job that `needs` this one runs only the lanes that run did not. The step passes
 either way: the answer is the output, not the exit code.
 
+A gate that runs only the lanes a change can reach still passes, and its pass is no proof of the
+lanes it left out. `-ran e2e-verify,e2e-suites` asks for them: the run that answers proves the
+tree only when it ran a job whose name starts with each, and every such job succeeded - one left
+out, skipped or failed makes the answer `proven=false`, and its line names the lane it lacked.
+
 ## base
 
 ```yaml title=".github/workflows/ci.yml"
@@ -77,7 +82,8 @@ Refuses (exits 1) a commit the gate did not pass on, by tree, and a commit the l
 every push to main (`-also`, `kvm.yml`; empty asks only the gate) did not pass on, by sha: their
 newest run on it, since a re-run replaces a conclusion and a run cancelled for want of a machine
 is dispatched again. Each answer is a line, the refusals as `::error::` for the job's log. A commit
-no run reached is released by dispatching the gate on main first.
+no run reached is released by dispatching the gate on main first. `-ran` is `tree`'s: a pass that
+left one of its lanes out is refused as a release's proof.
 
 ## times
 

@@ -80,6 +80,7 @@ func run(ctx context.Context, argv []string) error {
 	depth := fs.Int("depth", 200, "base: how far back in main's first-parent history a passed run is looked for") // mutate-exempt: a default, as deep as a day on main goes
 	also := fs.String("also", "kvm.yml", "release: the workflow that runs on every push to main, asked of the commit itself; empty is none")
 	jobs := fs.String("jobs", "e2e-verify", "times: the jobs whose logs hold the tests' times, by the start of their name")
+	ran := fs.String("ran", "", "tree, release: the jobs, by the start of their name and comma-separated, a run that passed must have run to success to answer for a tree; a gate that left one out proves nothing of it")
 	out := fs.String("out", "", "tests: the file the JSON is written to; stdout when empty")
 	if err := fs.Parse(argv[1:]); err != nil {
 		return err
@@ -106,11 +107,11 @@ func run(ctx context.Context, argv []string) error {
 	ev := strings.Split(*events, ",")
 	switch argv[0] {
 	case "tree":
-		return tree(ctx, gh, trees, *sha, *workflow, ev, *limit)
+		return tree(ctx, gh, trees, *sha, *workflow, ev, *limit, lanes(*ran))
 	case "base":
 		return base(ctx, gh, trees, *sha, *ref, *mainBranch, *workflow, ev, *limit, *depth)
 	case "release":
-		return release(ctx, gh, trees, *sha, *workflow, ev, *limit, *also)
+		return release(ctx, gh, trees, *sha, *workflow, ev, *limit, *also, lanes(*ran))
 	case "times":
 		return times(ctx, gh, *workflow, *jobs, *limit)
 	case "flakes":
@@ -237,7 +238,7 @@ func tests(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workf
 
 // tree answers whether the gate passed on the commit's tree, for a workflow that then runs only
 // the lanes that run did not.
-func tree(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int) error {
+func tree(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, ran []string) error {
 	t, err := trees(ctx, sha)
 	if err != nil {
 		return err
@@ -247,6 +248,14 @@ func tree(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workfl
 		return err
 	}
 	run, found := proven.Answer(ctx, runs, sha, t, events, trees)
+	if found && run.Passed() {
+		if ok, missing, err := ranAll(ctx, gh, run, ran); err != nil {
+			return err
+		} else if !ok {
+			fmt.Printf("%s passed on %s's tree without running %s (%s): every lane\n", workflow, sha, missing, run.URL)
+			return output("proven", "false")
+		}
+	}
 	switch {
 	case found && run.Passed():
 		summary(fmt.Sprintf("%s passed on %s's tree: %s: what that run ran is not run again", workflow, sha, run.URL))
@@ -297,7 +306,7 @@ func base(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, ref, m
 }
 
 // release refuses a commit the gates did not pass on, each refusal said for the workflow's log.
-func release(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, also string) error {
+func release(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, also string, ran []string) error {
 	t, err := trees(ctx, sha)
 	if err != nil {
 		return err
@@ -307,6 +316,15 @@ func release(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, wor
 		return err
 	}
 	answer, found := proven.Answer(ctx, runs, sha, t, events, trees)
+	// A pass that left a lane out answers for no tree a release is cut from.
+	if found && answer.Passed() {
+		if ok, missing, err := ranAll(ctx, gh, answer, ran); err != nil {
+			return err
+		} else if !ok {
+			fmt.Printf("%s passed on %s's tree without running %s (%s): not a release's proof\n", workflow, sha, missing, answer.URL)
+			return errRefused
+		}
+	}
 	var alsoRuns []proven.Run
 	if also != "" {
 		all, err := gh.Runs(ctx, also, url.Values{"head_sha": {sha}}, limit)
@@ -513,4 +531,26 @@ func appendTo(path, text string) error {
 		return err
 	}
 	return f.Close()
+}
+
+// ranAll is whether run ran each of ran's jobs to success (proven.Ran); asked nothing, it is, and
+// nothing is fetched.
+func ranAll(ctx context.Context, gh proven.GitHub, run proven.Run, ran []string) (bool, string, error) {
+	if len(ran) == 0 {
+		return true, "", nil
+	}
+	jobs, err := gh.Jobs(ctx, run.ID)
+	if err != nil {
+		return false, "", err
+	}
+	ok, missing := proven.Ran(jobs, ran)
+	return ok, missing, nil
+}
+
+// lanes is -ran's list: none when it is empty.
+func lanes(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }

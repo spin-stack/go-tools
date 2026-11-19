@@ -96,7 +96,7 @@ func setup(t *testing.T) *fixture {
 		case "/repos/o/r/actions/workflows/kvm.yml/runs":
 			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": f.kvm})
 		case "/repos/o/r/actions/runs/4/jobs":
-			_, _ = w.Write([]byte(`{"jobs": [{"id": 41, "name": "short"}, {"id": 42, "name": "e2e-verify:1/1", "html_url": "j42", "labels": ["runs-on/fleet=kvm"]}]}`))
+			_, _ = w.Write([]byte(`{"jobs": [{"id": 41, "name": "short", "conclusion": "success"}, {"id": 42, "name": "e2e-verify:1/1", "conclusion": "success", "html_url": "j42", "labels": ["runs-on/fleet=kvm"]}]}`))
 		case "/repos/o/r/actions/runs/6/jobs":
 			_, _ = w.Write([]byte(`{"jobs": []}`))
 		case "/repos/o/r/actions/runs/3/jobs":
@@ -455,4 +455,32 @@ func TestAnOutputReachesTheWorkflow(t *testing.T) {
 	require.Error(t, output("a", "1"))
 	t.Setenv("GITHUB_OUTPUT", filepath.Join(t.TempDir(), "none", "output"))
 	require.Error(t, output("a", "1"))
+}
+
+// A gate that left a lane out still passes; asked for the lanes it must have run, a tree it
+// passed on is proven only when it ran them, so kvm.yml and a release run what it skipped.
+func TestTreeIsProvenOnlyByARunOfTheLanesAsked(t *testing.T) {
+	f := setup(t)
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"tree", "-sha", f.main[1], "-ran", "e2e-verify,short"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree: u4: what that run ran is not run again\nproven=true\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"tree", "-sha", f.main[1], "-ran", "e2e-verify,e2e-suites"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree without running e2e-suites (u4): every lane\nproven=false\n", out)
+}
+
+// A release is cut from a tree its gate ran every lane on: a pass that left one out is refused.
+func TestReleaseIsRefusedOnAPassThatLeftALaneOut(t *testing.T) {
+	f := setup(t)
+	f.kvm = []ciRun{{ID: 9, HeadSHA: f.main[1], Event: "push", Status: "completed", Conclusion: "success", URL: "k9"}}
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1], "-ran", "e2e-verify"}) })
+	require.NoError(t, err)
+	assert.Contains(t, out, "kvm.yml passed on "+f.main[1])
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1], "-ran", "e2e-suites"}) })
+	require.ErrorIs(t, err, errRefused)
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree without running e2e-suites (u4): not a release's proof\n", out)
 }
