@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,10 +50,19 @@ type ciRun struct {
 // commit; whose kvm.yml is as the test says; and whose one e2e-verify job logged two tests. The
 // command is run in the clone, as the workflow's environment has it.
 type fixture struct {
-	main    []string // main, main~1, main~2
-	pr      string
-	kvm     []ciRun
-	newer   []ciRun // ci.yml's runs newer than the fixture's own, run 7's jobs a pointer's
+	main  []string // main, main~1, main~2
+	pr    string
+	kvm   []ciRun
+	newer []ciRun // ci.yml's runs newer than the fixture's own, run 7's jobs a pointer's
+	// dispatched is the conclusion of the kvm.yml run a dispatch starts, on dispatchedOn.
+	dispatched   string
+	dispatchedOn string
+	// lag is how many asks for kvm.yml's runs after a dispatch do not list its run yet, as
+	// GitHub's do not for a few seconds.
+	lag   int
+	later []ciRun
+	// ciSkips is a ci.yml dispatch the API takes, its run skipping every lane; without it, refused.
+	ciSkips bool
 	asked   []string
 	api     string // the test server
 	archive []byte // run 6's artifact, a zip of a lane's logs
@@ -96,6 +106,13 @@ func setup(t *testing.T) *fixture {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": runs})
 		case "/repos/o/r/actions/workflows/kvm.yml/runs":
+			if f.later != nil {
+				if f.lag == 0 {
+					f.kvm, f.later = append(f.later, f.kvm...), nil
+				} else {
+					f.lag--
+				}
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": f.kvm})
 		case "/repos/o/r/actions/runs/4/jobs":
 			_, _ = w.Write([]byte(`{"jobs": [{"id": 41, "name": "short", "conclusion": "success"}, {"id": 42, "name": "e2e-verify:1/1", "conclusion": "success", "html_url": "j42", "labels": ["runs-on/fleet=kvm"]}]}`))
@@ -111,7 +128,7 @@ func setup(t *testing.T) *fixture {
 		case "/repos/o/r/actions/jobs/31/logs":
 			_, _ = w.Write([]byte("--- PASS: TestA (1.40s)\n--- FAIL: TestB (2s)\n"))
 		default:
-			if f.flakesAPI(w, r) {
+			if f.flakesAPI(w, r) || f.dispatchAPI(w, r) {
 				return
 			}
 			// A commit the clone has not: its tree is never the one asked about.
@@ -487,7 +504,7 @@ func TestReleaseIsRefusedOnAPassThatLeftALaneOut(t *testing.T) {
 
 	out = stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1], "-ran", "e2e-suites"}) })
 	require.ErrorIs(t, err, errRefused)
-	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree without running e2e-suites (u4): not a release's proof\n", out)
+	assert.Equal(t, "::error::ci.yml passed on "+f.main[1]+"'s tree without running e2e-suites (u4): not a release's proof\nkvm.yml passed on "+f.main[1]+": k9\n", out)
 }
 
 // A run that failed is asked nothing of its lanes: it proves nothing either way, and says why as
@@ -555,4 +572,120 @@ func TestAPassThatRanNoLaneAnswersWithTheRunItPointsAt(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "main moved since "+f.main[1]+" (u4); every lane, mutate against it\nbase="+f.main[1]+"\n", out)
+}
+
+// Given -wait, a release makes the answer it is missing: kvm.yml never ran on the commit, so it
+// is dispatched on main, once, and the verdict is asked again when that run has finished.
+func TestReleaseDispatchesTheAnswerItIsMissing(t *testing.T) {
+	f := setup(t)
+	fastPoll(t)
+	f.dispatched, f.dispatchedOn = "success", f.main[1]
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1], "-wait", "1m"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "kvm.yml has no answer on "+f.main[1]+": dispatched on main, waiting for it up to 1m0s\nci.yml passed on "+f.main[1]+"'s tree: u4\nkvm.yml passed on "+f.main[1]+": k99\n", out)
+}
+
+// A run that failed is not missing: it is never dispatched again, and the release is refused once
+// what was missing has answered. The gate failed on main's tree; kvm.yml, dispatched, failed too.
+func TestReleaseNeverDispatchesARunThatFailed(t *testing.T) {
+	f := setup(t)
+	fastPoll(t)
+	f.dispatched, f.dispatchedOn = "failure", f.main[0]
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[0], "-wait", "1m"}) })
+	require.ErrorIs(t, err, errRefused)
+	assert.Equal(t, "kvm.yml has no answer on "+f.main[0]+": dispatched on main, waiting for it up to 1m0s\n::error::ci.yml did not pass on "+f.main[0]+"'s tree (failure): u6\n::error::kvm.yml did not pass on "+f.main[0]+" (failure): k99\n", out)
+	assert.NotContains(t, f.asked, "/repos/o/r/actions/workflows/ci.yml/dispatches")
+}
+
+// A run still going is waited for, until -wait is up: then the release is refused with what it saw.
+func TestReleaseWaitsForARunStillGoingUntilTheWaitIsUp(t *testing.T) {
+	f := setup(t)
+	fastPoll(t)
+	f.kvm = []ciRun{{ID: 9, HeadSHA: f.main[1], Event: "push", Status: "in_progress", URL: "k9"}}
+	var err error
+	start := time.Now()
+	out := stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1], "-wait", "50ms"}) })
+	require.ErrorIs(t, err, errRefused)
+	assert.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond, "it waited")
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree: u4\n::error::kvm.yml is still running on "+f.main[1]+" (in_progress): release once it has passed: k9\n", out)
+}
+
+// fastPoll asks again at once while the test lasts.
+func fastPoll(t *testing.T) {
+	t.Helper()
+	was := poll
+	poll = time.Millisecond
+	t.Cleanup(func() { poll = was })
+}
+
+// GitHub lists a dispatched run a few seconds after the dispatch, and the commit may have runs of
+// the workflow that answer nothing - kvm.yml's schedule run: release waits for the run its dispatch
+// started, told apart from the ones before it.
+func TestReleaseWaitsForTheRunItsDispatchStarted(t *testing.T) {
+	f := setup(t)
+	fastPoll(t)
+	f.kvm = []ciRun{{ID: 8, HeadSHA: f.main[1], Event: "schedule", Status: "completed", Conclusion: "success", URL: "k8"}}
+	f.dispatched, f.dispatchedOn, f.lag = "success", f.main[1], 2
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1], "-wait", "1m"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "kvm.yml has no answer on "+f.main[1]+": dispatched on main, waiting for it up to 1m0s\nci.yml passed on "+f.main[1]+"'s tree: u4\nkvm.yml passed on "+f.main[1]+": k99\n", out)
+}
+
+// A dispatch GitHub refuses stops the release with what it said.
+func TestReleaseStopsOnARefusedDispatch(t *testing.T) {
+	f := setup(t)
+	f.kvm = []ciRun{{ID: 9, HeadSHA: f.main[1], Event: "push", Status: "completed", Conclusion: "success", URL: "k9"}}
+	err := run(t.Context(), []string{"release", "-sha", f.main[1], "-ran", "e2e-suites", "-wait", "1m"})
+	require.ErrorContains(t, err, "422")
+	require.ErrorContains(t, err, "no ci.yml dispatch is asked in these tests")
+}
+
+// A dispatched run that finished and still answers nothing - ci.yml on main skipping the lanes
+// again - is not waited on: the release is refused at once, not when the wait is up.
+func TestReleaseIsRefusedWhenItsDispatchAnsweredNothing(t *testing.T) {
+	f := setup(t)
+	fastPoll(t)
+	f.ciSkips = true
+	f.kvm = []ciRun{{ID: 9, HeadSHA: f.main[1], Event: "push", Status: "completed", Conclusion: "success", URL: "k9"}}
+	var err error
+	start := time.Now()
+	out := stdout(t, func() {
+		err = run(t.Context(), []string{"release", "-sha", f.main[1], "-ran", "e2e-suites", "-wait", "1h"})
+	})
+	require.ErrorIs(t, err, errRefused)
+	assert.Less(t, time.Since(start), time.Minute, "not the hour")
+	assert.Equal(t, "ci.yml has no answer on "+f.main[1]+": dispatched on main, waiting for it up to 1h0m0s\n::error::ci.yml passed on "+f.main[1]+"'s tree without running e2e-suites (u7): not a release's proof\nkvm.yml passed on "+f.main[1]+": k9\n", out)
+}
+
+// dispatchAPI answers a dispatch of kvm.yml, whose run f.later holds until f.lag asks have passed,
+// and of ci.yml, taken only when f.ciSkips. False for anything else.
+func (f *fixture) dispatchAPI(w http.ResponseWriter, r *http.Request) bool {
+	switch r.URL.Path {
+	case "/repos/o/r/actions/workflows/kvm.yml/dispatches":
+		// The run a dispatch starts, already finished as f.dispatched says. Anything but a POST
+		// on main is refused, and the release says so.
+		var body struct {
+			Ref string `json:"ref"`
+		}
+		if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil || body.Ref != "main" {
+			http.Error(w, "a dispatch is a POST on main", http.StatusBadRequest)
+			return true
+		}
+		f.later = []ciRun{{ID: 99, HeadSHA: f.dispatchedOn, Event: "workflow_dispatch", Status: "completed", Conclusion: f.dispatched, URL: "k99"}}
+		w.WriteHeader(http.StatusNoContent)
+	case "/repos/o/r/actions/workflows/ci.yml/dispatches":
+		if !f.ciSkips {
+			http.Error(w, "no ci.yml dispatch is asked in these tests", http.StatusUnprocessableEntity)
+			return true
+		}
+		// The run it starts skips every lane, as ci.yml on main does when its tree passed.
+		f.newer = append(f.newer, ciRun{ID: 7, HeadSHA: f.main[1], HeadBranch: "main", Event: "workflow_dispatch", Status: "completed", Conclusion: "success", URL: "u7"})
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		return false
+	}
+	return true
 }

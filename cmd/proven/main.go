@@ -26,6 +26,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spin-stack/go-tools/internal/proven"
 )
@@ -76,7 +77,8 @@ func run(ctx context.Context, argv []string) error {
 	events := fs.String("events", "schedule,workflow_dispatch", "the events whose runs answer for a tree, comma-separated")
 	limit := fs.Int("limit", 40, "how many of the newest runs are asked")
 	ref := fs.String("ref", os.Getenv("GITHUB_REF"), "base: the run's ref; a run not on -main is of its branch against main")
-	mainBranch := fs.String("main", "main", "base: the branch whose history is the base's")
+	mainBranch := fs.String("main", "main", "base: the branch whose history is the base's; release: the ref a missing answer is dispatched on")
+	wait := fs.Duration("wait", 0, "release: dispatch each workflow with no answer on the commit and wait this long for the answers; 0 refuses at once")
 	depth := fs.Int("depth", 200, "base: how far back in main's first-parent history a passed run is looked for") // mutate-exempt: a default, as deep as a day on main goes
 	also := fs.String("also", "kvm.yml", "release: the workflow that runs on every push to main, asked of the commit itself; empty is none")
 	jobs := fs.String("jobs", "e2e-verify", "times: the jobs whose logs hold the tests' times, by the start of their name")
@@ -111,7 +113,7 @@ func run(ctx context.Context, argv []string) error {
 	case "base":
 		return base(ctx, gh, trees, *sha, *ref, *mainBranch, *workflow, ev, *limit, *depth, lanes(*ran))
 	case "release":
-		return release(ctx, gh, trees, *sha, *workflow, ev, *limit, *also, lanes(*ran))
+		return release(ctx, gh, trees, *sha, *workflow, ev, *limit, *also, lanes(*ran), *mainBranch, *wait)
 	case "times":
 		return times(ctx, gh, *workflow, *jobs, *limit)
 	case "flakes":
@@ -193,7 +195,7 @@ func tests(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workf
 		answering = append(answering, evidenceRun{Workflow: workflow, ID: answer.ID, URL: answer.URL, Conclusion: answer.Conclusion, Head: answer.HeadSHA})
 	}
 	if also != "" {
-		alsoRuns, err := gh.Runs(ctx, also, url.Values{"head_sha": {sha}}, limit)
+		alsoRuns, err := gh.Runs(ctx, also, onCommit(sha), limit)
 		if err != nil {
 			return err
 		}
@@ -317,29 +319,101 @@ func base(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, ref, m
 }
 
 // release refuses a commit the gates did not pass on, each refusal said for the workflow's log.
-func release(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, also string, ran []string) error {
+// Given wait, it first makes the answers that are missing: each workflow with none on the commit
+// is dispatched on mainBranch, once, and the verdict is asked again when that run and any run of
+// also still going have finished, until wait is up. A run that failed is never dispatched again.
+func release(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, also string, ran []string, mainBranch string, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	// Each workflow dispatched: the runs it had on the commit before, so its new one is told apart.
+	before := map[string]map[int64]bool{}
+	for {
+		// Before the verdict: a run that finishes between the two is then in the verdict, rather
+		// than done and still missing from it.
+		done := map[string]bool{}
+		for w, seen := range before {
+			d, err := dispatchedDone(ctx, gh, w, sha, limit, seen)
+			if err != nil {
+				return err
+			}
+			done[w] = d
+		}
+		v, err := verdict(ctx, gh, trees, sha, workflow, events, limit, also, ran)
+		if err != nil {
+			return err
+		}
+		waiting := false
+		if wait > 0 && !v.OK { // mutate-exempt: a wait of a nanosecond is no wait anyone asks for
+			if waiting, err = dispatchMissing(ctx, gh, v, before, done, sha, mainBranch, limit, wait); err != nil {
+				return err
+			}
+		}
+		if !waiting || !time.Now().Before(deadline) {
+			for _, line := range v.Lines {
+				fmt.Println(line)
+			}
+			if !v.OK {
+				return errRefused
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+}
+
+// dispatchMissing dispatches each workflow v is missing that was not dispatched yet, recording in
+// before its runs on the commit until then, and says whether an answer is still coming: a run of
+// also still going, a dispatch just made, or a dispatched run not finished.
+func dispatchMissing(ctx context.Context, gh proven.GitHub, v proven.Verdict, before map[string]map[int64]bool, done map[string]bool, sha, mainBranch string, limit int, wait time.Duration) (bool, error) {
+	waiting := v.Running
+	for _, w := range v.Missing {
+		if _, sent := before[w]; sent {
+			// Its run finished and it is still missing: the run answered nothing (a gate on main
+			// that skipped its lanes again), and waiting more changes nothing.
+			waiting = waiting || !done[w]
+			continue
+		}
+		seen, err := runsOn(ctx, gh, w, sha, limit)
+		if err != nil {
+			return false, err
+		}
+		if err := gh.Dispatch(ctx, w, mainBranch); err != nil {
+			return false, err
+		}
+		before[w] = seen
+		fmt.Printf("%s has no answer on %s: dispatched on %s, waiting for it up to %s\n", w, sha, mainBranch, wait)
+		waiting = true
+	}
+	return waiting, nil
+}
+
+// poll is how often release asks again while it waits: a lane takes minutes, and every ask is a
+// few API calls.
+var poll = 30 * time.Second
+
+// verdict is the release's verdict now: the gate's answer for the tree (proof), and also's runs on
+// the commit from a push or a dispatch.
+func verdict(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, also string, ran []string) (proven.Verdict, error) {
 	t, err := trees(ctx, sha)
 	if err != nil {
-		return err
+		return proven.Verdict{}, err
 	}
 	runs, err := gh.Runs(ctx, workflow, completed, limit)
 	if err != nil {
-		return err
+		return proven.Verdict{}, err
 	}
-	answer, found, missing, err := proof(ctx, gh, runs, sha, t, events, trees, ran)
+	answer, found, left, err := proof(ctx, gh, runs, sha, t, events, trees, ran)
 	if err != nil {
-		return err
-	}
-	// A pass that left a lane out answers for no tree a release is cut from.
-	if missing != "" {
-		fmt.Printf("%s passed on %s's tree without running %s (%s): not a release's proof\n", workflow, sha, missing, answer.URL)
-		return errRefused
+		return proven.Verdict{}, err
 	}
 	var alsoRuns []proven.Run
 	if also != "" {
-		all, err := gh.Runs(ctx, also, url.Values{"head_sha": {sha}}, limit)
+		all, err := gh.Runs(ctx, also, onCommit(sha), limit)
 		if err != nil {
-			return err
+			return proven.Verdict{}, err
 		}
 		for _, r := range all {
 			if r.Event == "push" || r.Event == "workflow_dispatch" {
@@ -347,14 +421,38 @@ func release(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, wor
 			}
 		}
 	}
-	v := proven.Judge(sha, workflow, answer, found, also, alsoRuns)
-	for _, line := range v.Lines {
-		fmt.Println(line)
+	return proven.Judge(sha, workflow, answer, found, left, also, alsoRuns), nil
+}
+
+// onCommit is the runs query for the commit's own runs.
+func onCommit(sha string) url.Values { return url.Values{"head_sha": {sha}} }
+
+// runsOn is the ids of workflow's runs on the commit, whatever their state.
+func runsOn(ctx context.Context, gh proven.GitHub, workflow, sha string, limit int) (map[int64]bool, error) {
+	runs, err := gh.Runs(ctx, workflow, onCommit(sha), limit)
+	if err != nil {
+		return nil, err
 	}
-	if !v.OK {
-		return errRefused
+	ids := map[int64]bool{}
+	for _, r := range runs {
+		ids[r.ID] = true
 	}
-	return nil
+	return ids, nil
+}
+
+// dispatchedDone is whether the run a dispatch started on the commit - one not among seen - has
+// finished. None yet is not done: GitHub lists a dispatched run a few seconds after the dispatch.
+func dispatchedDone(ctx context.Context, gh proven.GitHub, workflow, sha string, limit int, seen map[int64]bool) (bool, error) {
+	runs, err := gh.Runs(ctx, workflow, onCommit(sha), limit)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range runs {
+		if !seen[r.ID] {
+			return r.Status == "completed", nil
+		}
+	}
+	return false, nil
 }
 
 // times is each test's time from the newest of the last limit runs that passed whose jobs' logs

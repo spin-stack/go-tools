@@ -1,6 +1,7 @@
 package proven
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,39 @@ func (g GitHub) Runs(ctx context.Context, workflow string, query url.Values, lim
 		return nil, err
 	}
 	return page.Runs, nil
+}
+
+// Dispatch starts a run of workflow (its file name) on ref, as its workflow_dispatch: the API
+// answers 204 with no body and no run id, so the run is found afterwards among the commit's.
+func (g GitHub) Dispatch(ctx context.Context, workflow, ref string) error {
+	u := g.API + "/repos/" + g.Repo + "/actions/workflows/" + workflow + "/dispatches"
+	body, err := json.Marshal(map[string]string{"ref": ref})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	if g.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+g.Token)
+	}
+	client := g.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }() // read-only
+	if resp.StatusCode != http.StatusNoContent {
+		said, _ := io.ReadAll(io.LimitReader(resp.Body, 512)) // mutate-exempt: how much of a refusal is quoted
+		return fmt.Errorf("POST %s: %s: %s", u, resp.Status, strings.TrimSpace(string(said)))
+	}
+	return nil
 }
 
 // Tree is the tree of the commit sha.

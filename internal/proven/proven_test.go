@@ -120,6 +120,7 @@ func TestARelease(t *testing.T) {
 	for name, tc := range map[string]struct {
 		answer proven.Run
 		found  bool
+		left   string
 		also   string
 		runs   []proven.Run
 		want   proven.Verdict
@@ -131,7 +132,12 @@ func TestARelease(t *testing.T) {
 		},
 		"the gate never ran on the tree": {
 			also: "kvm.yml", runs: []proven.Run{{Status: "completed", Conclusion: "success", URL: "kvm-ok"}},
-			want: proven.Verdict{Lines: []string{"::error::ci.yml never finished on abc's tree: dispatch it on main (or on the branch it came from)", "kvm.yml passed on abc: kvm-ok"}},
+			want: proven.Verdict{Missing: []string{"ci.yml"}, Lines: []string{"::error::ci.yml never finished on abc's tree: dispatch it on main (or on the branch it came from)", "kvm.yml passed on abc: kvm-ok"}},
+		},
+		"the gate's pass left a lane out": {
+			answer: passed, found: true, left: "checks", also: "kvm.yml",
+			runs: []proven.Run{{Status: "completed", Conclusion: "success", URL: "kvm-ok"}},
+			want: proven.Verdict{Missing: []string{"ci.yml"}, Lines: []string{"::error::ci.yml passed on abc's tree without running checks (ci-ok): not a release's proof", "kvm.yml passed on abc: kvm-ok"}},
 		},
 		"the gate failed": {
 			answer: failed, found: true, also: "kvm.yml",
@@ -140,7 +146,7 @@ func TestARelease(t *testing.T) {
 		},
 		"the second never ran": {
 			answer: passed, found: true, also: "kvm.yml",
-			want: proven.Verdict{Lines: []string{"ci.yml passed on abc's tree: ci-ok", "::error::kvm.yml never ran on abc from a push to main: a release is made from a commit main tested"}},
+			want: proven.Verdict{Missing: []string{"kvm.yml"}, Lines: []string{"ci.yml passed on abc's tree: ci-ok", "::error::kvm.yml never ran on abc from a push to main: a release is made from a commit main tested"}},
 		},
 		"the second failed": {
 			answer: passed, found: true, also: "kvm.yml",
@@ -150,7 +156,7 @@ func TestARelease(t *testing.T) {
 		"the second is still running": {
 			answer: passed, found: true, also: "kvm.yml",
 			runs: []proven.Run{{Status: "in_progress", URL: "kvm-run"}},
-			want: proven.Verdict{Lines: []string{"ci.yml passed on abc's tree: ci-ok", "::error::kvm.yml is still running on abc (in_progress): release once it has passed: kvm-run"}},
+			want: proven.Verdict{Running: true, Lines: []string{"ci.yml passed on abc's tree: ci-ok", "::error::kvm.yml is still running on abc (in_progress): release once it has passed: kvm-run"}},
 		},
 		"the gate alone": {
 			answer: passed, found: true,
@@ -158,7 +164,7 @@ func TestARelease(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, proven.Judge("abc", "ci.yml", tc.answer, tc.found, tc.also, tc.runs))
+			assert.Equal(t, tc.want, proven.Judge("abc", "ci.yml", tc.answer, tc.found, tc.left, tc.also, tc.runs))
 		})
 	}
 }
