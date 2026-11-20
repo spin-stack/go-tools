@@ -119,19 +119,31 @@ func Base(ctx context.Context, main []Commit, passed []Run, trees Trees) (Commit
 type Verdict struct {
 	Lines []string
 	OK    bool
+	// Missing is each workflow with no answer on the commit: never run there, or the gate's pass
+	// left a lane out. A run of it, dispatched now, answers. A run that failed is not missing:
+	// running it again until it passes would hide what it found.
+	Missing []string
+	// Running is the second workflow still running on the commit: its answer is coming.
+	Running bool
 }
 
 // Judge is a release's verdict over the gate's answer for the commit's tree - the run, or none -
 // and the runs of a second workflow on the commit itself (newest first), when there is one: the
 // lanes that run on every push to main, whose newest run on the commit is the answer, since a
 // re-run replaces a conclusion and a run cancelled for want of a machine is dispatched again.
-func Judge(sha, workflow string, answer Run, found bool, also string, alsoRuns []Run) Verdict {
+// left is the lane the gate's pass did not run, empty when it ran them all.
+func Judge(sha, workflow string, answer Run, found bool, left, also string, alsoRuns []Run) Verdict {
 	var v Verdict
 	v.OK = true
 	switch {
 	case !found:
 		v.OK = false
+		v.Missing = append(v.Missing, workflow)
 		v.Lines = append(v.Lines, "::error::"+workflow+" never finished on "+sha+"'s tree: dispatch it on main (or on the branch it came from)")
+	case left != "":
+		v.OK = false
+		v.Missing = append(v.Missing, workflow)
+		v.Lines = append(v.Lines, "::error::"+workflow+" passed on "+sha+"'s tree without running "+left+" ("+answer.URL+"): not a release's proof")
 	case answer.Conclusion != success:
 		v.OK = false
 		v.Lines = append(v.Lines, "::error::"+workflow+" did not pass on "+sha+"'s tree ("+answer.Conclusion+"): "+answer.URL)
@@ -144,6 +156,7 @@ func Judge(sha, workflow string, answer Run, found bool, also string, alsoRuns [
 	switch {
 	case len(alsoRuns) == 0:
 		v.OK = false
+		v.Missing = append(v.Missing, also)
 		v.Lines = append(v.Lines, "::error::"+also+" never ran on "+sha+" from a push to main: a release is made from a commit main tested")
 	case alsoRuns[0].Passed():
 		v.Lines = append(v.Lines, also+" passed on "+sha+": "+alsoRuns[0].URL)
@@ -152,6 +165,7 @@ func Judge(sha, workflow string, answer Run, found bool, also string, alsoRuns [
 		v.Lines = append(v.Lines, "::error::"+also+" did not pass on "+sha+" ("+alsoRuns[0].Conclusion+"): "+alsoRuns[0].URL)
 	default:
 		v.OK = false
+		v.Running = true
 		v.Lines = append(v.Lines, "::error::"+also+" is still running on "+sha+" ("+alsoRuns[0].Status+"): release once it has passed: "+alsoRuns[0].URL)
 	}
 	return v

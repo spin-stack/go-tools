@@ -49,6 +49,13 @@ lanes it left out. `-ran e2e-verify,e2e-suites` asks for them: the run that answ
 tree only when it ran a job whose name starts with each, and every such job succeeded - one left
 out, skipped or failed makes the answer `proven=false`, and its line names the lane it lacked.
 
+A pass that ran fewer lanes is passed over for an older run on the same tree, because a pass can
+point elsewhere: a gate on main skips every lane when another run already passed on its tree, and
+still concludes success. The answer is the newest run that failed or ran them all; only when no
+run on the tree did is it the newest pass, refused for the lane it left out. `release`, `tests`
+and `base` take `-ran` the same way, and `base` then takes no pass that left a lane out as main's
+proof.
+
 ## base
 
 ```yaml title=".github/workflows/ci.yml"
@@ -81,9 +88,15 @@ on its pull request's branch as the same tree.
 Refuses (exits 1) a commit the gate did not pass on, by tree, and a commit the lanes that run on
 every push to main (`-also`, `kvm.yml`; empty asks only the gate) did not pass on, by sha: their
 newest run on it, since a re-run replaces a conclusion and a run cancelled for want of a machine
-is dispatched again. Each answer is a line, the refusals as `::error::` for the job's log. A commit
-no run reached is released by dispatching the gate on main first. `-ran` is `tree`'s: a pass that
-left one of its lanes out is refused as a release's proof.
+is dispatched again. Each answer is a line, the refusals as `::error::` for the job's log. `-ran` is
+`tree`'s: a pass that left one of its lanes out is refused as a release's proof.
+
+`-wait 2h` makes the answers a release is missing instead of refusing for them. A workflow with no
+answer on the commit - never run there, or the gate's pass left a lane out - is dispatched on
+`-main`, once, and the verdict is asked again every 30 seconds until that run, and any run of
+`-also` still going on the commit, has finished, or the wait is up. A run that failed is never
+dispatched again: running it until it passes would hide what it found, so a failure refuses as
+it did. The job needs `actions: write` to dispatch.
 
 ## times
 
