@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -51,6 +52,7 @@ type fixture struct {
 	main    []string // main, main~1, main~2
 	pr      string
 	kvm     []ciRun
+	newer   []ciRun // ci.yml's runs newer than the fixture's own, run 7's jobs a pointer's
 	asked   []string
 	api     string // the test server
 	archive []byte // run 6's artifact, a zip of a lane's logs
@@ -82,12 +84,12 @@ func setup(t *testing.T) *fixture {
 		case "/repos/o/r/actions/workflows/ci.yml/runs":
 			// As the API filters: status=success is the passed runs, status=completed every finished one.
 			var runs []ciRun
-			for _, run := range []ciRun{
+			for _, run := range append(slices.Clone(f.newer), []ciRun{
 				{ID: 6, HeadSHA: f.main[0], HeadBranch: "main", Event: "schedule", Status: "completed", Conclusion: "failure", URL: "u6"},
 				{ID: 5, HeadSHA: "elsewhere", Event: "schedule", Status: "completed", Conclusion: "cancelled", URL: "u5"},
 				{ID: 4, HeadSHA: f.pr, Event: "workflow_dispatch", Status: "completed", Conclusion: "success", URL: "u4"},
 				{ID: 3, HeadSHA: f.main[2], Event: "schedule", Status: "completed", Conclusion: "success", URL: "u3"},
-			} {
+			}...) {
 				if r.URL.Query().Get("status") != "success" || run.Conclusion == "success" {
 					runs = append(runs, run)
 				}
@@ -97,6 +99,9 @@ func setup(t *testing.T) *fixture {
 			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": f.kvm})
 		case "/repos/o/r/actions/runs/4/jobs":
 			_, _ = w.Write([]byte(`{"jobs": [{"id": 41, "name": "short", "conclusion": "success"}, {"id": 42, "name": "e2e-verify:1/1", "conclusion": "success", "html_url": "j42", "labels": ["runs-on/fleet=kvm"]}]}`))
+		case "/repos/o/r/actions/runs/7/jobs":
+			// ci.yml on main when another run passed on its tree: the plan, and every lane skipped.
+			_, _ = w.Write([]byte(`{"jobs": [{"id": 71, "name": "What to run", "conclusion": "success"}, {"id": 72, "name": "e2e-verify:1/1", "conclusion": "skipped"}]}`))
 		case "/repos/o/r/actions/runs/6/jobs":
 			_, _ = w.Write([]byte(`{"jobs": []}`))
 		case "/repos/o/r/actions/runs/3/jobs":
@@ -499,4 +504,55 @@ func TestAFailedRunIsNotAskedWhichLanesItRan(t *testing.T) {
 	})
 	require.ErrorIs(t, err, errRefused)
 	assert.Equal(t, "::error::ci.yml did not pass on "+f.main[0]+"'s tree (failure): u6\n", out)
+}
+
+// ci.yml on main skips every lane when another run passed on its tree, and concludes success. That
+// pass points at the older run: tree, release and tests answer with the run that ran the lanes,
+// and base takes no pass that left a lane out as main's proof.
+func TestAPassThatRanNoLaneAnswersWithTheRunItPointsAt(t *testing.T) {
+	f := setup(t)
+	f.newer = []ciRun{{ID: 7, HeadSHA: f.main[1], HeadBranch: "main", Event: "schedule", Status: "completed", Conclusion: "success", URL: "u7"}}
+	f.kvm = []ciRun{{ID: 9, HeadSHA: f.main[1], Event: "push", Status: "completed", Conclusion: "success", URL: "k9"}}
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"release", "-sha", f.main[1], "-ran", "e2e-verify"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree: u4\nkvm.yml passed on "+f.main[1]+": k9\n", out)
+
+	out = stdout(t, func() { err = run(t.Context(), []string{"tree", "-sha", f.main[1], "-ran", "e2e-verify"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on "+f.main[1]+"'s tree: u4: what that run ran is not run again\nproven=true\n", out)
+
+	file := filepath.Join(t.TempDir(), "tests.json")
+	stdout(t, func() {
+		err = run(t.Context(), []string{"tests", "-sha", f.main[1], "-also", "", "-ran", "e2e-verify", "-out", file})
+	})
+	require.NoError(t, err)
+	raw, err := os.ReadFile(file)
+	require.NoError(t, err)
+	var got evidence
+	require.NoError(t, json.Unmarshal(raw, &got))
+	assert.Equal(t, []evidenceRun{{Workflow: "ci.yml", ID: 4, URL: "u4", Conclusion: "success", Head: f.pr}}, got.Runs)
+
+	// The run just behind the pointer is asked next: one that failed on the tree refuses.
+	f.newer = append(f.newer, ciRun{ID: 8, HeadSHA: f.main[1], HeadBranch: "main", Event: "workflow_dispatch", Status: "completed", Conclusion: "failure", URL: "u8"})
+	out = stdout(t, func() {
+		err = run(t.Context(), []string{"release", "-sha", f.main[1], "-also", "", "-ran", "e2e-verify"})
+	})
+	require.ErrorIs(t, err, errRefused)
+	assert.Equal(t, "::error::ci.yml did not pass on "+f.main[1]+"'s tree (failure): u8\n", out)
+	f.newer = f.newer[:1]
+
+	// Without -ran a pass is a pass, the pointer's included: main is proven by it.
+	f.newer[0].HeadSHA = f.main[0]
+	out = stdout(t, func() {
+		err = run(t.Context(), []string{"base", "-sha", f.main[0], "-ref", "refs/heads/main"})
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "ci.yml passed on main's tree: u7\nproven=true\n", out)
+
+	out = stdout(t, func() {
+		err = run(t.Context(), []string{"base", "-sha", f.main[0], "-ref", "refs/heads/main", "-ran", "e2e-verify"})
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "main moved since "+f.main[1]+" (u4); every lane, mutate against it\nbase="+f.main[1]+"\n", out)
 }

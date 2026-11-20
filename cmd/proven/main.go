@@ -80,7 +80,7 @@ func run(ctx context.Context, argv []string) error {
 	depth := fs.Int("depth", 200, "base: how far back in main's first-parent history a passed run is looked for") // mutate-exempt: a default, as deep as a day on main goes
 	also := fs.String("also", "kvm.yml", "release: the workflow that runs on every push to main, asked of the commit itself; empty is none")
 	jobs := fs.String("jobs", "e2e-verify", "times: the jobs whose logs hold the tests' times, by the start of their name")
-	ran := fs.String("ran", "", "tree, release: the jobs, by the start of their name and comma-separated, a run that passed must have run to success to answer for a tree; a gate that left one out proves nothing of it")
+	ran := fs.String("ran", "", "tree, release, tests, base: the jobs, by the start of their name and comma-separated, a run that passed must have run to success to answer for a tree; a gate that left one out proves nothing of it, and an older run on the tree is asked")
 	out := fs.String("out", "", "tests: the file the JSON is written to; stdout when empty")
 	if err := fs.Parse(argv[1:]); err != nil {
 		return err
@@ -109,7 +109,7 @@ func run(ctx context.Context, argv []string) error {
 	case "tree":
 		return tree(ctx, gh, trees, *sha, *workflow, ev, *limit, lanes(*ran))
 	case "base":
-		return base(ctx, gh, trees, *sha, *ref, *mainBranch, *workflow, ev, *limit, *depth)
+		return base(ctx, gh, trees, *sha, *ref, *mainBranch, *workflow, ev, *limit, *depth, lanes(*ran))
 	case "release":
 		return release(ctx, gh, trees, *sha, *workflow, ev, *limit, *also, lanes(*ran))
 	case "times":
@@ -121,7 +121,7 @@ func run(ctx context.Context, argv []string) error {
 		}
 		return flakes(ctx, gh, trees, workflows, *limit)
 	case "tests":
-		return tests(ctx, gh, trees, *sha, *workflow, ev, *limit, *also, *out)
+		return tests(ctx, gh, trees, *sha, *workflow, ev, *limit, *also, *out, lanes(*ran))
 	}
 	return fmt.Errorf("no command %q; one of tree, base, release, times, flakes, tests", argv[0])
 }
@@ -175,7 +175,7 @@ type evidenceJob struct {
 // on the commit's tree, as tree finds it, and the newest run of -also on the commit, as release
 // does. A job whose log the API no longer holds says nothing (proven.ErrGone); the runs are in
 // the record whether they logged any test or not, so a reader sees what answered.
-func tests(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, also, out string) error {
+func tests(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workflow string, events []string, limit int, also, out string, ran []string) error {
 	t, err := trees(ctx, sha)
 	if err != nil {
 		return err
@@ -184,8 +184,12 @@ func tests(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workf
 	if err != nil {
 		return err
 	}
+	answer, found, _, err := proof(ctx, gh, runs, sha, t, events, trees, ran)
+	if err != nil {
+		return err
+	}
 	var answering []evidenceRun
-	if answer, found := proven.Answer(ctx, runs, sha, t, events, trees); found {
+	if found {
 		answering = append(answering, evidenceRun{Workflow: workflow, ID: answer.ID, URL: answer.URL, Conclusion: answer.Conclusion, Head: answer.HeadSHA})
 	}
 	if also != "" {
@@ -247,14 +251,13 @@ func tree(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workfl
 	if err != nil {
 		return err
 	}
-	run, found := proven.Answer(ctx, runs, sha, t, events, trees)
-	if found && run.Passed() {
-		if ok, missing, err := ranAll(ctx, gh, run, ran); err != nil {
-			return err
-		} else if !ok {
-			fmt.Printf("%s passed on %s's tree without running %s (%s): every lane\n", workflow, sha, missing, run.URL)
-			return output("proven", "false")
-		}
+	run, found, missing, err := proof(ctx, gh, runs, sha, t, events, trees, ran)
+	if err != nil {
+		return err
+	}
+	if missing != "" {
+		fmt.Printf("%s passed on %s's tree without running %s (%s): every lane\n", workflow, sha, missing, run.URL)
+		return output("proven", "false")
 	}
 	switch {
 	case found && run.Passed():
@@ -271,7 +274,7 @@ func tree(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, workfl
 // base is what a run on main is of: nothing, when a run that passed has main's tree, else the
 // diff from the newest of main's commits one did - what mutate is asked to break - or from the
 // commit before when none of the last depth did. A run on another branch is of it against main.
-func base(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, ref, mainBranch, workflow string, events []string, limit, depth int) error {
+func base(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, ref, mainBranch, workflow string, events []string, limit, depth int, ran []string) error {
 	if ref != "refs/heads/"+mainBranch {
 		fmt.Printf("a dispatch on %s: every lane, mutate against %s\n", ref, mainBranch)
 		return output("base", "origin/"+mainBranch)
@@ -280,9 +283,17 @@ func base(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, ref, m
 	if err != nil {
 		return err
 	}
+	// A pass that left a lane of ran out is no base: what it skipped was never run on that tree.
 	var passed []proven.Run
 	for _, r := range runs {
-		if slices.Contains(events, r.Event) {
+		if !slices.Contains(events, r.Event) {
+			continue
+		}
+		ok, _, err := ranAll(ctx, gh, r, ran)
+		if err != nil {
+			return err
+		}
+		if ok {
 			passed = append(passed, r)
 		}
 	}
@@ -315,15 +326,14 @@ func release(ctx context.Context, gh proven.GitHub, trees proven.Trees, sha, wor
 	if err != nil {
 		return err
 	}
-	answer, found := proven.Answer(ctx, runs, sha, t, events, trees)
+	answer, found, missing, err := proof(ctx, gh, runs, sha, t, events, trees, ran)
+	if err != nil {
+		return err
+	}
 	// A pass that left a lane out answers for no tree a release is cut from.
-	if found && answer.Passed() {
-		if ok, missing, err := ranAll(ctx, gh, answer, ran); err != nil {
-			return err
-		} else if !ok {
-			fmt.Printf("%s passed on %s's tree without running %s (%s): not a release's proof\n", workflow, sha, missing, answer.URL)
-			return errRefused
-		}
+	if missing != "" {
+		fmt.Printf("%s passed on %s's tree without running %s (%s): not a release's proof\n", workflow, sha, missing, answer.URL)
+		return errRefused
 	}
 	var alsoRuns []proven.Run
 	if also != "" {
@@ -531,6 +541,36 @@ func appendTo(path, text string) error {
 		return err
 	}
 	return f.Close()
+}
+
+// proof is the run that answers for the commit's tree (proven.Answer) once asked which lanes it
+// must have run: the newest that failed, or that passed and ran every one of ran. A pass that ran
+// fewer is passed over for an older run on the tree, because a pass can point elsewhere: ci.yml on
+// main skips every lane when another run already passed on its tree, and still concludes success.
+// When no run on the tree ran them all, the answer is the newest pass with the lane it left out.
+func proof(ctx context.Context, gh proven.GitHub, runs []proven.Run, sha, tree string, events []string, trees proven.Trees, ran []string) (proven.Run, bool, string, error) {
+	var partial proven.Run
+	var missing string
+	for rest := runs; ; {
+		r, found := proven.Answer(ctx, rest, sha, tree, events, trees)
+		if !found {
+			return partial, missing != "", missing, nil
+		}
+		if !r.Passed() {
+			return r, true, "", nil
+		}
+		ok, m, err := ranAll(ctx, gh, r, ran)
+		if err != nil {
+			return proven.Run{}, false, "", err
+		}
+		if ok {
+			return r, true, "", nil
+		}
+		if missing == "" {
+			partial, missing = r, m
+		}
+		rest = rest[slices.IndexFunc(rest, func(x proven.Run) bool { return x.ID == r.ID })+1:]
+	}
 }
 
 // ranAll is whether run ran each of ran's jobs to success (proven.Ran); asked nothing, it is, and
