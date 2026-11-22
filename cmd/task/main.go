@@ -12,7 +12,7 @@
 // none bumps them - each unpacked once (internal/toolcache). Then it becomes Task: the same
 // process, so a signal, the terminal and the exit status are Task's.
 //
-// The release also carries the tasks every repository has (tasks.yml, beside this file), and
+// The release also carries the tasks every repository has (internal/tasks' tasks.yml), and
 // GO_TOOLS_TASKS names the unpacked copy: a Taskfile includes '{{.GO_TOOLS_TASKS}}' and has
 // `versions`, `bump`, `release`, `lint:workflows` and `consumers` as every other repository has
 // them, at the release its commands are from.
@@ -35,7 +35,7 @@ import (
 // passes.
 const goTools = "https://github.com/spin-stack/go-tools"
 
-// tasksEnv is the variable that names the release's copy of tasks, the file beside this one.
+// tasksEnv is the variable that names the release's copy of tasks, the file internal/tasks holds.
 const (
 	tasksEnv = "GO_TOOLS_TASKS"
 	tasks    = "tasks.yml"

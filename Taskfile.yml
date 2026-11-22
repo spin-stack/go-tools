@@ -10,7 +10,7 @@
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
 #   task release      what release.yml runs once the binaries are built: the next v<YYYYMMDD>.<NN>
 #
-# versions, bump, release, lint:workflows and consumers are cmd/task/tasks.yml's, which every
+# versions, bump, release, lint:workflows and consumers are internal/tasks/tasks.yml's, which every
 # repository includes: none of them is written here.
 #   task site         the documentation site under site/, built into site/dist
 
@@ -18,7 +18,7 @@ version: '3'
 
 silent: true
 
-# The Task this runs under, for the tests that run cmd/task/tasks.yml under Task itself.
+# The Task this runs under, for the tests that run internal/tasks/tasks.yml under Task itself.
 env:
   TASK_EXE: '{{.TASK_EXE}}'
 
@@ -27,7 +27,7 @@ includes:
   # with the tree's commands: a change to a task or to what it calls is held to this repository
   # before any release carries it.
   common:
-    taskfile: cmd/task/tasks.yml
+    taskfile: internal/tasks/tasks.yml
     flatten: true
     vars:
       GO_TOOLS: 'go run ./cmd/'
@@ -157,7 +157,7 @@ tasks:
             | go run ./internal/release/cmd/notices -go "$(go env GOVERSION)" -goroot "$(go env GOROOT)" \
             > {{.OUT}}/release/{{replace "/" "_" .ITEM}}/THIRD_PARTY_NOTICES
       - for: {var: PLATFORMS, split: ' '}
-        cmd: cp cmd/task/tasks.yml {{.OUT}}/release/{{replace "/" "_" .ITEM}}/
+        cmd: cp internal/tasks/tasks.yml {{.OUT}}/release/{{replace "/" "_" .ITEM}}/
       - for: {var: PLATFORMS, split: ' '}
         cmd: >-
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git show -s --format=%ct HEAD)"

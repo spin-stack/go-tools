@@ -14,6 +14,9 @@ import (
 	"slices"
 	"strings"
 
+	"go.yaml.in/yaml/v3"
+
+	"github.com/spin-stack/go-tools/internal/tasks"
 	"github.com/spin-stack/go-tools/versions"
 )
 
@@ -21,7 +24,9 @@ import (
 // pin a bump does not move and check does not see; a Dockerfile's pin with a default of its own
 // is one a build can fall back to without anybody noticing; an entry nothing reads is a pin
 // nobody checks; an entry written so a bump cannot rewrite it in place is one that cannot move;
-// an entry tracked with another and not at its version is a build of two releases. A repository runs it from a test, so `go test` is what fails.
+// an entry tracked with another and not at its version is a build of two releases; an entry a
+// common task of go-tools reads and the repository that includes those tasks lacks is a task that
+// cannot run. A repository runs it from a test, so `go test` is what fails.
 type Gate struct {
 	// Root is the repository's top, where versions.yaml is.
 	Root string
@@ -101,6 +106,7 @@ func (g Gate) Check() error {
 		}
 	}
 	errs = append(errs, taskCommand(v, files["go.mod"], used)...)
+	errs = append(errs, commonTasks(v, files, tasks.File, used)...)
 	for _, e := range v.Entries {
 		if !used[e.Name] {
 			errs = append(errs, fmt.Errorf("%s pins %s, and nothing reads it", versions.File, e.Name))
@@ -142,6 +148,91 @@ func taskCommand(v *versions.Versions, gomod string, used map[string]bool) []err
 		return []error{fmt.Errorf("go.mod takes %s, which runs the Task %s pins: %w", TaskCommand, versions.File, err)}
 	}
 	return nil
+}
+
+// tasksInclude is what a Taskfile includes to have go-tools' common tasks: the variable
+// `go tool task` names the release's tasks.yml in.
+const tasksInclude = "{{.GO_TOOLS_TASKS}}"
+
+// commonTasks is what a repository whose Taskfile includes go-tools' common tasks owes
+// versions.yaml: every entry one of those tasks reads. The reads are in common, the tasks' file,
+// which is in a release and in no file of the repository, so each entry is marked used here; and a
+// repository without one has a task that fails the day it is run, which is said here instead.
+func commonTasks(v *versions.Versions, files map[string]string, common []byte, used map[string]bool) []error {
+	by := includer(files)
+	if by == "" {
+		return nil
+	}
+	reads, err := taskReads(common)
+	if err != nil {
+		return []error{err}
+	}
+	var errs []error
+	for _, r := range reads {
+		used[r.entry] = true
+		if _, err := v.Get(r.entry); err != nil {
+			errs = append(errs, fmt.Errorf("%s includes go-tools' tasks, and its task %s reads %s: %w", by, r.task, r.entry, err))
+		}
+	}
+	return errs
+}
+
+// includer is the file of the repository that includes go-tools' common tasks, "" when none
+// does: a Taskfile with tasksInclude as the taskfile of one of its includes. A file that only
+// mentions the variable - a comment, a page that shows the include - includes nothing.
+func includer(files map[string]string) string {
+	for _, rel := range slices.Sorted(maps.Keys(files)) {
+		// Only a file that spells the variable is parsed: the gate reads every file of a repository.
+		if !strings.Contains(files[rel], "GO_TOOLS_TASKS") {
+			continue
+		}
+		var taskfile struct {
+			Includes map[string]yaml.Node `yaml:"includes"`
+		}
+		_ = yaml.Unmarshal([]byte(files[rel]), &taskfile) // what is not a Taskfile has no includes
+		for _, include := range taskfile.Includes {
+			// An include is its file, or a mapping whose taskfile is: one of the two decodes.
+			var short string
+			var long struct {
+				Taskfile string `yaml:"taskfile"`
+			}
+			_, _ = include.Decode(&short), include.Decode(&long)
+			if strings.Join(strings.Fields(short+long.Taskfile), "") == tasksInclude {
+				return rel
+			}
+		}
+	}
+	return ""
+}
+
+// A taskRead is a task and an entry of versions.yaml it reads.
+type taskRead struct{ task, entry string }
+
+// taskReads is every read of versions.yaml in taskfile, a Taskfile's bytes, by the task that
+// makes it and once each, as DefaultReads finds them in that task: a common task runs the versions
+// command and no repository's own way of reading. In the order of the tasks' names.
+func taskReads(taskfile []byte) ([]taskRead, error) {
+	var file struct {
+		Tasks map[string]any `yaml:"tasks"`
+	}
+	if err := yaml.Unmarshal(taskfile, &file); err != nil {
+		return nil, fmt.Errorf("versions: go-tools' common tasks: %w", err)
+	}
+	var reads []taskRead
+	for _, task := range slices.Sorted(maps.Keys(file.Tasks)) {
+		text := fmt.Sprint(file.Tasks[task])
+		for _, re := range DefaultReads {
+			// mutate-exempt: any n below zero is every match.
+			for _, m := range re.FindAllStringSubmatch(text, -1) {
+				for entry := range strings.FieldsSeq(m[1]) {
+					if r := (taskRead{task, entry}); !slices.Contains(reads, r) {
+						reads = append(reads, r)
+					}
+				}
+			}
+		}
+	}
+	return reads, nil
 }
 
 // pins is what the file rel breaks of the gate by what it writes: a digest or a commit, or a

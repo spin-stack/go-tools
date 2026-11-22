@@ -51,7 +51,7 @@ task mutate    # break what the change against BASE (origin/main) touched, and a
 task site      # the documentation site (site/), built
 ```
 
-`versions`, `bump`, `release`, `lint:workflows` and `consumers` are `cmd/task/tasks.yml`'s, the
+`versions`, `bump`, `release`, `lint:workflows` and `consumers` are `internal/tasks/tasks.yml`'s, the
 file every repository includes: this one includes its tree's copy, with its tree's commands.
 
 The site is Astro Starlight under `site/`, styled as [spin-stack/website](https://github.com/spin-stack/website),

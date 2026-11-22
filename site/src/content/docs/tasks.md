@@ -6,7 +6,7 @@ description: versions, bump, release, lint:workflows and consumers, written once
 Every repository pins in `versions.yaml`, lints its workflows and - most of them - cuts releases.
 Written per repository, the tasks for those drift: `bump` took `VERSION=` here and `TO=` there,
 and a release was three tasks in one repository and a copied naming rule in another. So the tasks
-are written once, in go-tools' `cmd/task/tasks.yml`, and ship in its release beside the commands
+are written once, in go-tools' `internal/tasks/tasks.yml`, and ship in its release beside the commands
 they call.
 
 ## Take them
