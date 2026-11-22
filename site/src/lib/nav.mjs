@@ -5,6 +5,7 @@ export const sidebar = [
 		items: [
 			{ label: 'Getting started', slug: 'start' },
 			{ label: 'GitHub Actions', slug: 'github-actions' },
+			{ label: 'The common tasks', slug: 'tasks' },
 		],
 	},
 	{
@@ -28,6 +29,8 @@ export const sidebar = [
 		items: [
 			{ label: 'versions', slug: 'versions' },
 			{ label: 'versions.yaml reference', slug: 'versions/reference' },
+			{ label: 'release', slug: 'release' },
+			{ label: 'consumers', slug: 'consumers' },
 			{ label: 'sfw', slug: 'sfw' },
 			{ label: 'Provenance and SBOMs', slug: 'supply-chain' },
 			{ label: 'exposure', slug: 'exposure' },

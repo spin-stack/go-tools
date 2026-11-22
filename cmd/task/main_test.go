@@ -111,6 +111,7 @@ func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	}
 	t.Chdir(sub)
 	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("GO_TOOLS_TASKS", "/a/release/before")
 	var c call
 	if err := run(t.Context(), []string{"lint", "--", "-v"}, base, c.exec); err != nil {
 		t.Fatal(err)
@@ -128,6 +129,15 @@ func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	first, rest, _ := strings.Cut(paths[0], string(os.PathListSeparator))
 	if _, err := os.Stat(filepath.Join(first, "mutate")); err != nil || rest != "/usr/bin" {
 		t.Errorf("PATH = %s: go-tools' directory is not first, or the rest is not the caller's", paths[0])
+	}
+	var named []string
+	for _, kv := range c.env {
+		if v, ok := strings.CutPrefix(kv, "GO_TOOLS_TASKS="); ok {
+			named = append(named, v)
+		}
+	}
+	if !slices.Equal(named, []string{filepath.Join(first, "tasks.yml")}) {
+		t.Errorf("GO_TOOLS_TASKS = %v, want once and the tasks.yml of the release on PATH, %s", named, first)
 	}
 }
 

@@ -31,6 +31,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      # task release asks proven whether the gate passed on the commit, which reads its runs.
+      actions: read
       id-token: write
       attestations: write
     steps:
@@ -82,13 +84,14 @@ jobs:
         with:
           subject-path: _output/release/*.tar.gz
 
+      # The task every repository releases with: it asks the gate again, names the release as the
+      # step above did - no tag has been made since - and publishes the files, which tags it.
       - name: The release
         if: steps.name.outputs.new == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.event.workflow_run.head_sha }}
-          VERSION: ${{ steps.name.outputs.version }}
-        run: task release:publish
+        run: task release
 
       # On every run, a commit released already included: what a failed run left untagged is
       # tagged by the next.

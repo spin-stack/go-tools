@@ -25,6 +25,9 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`exposure`](https://spin-stack.github.io/go-tools/exposure/) | what a repository would show if made public: secrets and private values in every ref's commits, pull request heads included, and in its issues, comments and releases |
 | [`planguard`](https://spin-stack.github.io/go-tools/planguard/) | an OpenTofu plan that takes something away - a delete, a replacement, a forget - which an installation applying on a schedule leaves to a person, and applies the rest |
 | [`task`](https://spin-stack.github.io/go-tools/start/) | not a check: Task at the version `versions.yaml` pins, with every other go-tools command on its `PATH`, the tools at their latest release - both downloaded as binaries; the one command a repository's `go.mod` takes, so neither Task's modules nor the tools' are compiled or cached |
+| [the common tasks](https://spin-stack.github.io/go-tools/tasks/) | not a check: `versions`, `bump`, `release`, `lint:workflows` and `consumers`, written once and included by every repository's Taskfile from the release `go tool task` unpacks - the same names, arguments and meaning in each |
+| [`release`](https://spin-stack.github.io/go-tools/release/) | not a check: the name of a repository's next release, `v<YYYYMMDD>.<NN>`, and a refusal for a commit already released |
+| [`consumers`](https://spin-stack.github.io/go-tools/consumers/) | not a check: which commit of a repository each place that copies from it is on, whether its copies are that commit's, and whether its npm packages are the ones pinned there |
 | [`gencache`](https://spin-stack.github.io/go-tools/gencache/) | not a check: `go generate` with each mockgen directive answered from a cache when nothing its mock is made from has changed |
 | [`ghatrace`](https://spin-stack.github.io/go-tools/ghatrace/) | not a check: where a GitHub Actions run's time went - the critical path, each job's wait for a runner, its steps and the spans inside them - as the run's summary, an HTML page and a Perfetto trace, with nothing hosted |
 | [`provenance`, `sbom`, `attestgate`, `trustroot`, `sigcheck`, `catalog`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM; a signature by any workflow but the one named; a Spin OS image catalog its release did not sign |
@@ -36,8 +39,8 @@ go tool task mutate                                    # a task that runs `mutat
 
 [Getting started](https://spin-stack.github.io/go-tools/start/) has the `versions.yaml` entry.
 
-`versions`, `versions/upstream`, `versions/gate`, `provenance`, `attestgate`, `sbom`, `ghatrace`, `sigcheck`, `catalog` and
-`trustroot` are also packages another repository imports; the rest is `internal/`.
+`versions`, `versions/upstream`, `versions/gate`, `provenance`, `attestgate`, `sbom`, `ghatrace`, `sigcheck`, `catalog`,
+`consumers` and `trustroot` are also packages another repository imports; the rest is `internal/`.
 
 ## Working here
 
@@ -47,6 +50,9 @@ task lint      # golangci-lint with spin's rules, and this repository's own gate
 task mutate    # break what the change against BASE (origin/main) touched, and ask the tests
 task site      # the documentation site (site/), built
 ```
+
+`versions`, `bump`, `release`, `lint:workflows` and `consumers` are `cmd/task/tasks.yml`'s, the
+file every repository includes: this one includes its tree's copy, with its tree's commands.
 
 The site is Astro Starlight under `site/`, styled as [spin-stack/website](https://github.com/spin-stack/website),
 and published to GitHub Pages from `main`. The example on its mutate page is

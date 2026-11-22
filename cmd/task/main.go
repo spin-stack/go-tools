@@ -11,6 +11,11 @@
 // checksums give - every repository runs the newest commands main has passed its gate with, and
 // none bumps them - each unpacked once (internal/toolcache). Then it becomes Task: the same
 // process, so a signal, the terminal and the exit status are Task's.
+//
+// The release also carries the tasks every repository has (tasks.yml, beside this file), and
+// GO_TOOLS_TASKS names the unpacked copy: a Taskfile includes '{{.GO_TOOLS_TASKS}}' and has
+// `versions`, `bump`, `release`, `lint:workflows` and `consumers` as every other repository has
+// them, at the release its commands are from.
 package main
 
 import (
@@ -29,6 +34,12 @@ import (
 // goTools is where go-tools' releases are, made by its release.yml of main each time its gate
 // passes.
 const goTools = "https://github.com/spin-stack/go-tools"
+
+// tasksEnv is the variable that names the release's copy of tasks, the file beside this one.
+const (
+	tasksEnv = "GO_TOOLS_TASKS"
+	tasks    = "tasks.yml"
+)
 
 func main() {
 	err := run(context.Background(), os.Args[1:], goTools, syscall.Exec) // mutate-exempt: the process's own arguments; run is what the test drives
@@ -74,19 +85,20 @@ func run(ctx context.Context, args []string, base string, exec execFunc) error {
 	}
 	bin := filepath.Join(taskDir, "task")
 	path := tools + string(os.PathListSeparator) + os.Getenv("PATH")
-	return exec(bin, append([]string{bin}, args...), withPath(os.Environ(), path))
+	env := with(with(os.Environ(), "PATH", path), tasksEnv, filepath.Join(tools, tasks))
+	return exec(bin, append([]string{bin}, args...), env)
 }
 
-// withPath is env with PATH set to path: replaced where it is, since a program that reads the
+// with is env with key set to value: replaced where it is, since a program that reads the
 // environment from the front would find a second PATH appended after the first only by luck.
-func withPath(env []string, path string) []string {
+func with(env []string, key, value string) []string {
 	var out []string
 	for _, kv := range env {
-		if !strings.HasPrefix(kv, "PATH=") {
+		if !strings.HasPrefix(kv, key+"=") {
 			out = append(out, kv)
 		}
 	}
-	return append(out, "PATH="+path)
+	return append(out, key+"="+value)
 }
 
 // find is versions.yaml in dir or the nearest directory above it, as Task finds its Taskfile.

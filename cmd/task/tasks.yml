@@ -1,0 +1,96 @@
+# The tasks every spin-stack repository has, written once: the same names, the same arguments and
+# the same meaning in each. It ships in go-tools' release beside the commands it calls, and
+# `go tool task` (cmd/task) names the unpacked copy in GO_TOOLS_TASKS, so a repository's Taskfile
+# takes it in one include and commits no copy:
+#
+#   includes:
+#     common:
+#       taskfile: '{{.GO_TOOLS_TASKS}}'
+#       flatten: true
+#       vars: {GATE_WORKFLOW: ci.yml, GATE_JOBS: Gate}
+#
+# flatten: the tasks keep these names, `task versions` and not `task common:versions`, and a
+# repository that defines one of them itself is refused by Task ("Found multiple tasks"), so a
+# name here has one meaning everywhere. What differs between repositories is the include's vars,
+# and nothing else:
+#
+#   GATE_WORKFLOW   the workflow whose pass proves a commit, as ci.yml; a repository that sets
+#   GATE_JOBS       neither does not release, and `task release` says so. The jobs are those the
+#                   pass must have run, by the start of their name and comma-separated.
+#   RELEASE_FILES   what a release carries besides its tag: files, or globs of them.
+#   VERSIONS_FILES  every file of pins the repository has, when versions.yaml is not the only one.
+#   WORKFLOWS_ALSO  a second .github directory the repository holds - an example it publishes.
+#   CONSUMERS       where the consumers table is, when it is not consumers.toml.
+#   GO_TOOLS        go-tools' own: `go run ./cmd/`, so that it runs its tree's commands and not
+#                   its last release's. Everywhere else the commands are on PATH.
+#
+# Vars of the include, not the Taskfile's own: Task gives a Taskfile's var of the same name
+# precedence over the command line's in an included task, so a root `VERSION` - spin has one -
+# would answer for `task bump VERSION=...`. Hence TO, and no name here a repository is likely to
+# hold already.
+version: '3'
+
+tasks:
+
+  versions:
+    desc: Say which pins of versions.yaml (and of every file in VERSIONS_FILES) are behind their upstream; exits 1 when any is.
+    cmds:
+      # Every file, whichever is behind.
+      - |
+        status=0
+        for file in {{.VERSIONS_FILES | default "versions.yaml"}}; do
+          {{.GO_TOOLS}}versions check -file "$file" || status=1
+        done
+        exit $status
+
+  bump:
+    desc: Pin one entry of versions.yaml at a version, the newest by default (task bump NAME=golangci-lint [TO=v2.14.0] [FILE=another/versions.yaml]).
+    requires:
+      vars: [NAME]
+    cmds:
+      - '{{.GO_TOOLS}}versions bump -file {{.FILE | default "versions.yaml"}} {{.NAME}} {{.TO}}'
+
+  release:
+    desc: Release main's head (or SHA) as the next v<YYYYMMDD>.<NN> of today, in UTC, with RELEASE_FILES. A person runs it, with gh logged in, or a workflow with GH_TOKEN; it refuses a commit GATE_JOBS of GATE_WORKFLOW has not passed on, and one released already.
+    requires:
+      vars: [GATE_WORKFLOW, GATE_JOBS]
+    cmds:
+      # The name is counted from every tag there is, and main's head is origin's as it is now.
+      - git fetch --quiet --tags origin main
+      # proven: the gate passed on this commit, or on a pull request's with the same tree, which
+      # is what a rebase merge leaves main with. The release makes the tag, last, so one that
+      # failed to publish is no tag naming a commit with no files. --latest: a repository
+      # publishes other things as releases too (brand its screens, with --latest=false), and
+      # `track: github-release` reads the one GitHub calls latest.
+      - |
+        set -eu
+        [ -n "${GH_TOKEN:-}" ] || export GH_TOKEN="$(gh auth token)"
+        sha="$(git rev-parse --verify '{{.SHA | default "origin/main"}}^{commit}')"
+        repo="${GITHUB_REPOSITORY:-}"
+        [ -n "$repo" ] || repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+        {{.GO_TOOLS}}proven release -repo "$repo" -sha "$sha" -workflow '{{.GATE_WORKFLOW}}' -events push,pull_request -ran '{{.GATE_JOBS}}' -also ''
+        name="$({{.GO_TOOLS}}release "$sha")"
+        gh release create "$name" {{.RELEASE_FILES}} --repo "$repo" --target "$sha" --title "$name" --latest --generate-notes
+
+  lint:workflows:
+    desc: actionlint over .github/ (and WORKFLOWS_ALSO), at the version versions.yaml pins, and every action pinned by its commit.
+    cmds:
+      # -shellcheck= because actionlint runs whatever shellcheck is on PATH: a runner has one and
+      # a laptop may not, and a gate whose answer depends on the machine is not a gate.
+      - go run github.com/rhysd/actionlint/cmd/actionlint@$({{.GO_TOOLS}}versions version actionlint) -shellcheck= {{if .WORKFLOWS_ALSO}}.github/workflows/*.yml {{.WORKFLOWS_ALSO}}/workflows/*.yml{{end}}
+      # A tag is whatever its owner points it at; the comment is the version Dependabot moves.
+      - |
+        if grep -rnE '^\s*(- )?uses: [^./][^ ]*@' .github {{.WORKFLOWS_ALSO}} | grep -vE '@[0-9a-f]{40} # v[0-9]'; then
+          echo "an action above is used by a tag its owner can move: pin it by commit SHA, with '# vX.Y.Z' after it"
+          exit 1
+        fi
+
+  consumers:
+    desc: Say which commit of this repository each consumer in consumers.toml is on - its pin, the release that names it, how far behind main, whether its copies and its npm packages are this repository's at that commit - read through gh, or `-- -checkout owner/name=dir[@ref]`. A report, exit 0 whatever it finds.
+    preconditions:
+      - sh: test -f '{{.CONSUMERS | default "consumers.toml"}}'
+        msg: 'no {{.CONSUMERS | default "consumers.toml"}}: this repository names nobody that copies from it'
+    cmds:
+      # A consumer is behind origin/main as it is now, and on the releases there are now.
+      - git fetch --quiet --tags origin main
+      - '{{.GO_TOOLS}}consumers -table {{.CONSUMERS | default "consumers.toml"}} {{.CLI_ARGS}}'
