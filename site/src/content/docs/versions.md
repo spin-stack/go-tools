@@ -113,7 +113,7 @@ that arrived whole: a file that is not the pin is refused, not tried again.
 ## Keeping up
 
 ```sh
-go tool versions check                # what is behind; exits 1 when anything is
+go tool versions check                # what is behind; exits 1 when anything is, 2 when an entry could not be read
 go tool versions bump kernel          # to the newest the track finds
 go tool versions bump kernel 7.2.9    # or to a version you name
 ```
@@ -123,6 +123,25 @@ for the digest. It builds nothing, and the entry's `note` says what to run befor
 
 `GITHUB_TOKEN`, when set, is sent to api.github.com, which answers only sixty unauthenticated
 requests an hour.
+
+### An entry check could not read
+
+An upstream that does not answer is not an entry that is up to date. A private repository asked
+without a token answers 404, a registry can be down, and a version can be one its track cannot
+order. `check` marks such a row `not read:` with what the upstream said, counts it apart, and
+exits 2 rather than 1:
+
+```
+NAME   PINNED        NEWEST
+spin   v20261114.01                not read: versions: https://api.github.com/repos/spin-stack/spin/releases/latest answered 404 Not Found
+brand  main          main          behind main is now c6d8cb1f...
+versions: 1 not read, and 1 behind of the 1 that were: a row not read may be behind, and says why (GITHUB_TOKEN or GH_TOKEN reads a private repository, and more than sixty requests an hour)
+```
+
+Exit 1 is "something is behind, and every entry was read"; exit 2 is "what is behind is not all
+known". Exit 0 is never a file `check` was not shown whole. A `kernel` whose series kernel.org no
+longer lists was read - the answer is that the pin stays - and so was an entry that `follows`
+another.
 
 ## A refresh, on a schedule
 

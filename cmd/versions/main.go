@@ -35,8 +35,21 @@ func main() {
 			msg = "versions: " + msg
 		}
 		fmt.Fprintln(os.Stderr, msg)
-		os.Exit(1)
+		os.Exit(status(err))
 	}
+}
+
+// unread is check's failure when it could not read a row: another exit status than a row behind,
+// so that what a script reads as "nothing to bump" is never a file it was not shown.
+type unread struct{ error }
+
+// status is the exit status of a failure: 2 for rows check could not read, 1 for any other, a
+// row behind among them - as diff answers 1 for a difference and 2 for a file it could not read.
+func status(err error) int {
+	if errors.As(err, &unread{}) {
+		return 2
+	}
+	return 1
 }
 
 const usage = `versions - what versions.yaml pins
@@ -49,7 +62,9 @@ Usage:
   versions url     <name>             a download's URL, at its version
   versions fetch   <name> <dir>       a download in dir, only as the bytes it pins, and its path
   versions newer   <name> <version>   <version> when it is newer than the pin, nothing when not
-  versions check                      what is behind its upstream; exits 1 when anything is
+  versions check                      what is behind its upstream; exits 1 when anything is,
+                                      and 2 when an entry could not be read, which may be
+                                      behind
   versions bump    <name> [version]   pin an entry at a version, the newest by default, and
                                       every entry tracked with it at the same
   versions refresh <name>...          bump each to its newest, a commit each, and say what moved
@@ -115,7 +130,7 @@ func run(ctx context.Context, argv []string) error {
 		if len(names) != 0 {
 			return errors.New("check: takes no names; it checks every entry")
 		}
-		return check(ctx, v)
+		return check(os.Stdout, upstream.Check(ctx, v))
 	case "bump":
 		return bump(ctx, v, *file, names)
 	case "refresh":
@@ -238,13 +253,19 @@ func pins(v *versions.Versions, names []string, prefix string) ([]string, error)
 	return out, nil
 }
 
-func check(ctx context.Context, v *versions.Versions) error {
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+// check prints where each entry stands and fails when one is behind, or could not be read. The
+// two are counted apart and fail apart: a row not read - a private upstream asked without a token
+// answers 404 - may be behind, so a count of what is behind says "of those read" beside it.
+func check(w io.Writer, rows []upstream.Status) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tPINNED\tNEWEST\t")
-	behind := 0
-	for _, st := range upstream.Check(ctx, v) {
+	behind, unreadRows := 0, 0
+	for _, st := range rows {
 		mark := ""
-		if st.Behind {
+		switch {
+		case st.Unread:
+			mark, unreadRows = "not read:", unreadRows+1
+		case st.Behind:
 			mark, behind = "behind", behind+1
 		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s %s\n", st.Entry.Name, st.Entry.Version, st.Newest, mark, st.Note)
@@ -252,7 +273,11 @@ func check(ctx context.Context, v *versions.Versions) error {
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	if behind > 0 {
+	switch {
+	case unreadRows > 0:
+		return unread{fmt.Errorf("%d not read, and %d behind of the %d that were: a row not read may be behind, and says why "+
+			"(GITHUB_TOKEN or GH_TOKEN reads a private repository, and more than sixty requests an hour)", unreadRows, behind, len(rows)-unreadRows)}
+	case behind > 0:
 		return fmt.Errorf("%d behind; versions bump <name> moves one", behind)
 	}
 	return nil

@@ -34,7 +34,7 @@ description: Every kind of entry versions.yaml takes, the build arguments each b
 | track | the newest is |
 |---|---|
 | `github-release [repo] [prefix]` | the repository's latest release (`source`'s by default), with a `v` only when the version has one; with a prefix, a release is `<prefix><version>`; for an image, the same variant of it: `v2.15.0-alpine` moves to `v2.16.0-alpine` |
-| `tags <repo>` | the highest release-numbered tag of a git repository; for a download, the highest whose file is published |
+| `tags <repo>` | the highest release-numbered tag of a git repository; for a download, the highest whose file is published. A tag with anything after its numbers (`v11.2.0-rc0`) is no release. A download pinned at one is ordered by its numbers, before the release of the same numbers: `11.2.0-rc0` is behind once `11.2.0` is published, and not behind `11.1.2`. A pin that starts with no number is not ordered, and `check` says it could not read the entry |
 | `commit <repo> <branch>` | the commit a branch is at, for a download whose version is a commit: behind only when the file changed |
 | `go` | the newest stable Go, spelled as the tag is (`1.27.1-trixie`) |
 | `kernel` | the newest release of the pinned series; moving to another series is naming it (`versions bump kernel 7.4.1`), and a series kernel.org no longer lists is reported and the pin stays |

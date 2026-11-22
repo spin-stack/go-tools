@@ -481,17 +481,23 @@ func releaseTags(ctx context.Context, repo string, withV bool) ([]string, error)
 // A tag is not a release. QEMU tagged v11.1.2 before download.qemu.org had its tarball
 // (2026-09-28), so check called qemu behind and a bump to the newest failed on a 404. What a
 // download entry builds from is the download, so that is what is asked.
+//
+// A pin can be what a release tag never is: spin-machine built QEMU 11.2.0-rc0. It is ordered by
+// its numbers, and the release of those numbers is newer than it, since a tag with anything after
+// its numbers is no release (releaseTags). A pin that starts with no number is not ordered at all,
+// and is said to be so rather than called current.
 func newestPublished(ctx context.Context, e versions.Entry, tags []string) (string, error) {
-	current, err := numbers(strings.TrimPrefix(e.Version, "v"))
-	if err != nil {
-		return "", fmt.Errorf("versions: %s's version %q: %w", e.Name, e.Version, err)
+	current, before, ok := numbered(e.Version)
+	if !ok {
+		return "", fmt.Errorf("versions: %s's version %q is not numbers between dots, alone or with a -suffix after them: "+
+			"the tags track cannot order it against a release", e.Name, e.Version)
 	}
 	for _, tag := range tags {
 		n, err := numbers(strings.TrimPrefix(tag, "v"))
 		if err != nil {
 			return "", fmt.Errorf("versions: %s's tag %q: %w", e.Name, tag, err)
 		}
-		if slices.Compare(n, current) <= 0 {
+		if c := slices.Compare(n, current); c < 0 || (c == 0 && !before) {
 			break
 		}
 		c := e
@@ -522,6 +528,18 @@ func branchHead(ctx context.Context, repo, branch string) (string, error) {
 		return "", fmt.Errorf("versions: %s has no branch %s", repo, branch)
 	}
 	return sha, nil
+}
+
+// numbered is a version as the numbers it starts with, a leading v apart, and whether a -suffix
+// follows them: 11.2.0-rc0 is 11.2.0 and more, as 1.27.4-bookworm is 1.27.4 and more. ok is false
+// for what starts with no number or goes on in any other way: a branch, a commit, a date and time.
+func numbered(version string) (n []int, suffixed, ok bool) {
+	m := variant.FindStringSubmatch(version)
+	if m == nil || (m[1] != "" && !strings.HasPrefix(m[1], "-")) {
+		return nil, false, false
+	}
+	n, err := numbers(strings.TrimSuffix(strings.TrimPrefix(version, "v"), m[1]))
+	return n, m[1] != "", err == nil
 }
 
 // numbers is a dotted version as numbers, so 11.10 comes after 11.9.
@@ -618,12 +636,18 @@ type Status struct {
 	Newest string
 	// Behind is a newer version, or the same one at another pin.
 	Behind bool
+	// Unread is an entry check could not place: its upstream did not answer - a private repository
+	// asked without a token is a 404 - or answered with what cannot be ordered against the pin.
+	// Note says which, and Behind says nothing: the entry may be behind.
+	Unread bool
 	Note   string
 }
 
 // Check is where each entry stands against its upstream. An image tracked by its digest, or a
 // commit tracked by its branch, is behind when the name now points at something else; a download
-// only when its version moves, since its pin is what that version was published as.
+// only when its version moves, since its pin is what that version was published as. An entry
+// whose upstream could not be read is Unread, never "not behind": a caller that counts only
+// Behind would call a file with no token up to date.
 func Check(ctx context.Context, v *versions.Versions) []Status {
 	var out []Status
 	for _, e := range v.Entries {
@@ -632,8 +656,11 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 		switch {
 		case errors.Is(err, errFollows):
 			st.Note = "follows " + strings.TrimPrefix(e.Track, "follows ") + ": " + e.Note
-		case err != nil:
+		case errors.Is(err, errSeriesOver):
+			// kernel.org answered, and what it said is that the pin stays.
 			st.Note = err.Error()
+		case err != nil:
+			st.Unread, st.Note = true, err.Error()
 		default:
 			st.Newest = latest
 			st.Behind = latest != e.Version
@@ -643,7 +670,7 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 				pin, err := resolve(ctx, e, latest)
 				switch {
 				case err != nil:
-					st.Note = err.Error()
+					st.Behind, st.Unread, st.Note = false, true, err.Error()
 				case pin == e.Pin:
 					st.Behind, st.Note = false, "the branch moved; the file did not"
 				}
@@ -651,7 +678,7 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 			if !st.Behind && (e.Kind == versions.Image || e.Kind == versions.Git) {
 				pin, err := resolve(ctx, e, latest)
 				if err != nil {
-					st.Note = err.Error()
+					st.Unread, st.Note = true, err.Error()
 				} else if pin != e.Pin {
 					st.Behind, st.Note = true, e.Version+" is now "+pin
 				}

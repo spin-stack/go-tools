@@ -23,12 +23,13 @@ func taskExe(t *testing.T) string {
 
 // stubs is a directory of the commands tasks.yml calls, each a program that writes its name and
 // arguments as a line of log and answers what a task reads from it. `versions check` fails for
-// a file named behind.yaml, and `proven` when REFUSE is set.
+// a file named behind.yaml, and as it does for an entry it could not read for one named
+// unread.yaml; `proven` fails when REFUSE is set.
 func stubs(t *testing.T) (bin, log string) {
 	t.Helper()
 	bin, log = t.TempDir(), filepath.Join(t.TempDir(), "log")
 	for name, answer := range map[string]string{
-		"versions":  `case "$*" in "version actionlint") echo v1.7.12 ;; *behind.yaml) exit 1 ;; esac`,
+		"versions":  `case "$*" in "version actionlint") echo v1.7.12 ;; *behind.yaml) exit 1 ;; *unread.yaml) exit 2 ;; esac`,
 		"proven":    `[ -z "${REFUSE:-}" ]`,
 		"release":   `echo v20261122.01`,
 		"consumers": ``,
@@ -151,12 +152,19 @@ func TestARepositoryThatIncludesTheTasksHasThem(t *testing.T) {
 	}
 }
 
-// Every file of pins is asked, whichever is behind, and one behind fails the task.
+// Every file of pins is asked, whichever is behind, and one behind fails the task. A file with
+// an entry that could not be read fails it as that, wherever it is among files that are behind.
 func TestVersionsAsksEveryFileOfPins(t *testing.T) {
-	r := newRepository(t, map[string]string{"Taskfile.yml": including("VERSIONS_FILES: versions.yaml behind.yaml cmd/sfw/versions.yaml", "")})
-	ran := r.refused("exit status 1", "versions")
-	if want := "versions check -file versions.yaml\nversions check -file behind.yaml\nversions check -file cmd/sfw/versions.yaml"; strings.Join(ran, "\n") != want {
-		t.Errorf("ran:\n%s\nwant:\n%s", strings.Join(ran, "\n"), want)
+	for files, status := range map[string]string{
+		"versions.yaml behind.yaml cmd/sfw/versions.yaml": "exit status 1",
+		"unread.yaml behind.yaml versions.yaml":           "exit status 2",
+		"behind.yaml unread.yaml":                         "exit status 2",
+	} {
+		r := newRepository(t, map[string]string{"Taskfile.yml": including("VERSIONS_FILES: "+files, "")})
+		ran := r.refused(status, "versions")
+		if want := "versions check -file " + strings.ReplaceAll(files, " ", "\nversions check -file "); strings.Join(ran, "\n") != want {
+			t.Errorf("ran:\n%s\nwant:\n%s", strings.Join(ran, "\n"), want)
+		}
 	}
 }
 
