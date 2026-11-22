@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,17 +18,19 @@ import (
 	"testing"
 )
 
-// archive is a .tar.gz of one executable named name, and its sha256.
-func archive(t *testing.T, name string) ([]byte, string) {
+// archive is a .tar.gz of an executable for each of names, and its sha256.
+func archive(t *testing.T, names ...string) ([]byte, string) {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: 2, Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write([]byte("x\n")); err != nil {
-		t.Fatal(err)
+	for _, name := range names {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: 2, Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte("x\n")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := errors.Join(tw.Close(), gz.Close()); err != nil {
 		t.Fatal(err)
@@ -41,19 +44,37 @@ func archive(t *testing.T, name string) ([]byte, string) {
 // listed in its checksums. The user's cache is a directory of the test's.
 func repository(t *testing.T) (repo, base string) {
 	t.Helper()
+	latest := before
+	return repositoryAt(t, &latest)
+}
+
+// The releases repositoryAt serves: one from before a release carried tasks.yml, and one with it.
+const (
+	before = "v20261110.01"
+	after  = "v20261122.04"
+)
+
+// repositoryAt is repository with go-tools' latest release the one *latest names when asked.
+func repositoryAt(t *testing.T, latest *string) (repo, base string) {
+	t.Helper()
 	platform := runtime.GOOS + "_" + runtime.GOARCH
 	taskArchive, taskPin := archive(t, "task")
 	toolsArchive, toolsPin := archive(t, "mutate")
+	withTasks, withTasksPin := archive(t, "mutate", "tasks.yml")
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/task/v3.54.0/task_" + platform + ".tar.gz":
 			_, _ = w.Write(taskArchive)
 		case "/go-tools/releases/latest":
-			http.Redirect(w, r, "/go-tools/releases/tag/v20261110.01", http.StatusFound)
-		case "/go-tools/releases/download/v20261110.01/checksums.txt":
+			http.Redirect(w, r, "/go-tools/releases/tag/"+*latest, http.StatusFound)
+		case "/go-tools/releases/download/" + before + "/checksums.txt":
 			_, _ = w.Write([]byte(toolsPin + "  go-tools_" + platform + ".tar.gz\n"))
-		case "/go-tools/releases/download/v20261110.01/go-tools_" + platform + ".tar.gz":
+		case "/go-tools/releases/download/" + before + "/go-tools_" + platform + ".tar.gz":
 			_, _ = w.Write(toolsArchive)
+		case "/go-tools/releases/download/" + after + "/checksums.txt":
+			_, _ = w.Write([]byte(withTasksPin + "  go-tools_" + platform + ".tar.gz\n"))
+		case "/go-tools/releases/download/" + after + "/go-tools_" + platform + ".tar.gz":
+			_, _ = w.Write(withTasks)
 		default:
 			http.NotFound(w, r)
 		}
@@ -104,7 +125,8 @@ func pathOf(env []string) []string {
 // From anywhere under the repository, `go tool task` is the pinned Task, given the arguments it
 // was given, with the latest go-tools first on a PATH that is there once.
 func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
-	repo, base := repository(t)
+	latest := after
+	repo, base := repositoryAt(t, &latest)
 	sub := filepath.Join(repo, "internal", "x")
 	if err := os.MkdirAll(sub, 0o750); err != nil {
 		t.Fatal(err)
@@ -113,8 +135,12 @@ func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
 	t.Setenv("GO_TOOLS_TASKS", "/a/release/before")
 	var c call
-	if err := run(t.Context(), []string{"lint", "--", "-v"}, base, c.exec); err != nil {
+	var warned strings.Builder
+	if err := run(t.Context(), []string{"lint", "--", "-v"}, base, "", &warned, c.exec); err != nil {
 		t.Fatal(err)
+	}
+	if warned.Len() != 0 {
+		t.Errorf("a release with its tasks was warned of: %s", &warned)
 	}
 	if filepath.Base(c.path) != "task" || !slices.Equal(c.argv, []string{c.path, "lint", "--", "-v"}) {
 		t.Errorf("exec'd %s %v", c.path, c.argv)
@@ -130,14 +156,66 @@ func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(first, "mutate")); err != nil || rest != "/usr/bin" {
 		t.Errorf("PATH = %s: go-tools' directory is not first, or the rest is not the caller's", paths[0])
 	}
+	if named := tasksOf(c.env); !slices.Equal(named, []string{filepath.Join(first, "tasks.yml")}) {
+		t.Errorf("GO_TOOLS_TASKS = %v, want once and the tasks.yml of the release on PATH, %s", named, first)
+	}
+}
+
+// tasksOf is every GO_TOOLS_TASKS in env.
+func tasksOf(env []string) []string {
 	var named []string
-	for _, kv := range c.env {
+	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "GO_TOOLS_TASKS="); ok {
 			named = append(named, v)
 		}
 	}
-	if !slices.Equal(named, []string{filepath.Join(first, "tasks.yml")}) {
-		t.Errorf("GO_TOOLS_TASKS = %v, want once and the tasks.yml of the release on PATH, %s", named, first)
+	return named
+}
+
+// A cache that named the latest release moments before a new one came out still names the old
+// one, which has no tasks.yml. A command compiled from the new release's module version does not
+// run that one: it asks again and runs its own release, with the file. A command that is of no
+// release, or of the old one, runs the one the cache names, says what is missing and what to do,
+// and runs Task all the same.
+func TestAReleaseFromBeforeThisCommandIsNotRunForBeingFresh(t *testing.T) {
+	latest := before
+	repo, base := repositoryAt(t, &latest)
+	t.Chdir(repo)
+	ran := func(version string) (tasks string, warned string) {
+		t.Helper()
+		var c call
+		var w strings.Builder
+		if err := run(t.Context(), nil, base, version, &w, c.exec); err != nil || !c.called {
+			t.Fatalf("a command of %q: %v, exec'd %t", version, err, c.called)
+		}
+		named := tasksOf(c.env)
+		if len(named) != 1 {
+			t.Fatalf("GO_TOOLS_TASKS = %v", named)
+		}
+		return named[0], w.String()
+	}
+	missing := func(version string) {
+		t.Helper()
+		tasks, warned := ran(version)
+		if _, err := os.Stat(tasks); err == nil {
+			t.Errorf("a command of %q runs a release with tasks.yml, and the cache's has none", version)
+		}
+		for _, says := range []string{"has no tasks.yml", filepath.Dir(tasks), "{{.GO_TOOLS_TASKS}}", base + "/releases/latest", "run this again then"} {
+			if !strings.Contains(warned, says) {
+				t.Errorf("a command of %q, of a release with no tasks.yml, does not say %q:\n%s", version, says, warned)
+			}
+		}
+	}
+	missing("")
+
+	latest = after
+	missing("")
+	missing("(devel)")
+	missing("v0.20261110.1")
+
+	tasks, warned := ran("v0.20261122.4")
+	if _, err := os.Stat(tasks); err != nil || warned != "" {
+		t.Errorf("a command of the new release runs %s (%v), and said: %q", tasks, err, warned)
 	}
 }
 
@@ -161,7 +239,7 @@ func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 			}
 			t.Chdir(dir)
 			var c call
-			err := run(t.Context(), nil, tc.base, c.exec)
+			err := run(t.Context(), nil, tc.base, "", io.Discard, c.exec)
 			if err == nil || !strings.Contains(err.Error(), tc.says) || c.called {
 				t.Errorf("err = %v, exec'd %v; want %q", err, c.called, tc.says)
 			}
@@ -171,7 +249,7 @@ func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 		repo, base := repository(t)
 		t.Chdir(repo)
 		var c call
-		err := run(t.Context(), nil, base+"/none", c.exec)
+		err := run(t.Context(), nil, base+"/none", "", io.Discard, c.exec)
 		if err == nil || !strings.Contains(err.Error(), "the latest release of") || c.called {
 			t.Errorf("err = %v, exec'd %v", err, c.called)
 		}

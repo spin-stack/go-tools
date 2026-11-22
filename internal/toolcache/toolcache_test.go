@@ -248,7 +248,7 @@ func TestTheLatestReleaseIsAskedForAtMostEveryTenMinutes(t *testing.T) {
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 	holds := func(at time.Time, want string) {
 		t.Helper()
-		dir, err := latest(t.Context(), base, "go-tools", root, "linux", "amd64", at)
+		dir, err := latest(t.Context(), base, "go-tools", root, "", "linux", "amd64", at)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -299,12 +299,45 @@ func TestALatestReleaseThatCannotBeHadIsSaid(t *testing.T) {
 			if tc.name == "no release" {
 				base += "/nothing"
 			}
-			_, err := latest(t.Context(), base, "go-tools", t.TempDir(), tc.goos, "amd64", time.Now())
+			_, err := latest(t.Context(), base, "go-tools", t.TempDir(), "", tc.goos, "amd64", time.Now())
 			if err == nil || !strings.Contains(err.Error(), tc.says) {
 				t.Errorf("err = %v, want %q", err, tc.says)
 			}
 		})
 	}
+}
+
+// A caller that is of a release is proof of it: a name recorded moments ago that is before the
+// caller's is asked again, where one that is the caller's or after it is taken for its ten
+// minutes; and a machine that cannot ask goes on with the release it has, old as it is.
+func TestAReleaseBeforeTheCallersIsNotTheLatestHoweverFresh(t *testing.T) {
+	one, _ := tarball(t, member{name: "mutate", body: "one", mode: 0o755, kind: tar.TypeReg})
+	two, _ := tarball(t, member{name: "mutate", body: "two", mode: 0o755, kind: tar.TypeReg})
+	tag := "v20261110.01"
+	g := &github{latest: &tag, releases: map[string][]byte{"v20261110.01": one, "v20261110.02": two}}
+	base := g.serve(t)
+	root := t.TempDir()
+	holds := func(since, want string, asked int32) {
+		t.Helper()
+		dir, err := latest(t.Context(), base, "go-tools", root, since, "linux", "amd64", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, "mutate")); string(got) != want || g.asked.Load() != asked {
+			t.Errorf("a caller of %q: mutate is %q after %d questions, want %q after %d", since, got, g.asked.Load(), want, asked)
+		}
+	}
+	holds("", "one", 1)
+	holds("v20261110.01", "one", 1)
+	holds("v20261109.07", "one", 1)
+
+	// The release the caller is of is out, and the stamp is seconds old.
+	tag = "v20261110.02"
+	g.down.Store(true)
+	holds("v20261110.02", "one", 1)
+	g.down.Store(false)
+	holds("v20261110.02", "two", 2)
+	holds("v20261110.02", "two", 2)
 }
 
 // A stamp that says nothing is no release, however fresh: the latest is asked for.
@@ -320,7 +353,7 @@ func TestAnEmptyStampIsAskedPast(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go-tools", "latest"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := latest(t.Context(), base, "go-tools", root, "linux", "amd64", time.Now()); err != nil || g.asked.Load() != 1 {
+	if _, err := latest(t.Context(), base, "go-tools", root, "", "linux", "amd64", time.Now()); err != nil || g.asked.Load() != 1 {
 		t.Errorf("err = %v, asked %d times", err, g.asked.Load())
 	}
 }

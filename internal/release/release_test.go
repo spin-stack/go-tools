@@ -64,3 +64,24 @@ func TestAReleaseIsAlsoAModuleVersion(t *testing.T) {
 		}
 	}
 }
+
+// A module version names the release it is the tag of, and a version that is no release's -
+// a commit after one, a checkout's build, a release's own name - names none.
+func TestAModuleVersionNamesItsRelease(t *testing.T) {
+	for version, want := range map[string]string{
+		"v0.20261110.1":  "v20261110.01",
+		"v0.20261110.10": "v20261110.10",
+		"v0.20261122.5-0.20261122181500-ede9302abcde": "",
+		"v0.20261122.4+dirty":                         "",
+		"v0.20261110.100":                             "",
+		"v1.20261110.1":                               "",
+		"xv0.20261110.1":                              "",
+		"v20261110.01":                                "",
+		"(devel)":                                     "",
+		"":                                            "",
+	} {
+		if got := Named(version); got != want {
+			t.Errorf("Named(%q) = %q, want %q", version, got, want)
+		}
+	}
+}

@@ -31,6 +31,41 @@ cache `go tool task` already keeps, at the release its commands are from.
 It needs `go tool task`. A Task run directly has no `GO_TOOLS_TASKS`, and says `include cycle
 detected`, since an empty path is the Taskfile itself.
 
+## Which release the tasks are from
+
+Two versions of go-tools are at work in a repository, and they are not the same one:
+
+- `go.mod` requires a module version, `v0.<YYYYMMDD>.<N>`. It is what `go tool task` itself is
+  compiled from, and what the repository's tests link: the [versions gate](../versions/#the-gate),
+  the `consumers` package.
+- The tasks, and every command they call, are go-tools' **latest release**, whatever `go.mod`
+  says. A release changes what `versions`, `bump`, `release`, `lint:workflows` and `consumers` do
+  in a repository at its next run, with no commit there. That is the point - one meaning
+  everywhere, the day it changes - and it means a red `lint:workflows` on an untouched branch can
+  be a release of go-tools: [its releases](https://github.com/spin-stack/go-tools/releases) say
+  what changed.
+
+The latest release is never one from before `go.mod`'s. Which release is the latest is asked at
+most every ten minutes, so a machine can go on naming the one before for that long; but
+`go tool task` knows the release it was compiled from, and asks again when the cache names an
+earlier one. So a repository that takes something a release added - these tasks, a new command, a
+new var - requires that release in the same commit, and no machine runs the new Taskfile beside
+the old release:
+
+```sh
+go get github.com/spin-stack/go-tools@latest && go mod tidy
+```
+
+`go get` also moves the modules go-tools requires that the repository requires too (taking the
+tasks moved brand's `github.com/BurntSushi/toml` to v1.6.0), and `go mod tidy` drops the ones the
+repository no longer imports. Both belong in the commit.
+
+The other way round needs nothing: a repository whose `go.mod` is behind runs the latest tasks
+with the `go tool task` it has. What it does not have is what a newer gate knows. The gate counts
+the pins the common tasks read as read, from the tasks of the version `go.mod` requires; when a
+release makes a task read a new pin, the task says the entry is missing at its next run, and the
+gate says it once `go.mod` has moved.
+
 ## The tasks
 
 | task | what it does |
