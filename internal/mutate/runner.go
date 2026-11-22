@@ -54,14 +54,9 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 	// time, beside the test processes.
 	b := &builds{sem: make(chan struct{}, 1), work: work, bins: map[string]*importerBinary{}}
 	covers := &coverages{by: map[string]*coverage{}, timeout: timeout, slots: slots}
-	byDir := map[string][]Mutation{}
-	var dirs []string
-	for _, m := range chosen {
-		dir := filepath.Dir(m.File)
-		if byDir[dir] == nil {
-			dirs = append(dirs, dir)
-		}
-		byDir[dir] = append(byDir[dir], m)
+	byDir, dirs := byPackage(chosen)
+	if broken, err := brokenImporters(dirs, importers, timeout, slots); err != nil {
+		return Tally{Broken: broken}, err
 	}
 	results := make(chan result)
 	var wg sync.WaitGroup
@@ -134,6 +129,98 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 			len(t.Broken), strings.Join(t.Broken, ", "))
 	}
 	return t, firstErr
+}
+
+// byPackage is chosen by the directory of its package, and those directories in the order chosen
+// first names them.
+func byPackage(chosen []Mutation) (map[string][]Mutation, []string) {
+	byDir := map[string][]Mutation{}
+	var dirs []string
+	for _, m := range chosen {
+		dir := filepath.Dir(m.File)
+		if byDir[dir] == nil {
+			dirs = append(dirs, dir)
+		}
+		byDir[dir] = append(byDir[dir], m)
+	}
+	return byDir, dirs
+}
+
+// brokenImporters runs the tests of every importer of dirs once, on the code as it is, each in one
+// of slots' trees, and fails naming each test that fails as "<importer>: <test>", sorted. A package's own tests
+// are measured that way (Cover), and one that fails is asked about no edit; an importer's are
+// asked whole, so one that fails regardless refuses every edit asked of it, and the run reports
+// none survived. One that does not build asks nothing either way, and is not named.
+func brokenImporters(dirs []string, importers map[string][]string, timeout string, slots chan *Tree) ([]string, error) {
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		for _, importer := range importers[filepath.ToSlash(dir)] {
+			seen[importer] = true
+		}
+	}
+	if len(seen) == 0 {
+		return nil, nil
+	}
+	root, err := moduleRoot(".")
+	if err != nil {
+		return nil, err
+	}
+	var (
+		mu       sync.Mutex
+		broken   []string
+		firstErr error
+		wg       sync.WaitGroup
+	)
+	for importer := range seen {
+		wg.Go(func() {
+			tree := <-slots
+			defer func() { slots <- tree }()
+			var said strings.Builder
+			outcome, err := runPackage(tree, importer, filepath.Join(root, importer), root, "an importer's tests, unbroken",
+				nil, timeout, "", &said)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				firstErr = cmp.Or(firstErr, err)
+				return
+			}
+			if outcome != Killed && outcome != Exceeded {
+				return
+			}
+			// mutate-exempt: how much of the failure is shown, not whether it is.
+			fmt.Fprintf(os.Stderr, "  (%s fails with nothing broken:)\n%s\n", importer, tail([]byte(said.String()), 20))
+			failed := failedTests(said.String())
+			if len(failed) == 0 {
+				failed = []string{"its test binary, which named no test"}
+			}
+			for _, test := range failed {
+				broken = append(broken, importer+": "+test)
+			}
+		})
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if len(broken) == 0 {
+		return nil, nil
+	}
+	slices.Sort(broken)
+	return broken, fmt.Errorf("mutate: %d importer test(s) fail with nothing broken, so they would refuse every edit "+
+		"asked of them: %s. Each failed in this run's copy of the module, as said above: fix it so that it passes there",
+		len(broken), strings.Join(broken, ", "))
+}
+
+// failedTests is the top-level tests a test binary's -test.v output says failed, in order.
+func failedTests(out string) []string {
+	var failed []string
+	for line := range strings.SplitSeq(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "--- FAIL: "); ok {
+			name, _, _ := strings.Cut(rest, " ")
+			failed = append(failed, name)
+		}
+	}
+	return failed
 }
 
 // pkgRun is one package's mutations put to the tests.

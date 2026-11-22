@@ -168,6 +168,11 @@ run still asks every edit and prints the test's output, then exits 2 naming the 
 test. A pass here would be a green check over a failing test. The fix is the test's: what it reads
 that the copy doesn't have, or a path it shares with a test run beside it.
 
+The packages that import the one being broken are checked the same way. Before the first edit,
+`mutate` runs each importer's tests once on your code as it is. If one fails, the run stops
+there and exits 2, naming the importer and the test. Asked anyway, that test would refuse every
+edit put to it, and the run would report `0 survived` over a broken test.
+
 ### Tests that need an environment
 
 `mutate` runs your tests as `go test` would, in the environment it was started in. Anything they
