@@ -26,8 +26,10 @@
 #
 # Vars of the include, not the Taskfile's own: Task gives a Taskfile's var of the same name
 # precedence over the command line's in an included task, so a root `VERSION` - spin has one -
-# would answer for `task bump VERSION=...`. Hence TO, and no name here a repository is likely to
-# hold already.
+# would answer for `task bump VERSION=...`. Hence TO, RELEASE_DRY and not DRY, and no name here a
+# repository is likely to hold already. For the same reason bump cannot refuse a `VERSION=` given
+# to it: in an included task that name reads the same whether the command line set it or the
+# repository's Taskfile did, so a refusal would be spin's every bump.
 version: '3'
 
 tasks:
@@ -51,7 +53,7 @@ tasks:
       - '{{.GO_TOOLS}}versions bump -file {{.FILE | default "versions.yaml"}} {{.NAME}} {{.TO}}'
 
   release:
-    desc: Release main's head (or SHA) as the next v<YYYYMMDD>.<NN> of today, in UTC, with RELEASE_FILES. A person runs it, with gh logged in, or a workflow with GH_TOKEN; it refuses a commit GATE_JOBS of GATE_WORKFLOW has not passed on, and one released already.
+    desc: Release main's head (or SHA) as the next v<YYYYMMDD>.<NN> of today, in UTC, with RELEASE_FILES. A person runs it, with gh logged in, or a workflow with GH_TOKEN; it refuses a commit GATE_JOBS of GATE_WORKFLOW has not passed on, and one released already. RELEASE_DRY=1 refuses what a release would and prints the name, and releases nothing.
     requires:
       vars: [GATE_WORKFLOW, GATE_JOBS]
     cmds:
@@ -70,6 +72,11 @@ tasks:
         [ -n "$repo" ] || repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
         {{.GO_TOOLS}}proven release -repo "$repo" -sha "$sha" -workflow '{{.GATE_WORKFLOW}}' -events push,pull_request -ran '{{.GATE_JOBS}}' -also ''
         name="$({{.GO_TOOLS}}release "$sha")"
+        # Every refusal above has been made, and gh's own for a file that is not there: what is
+        # left is the release. Its files are listed, so a glob that matches nothing is seen.
+        if [ -n '{{.RELEASE_DRY}}' ]; then
+          {{with .RELEASE_FILES}}ls -d -- {{.}}; {{end}}echo "RELEASE_DRY: $sha would be released to $repo as $name, and is not"; exit 0
+        fi
         gh release create "$name" {{.RELEASE_FILES}} --repo "$repo" --target "$sha" --title "$name" --latest --generate-notes
 
   lint:workflows:
