@@ -17,6 +17,10 @@ import (
 // one, so v20261109.1 and v20261109.01 are not two spellings of one release.
 var name = regexp.MustCompile(`^v(\d{8})\.(\d{2})$`)
 
+// Is says whether tag is a release's name. A repository tags other things - a module version,
+// an archive of screens - and none of them is a release.
+func Is(tag string) bool { return name.MatchString(tag) }
+
 // Next is the name of the next release on now's day, given every tag there is.
 func Next(tags []string, now time.Time) string {
 	day := now.UTC().Format("20060102")
@@ -51,7 +55,7 @@ func Module(release string) (string, error) {
 func Of(tags []string) string {
 	best := ""
 	for _, t := range tags {
-		if name.MatchString(t) && t > best {
+		if Is(t) && t > best {
 			best = t
 		}
 	}
