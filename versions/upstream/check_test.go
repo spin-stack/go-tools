@@ -159,7 +159,8 @@ func TestTheNewestIsWhatTheTrackFinds(t *testing.T) {
 }
 
 // Check says where each entry stands: at its newest, behind it, behind at the same version because
-// the name points elsewhere now, or a note saying why it cannot tell.
+// the name points elsewhere now, or unread with a note saying why it cannot tell - and an unread
+// entry is never called behind or not, since it may be either.
 func TestCheckSaysWhereEachEntryStands(t *testing.T) {
 	r := newGitRepo(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -201,29 +202,51 @@ func TestCheckSaysWhereEachEntryStands(t *testing.T) {
 
 	got := Check(t.Context(), &versions.Versions{Entries: []versions.Entry{git, moved, gone, image, download, current, atHead, unread, gitByCommit, follows, unknown, lead, withBehind, withAt}})
 	want := []struct {
-		newest string
-		behind bool
-		note   string
+		newest         string
+		behind, unread bool
+		note           string
 	}{
-		{"master", false, ""},
-		{"master", true, "master is now " + r.head},
-		{"master", false, "ls-remote"},
-		{"1.27", true, "1.27 is now " + now},
-		{"v1.2.0", true, ""},
-		{"v1.2.0", false, ""},
-		{r.head, false, ""},
-		{r.head, true, "404"},
-		{r.head, true, ""},
-		{"", false, "follows spin: spin says"},
-		{"", false, "which check does not know"},
-		{"v2", false, ""},
-		{"2", true, ""},
-		{"v2", false, ""},
+		{"master", false, false, ""},
+		{"master", true, false, "master is now " + r.head},
+		{"master", false, true, "ls-remote"},
+		{"1.27", true, false, "1.27 is now " + now},
+		{"v1.2.0", true, false, ""},
+		{"v1.2.0", false, false, ""},
+		{r.head, false, false, ""},
+		{r.head, false, true, "404"},
+		{r.head, true, false, ""},
+		{"", false, false, "follows spin: spin says"},
+		{"", false, true, "which check does not know"},
+		{"v2", false, false, ""},
+		{"2", true, false, ""},
+		{"v2", false, false, ""},
 	}
 	for i, w := range want {
 		st := got[i]
-		if st.Newest != w.newest || st.Behind != w.behind || !strings.Contains(st.Note, w.note) || (w.note == "" && st.Note != "") {
-			t.Errorf("%s: %+v, want newest %q behind %v note %q", st.Entry.Name, st, w.newest, w.behind, w.note)
+		if st.Newest != w.newest || st.Behind != w.behind || st.Unread != w.unread || !strings.Contains(st.Note, w.note) || (w.note == "" && st.Note != "") {
+			t.Errorf("%s: %+v, want newest %q behind %v unread %v note %q", st.Entry.Name, st, w.newest, w.behind, w.unread, w.note)
 		}
+	}
+}
+
+// A kernel whose series kernel.org no longer lists was read: the answer is that the pin stays, and
+// a kernel.org that answers nothing is an entry not read.
+func TestAKernelSeriesThatIsOverWasRead(t *testing.T) {
+	kernel := &versions.Versions{Entries: []versions.Entry{{Name: "kernel", Kind: versions.Download, Version: "7.2.8", Track: "kernel"}}}
+	serve(t, map[string]string{"https://www.kernel.org/releases.json": `{"releases": [{"version": "7.3.1", "moniker": "stable"}]}`})
+	if st := Check(t.Context(), kernel)[0]; st.Unread || st.Behind || !strings.Contains(st.Note, "the series is over") {
+		t.Errorf("a series that is over: %+v", st)
+	}
+	serve(t, nil)
+	if st := Check(t.Context(), kernel)[0]; !st.Unread || st.Behind || !strings.Contains(st.Note, "kernel.org/releases.json answered") {
+		t.Errorf("a kernel.org that answers 404: %+v", st)
+	}
+}
+
+// An image whose registry does not answer for its digest is unread, not at its newest.
+func TestAnImageWhoseRegistryDoesNotAnswerIsUnread(t *testing.T) {
+	image := versions.Entry{Name: "i", Kind: versions.Image, Source: registry(t) + "/nothing", Version: "1.27", Pin: "sha256:old", Track: "digest"}
+	if st := Check(t.Context(), &versions.Versions{Entries: []versions.Entry{image}})[0]; !st.Unread || st.Behind || st.Note == "" {
+		t.Errorf("an image the registry has not: %+v", st)
 	}
 }

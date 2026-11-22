@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,4 +206,49 @@ func TestABumpSaysEveryEntryItMoved(t *testing.T) {
 	assert.Contains(t, out, "mirror: 20270101T000000Z  -> "+today)
 	err = run(t.Context(), []string{"bump", "-file", file, "snapshot", today, "x"})
 	assert.ErrorContains(t, err, "bump: <name> [version]")
+}
+
+// check counts what is behind and what it could not read apart, and fails apart for them: a row
+// not read may be behind, so its failure is another exit status and its message says how many
+// rows the count of what is behind is of. Each file here is answered without a network: an entry
+// with another in the file, and a track check does not know, which is a row it cannot read.
+func TestCheckCountsARowItCouldNotReadAndFailsApartForIt(t *testing.T) {
+	const lead = "- name: lead\n  kind: date\n  version: v2\n  track: branch\n"
+	const behind = "- name: behind\n  kind: date\n  version: v1\n  track: with lead\n"
+	const unknown = "- name: unknown\n  kind: date\n  version: v1\n  track: rumour\n"
+	for name, tc := range map[string]struct {
+		file   string
+		rows   []string
+		says   string
+		status int
+	}{
+		"nothing behind": {file: lead, rows: []string{"lead v2 v2"}}, //nolint:dupword // a row: its pin, then its newest
+		"one behind": {file: lead + behind, rows: []string{"behind v1 v2 behind"},
+			says: "1 behind; versions bump <name> moves one", status: 1},
+		"one not read": {file: lead + unknown, rows: []string{"unknown v1 not read: versions: unknown tracks \"rumour\", which check does not know"},
+			says: "1 not read, and 0 behind of the 1 that were: a row not read may be behind", status: 2},
+		"one behind and two not read": {file: lead + behind + unknown + "- name: other\n  kind: date\n  version: v1\n  track: gossip\n",
+			says: "2 not read, and 1 behind of the 2 that were: a row not read may be behind", status: 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "versions.yaml")
+			require.NoError(t, os.WriteFile(file, []byte(tc.file), 0o600))
+			var err error
+			out := stdout(t, func() { err = run(t.Context(), []string{"check", "-file", file}) })
+			// A row's columns, whatever the widest entry made their width.
+			var rows []string
+			for line := range strings.Lines(out) {
+				rows = append(rows, strings.Join(strings.Fields(line), " "))
+			}
+			for _, row := range tc.rows {
+				assert.Contains(t, rows, row)
+			}
+			if tc.says == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.says)
+			assert.Equal(t, tc.status, status(err))
+		})
+	}
 }

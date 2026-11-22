@@ -104,26 +104,42 @@ func TestTheNewestTagIsTheHighestRelease(t *testing.T) {
 // was published, and a bump to it failed on a 404.
 func TestTheNewestDownloadIsTheNewestPublished(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/qemu-11.1.1.tar.xz" && r.URL.Path != "/qemu-11.0.0.tar.xz" {
+		if r.URL.Path != "/qemu-11.1.1.tar.xz" && r.URL.Path != "/qemu-11.0.0.tar.xz" && r.URL.Path != "/qemu-v11.1.1.tar.xz" {
 			http.NotFound(w, r)
 		}
 	}))
 	defer srv.Close()
 	e := versions.Entry{Name: "qemu", Kind: versions.Download, Source: srv.URL + "/qemu-{version}.tar.xz", Version: "11.0.0"}
 	for _, tc := range []struct {
+		pin  string
 		tags []string
 		want string
 	}{
-		{[]string{"11.1.2", "11.1.1", "11.0.0"}, "11.1.1"},
-		{[]string{"11.1.2", "11.0.0"}, "11.0.0"},
-		{[]string{"11.0.0", "10.2.0"}, "11.0.0"},
+		{"11.0.0", []string{"11.1.2", "11.1.1", "11.0.0"}, "11.1.1"},
+		{"11.0.0", []string{"11.1.2", "11.0.0"}, "11.0.0"},
+		{"11.0.0", []string{"11.0.0", "10.2.0"}, "11.0.0"},
+		// A release candidate is before the release of its numbers and after every release before
+		// it: spin-machine pinned 11.2.0-rc0, and check could not read the row.
+		{"11.1.1-rc0", []string{"11.1.2", "11.1.1", "11.0.0"}, "11.1.1"},
+		{"11.1.2-rc0", []string{"11.1.2", "11.1.1", "11.0.0"}, "11.1.2-rc0"},
+		{"11.2.0-rc0", []string{"11.1.2", "11.1.1", "11.0.0"}, "11.2.0-rc0"},
+		{"v11.0.0-rc3", []string{"v11.1.2", "v11.1.1", "v11.0.0"}, "v11.1.1"},
 	} {
+		e.Version = tc.pin
 		got, err := newestPublished(t.Context(), e, tc.tags)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got != tc.want {
-			t.Errorf("tags %v: newest %q, want %q", tc.tags, got, tc.want)
+			t.Errorf("%s, tags %v: newest %q, want %q", tc.pin, tc.tags, got, tc.want)
+		}
+	}
+	// What starts with no number, or goes on other than with a -suffix, is not ordered: said, and
+	// never called current. The served file is not asked.
+	for _, pin := range []string{"master", "0123abc", "11.1.1rc0", "11.1.x", "20261122T000000Z", "99999999999999999999.1"} {
+		e.Version = pin
+		if got, err := newestPublished(t.Context(), e, []string{"11.1.1"}); err == nil || !strings.Contains(err.Error(), "cannot order it") {
+			t.Errorf("%s: newest %q, %v; want refused as a version the track cannot order", pin, got, err)
 		}
 	}
 }
