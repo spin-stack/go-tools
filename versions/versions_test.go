@@ -181,6 +181,10 @@ func TestAnEntryOutOfItsKindsFormIsRefused(t *testing.T) {
 			"a download whose source is not an https URL"},
 		{"a file per platform with one pin", "kind: download\n  source: https://x/{version}/t_{os}_{arch}.tgz\n  pin: " + strings.Repeat("a", 64),
 			"a source that says {os} or {arch} is a file per platform"},
+		{"a file per os with one pin", "kind: download\n  source: https://x/{version}/t_{os}.tgz\n  pin: " + strings.Repeat("a", 64),
+			"a source that says {os} or {arch} is a file per platform"},
+		{"a file per arch with one pin", "kind: download\n  source: https://x/{version}/t_{arch}.tgz\n  pin: " + strings.Repeat("a", 64),
+			"a source that says {os} or {arch} is a file per platform"},
 		{"pins and a pin", "kind: download\n  source: https://x/{version}/t_{os}_{arch}.tgz\n  pin: " + strings.Repeat("a", 64) +
 			"\n  pins: {linux/amd64: " + strings.Repeat("a", 64) + "}", "a pin and pins"},
 		{"pins for a source that names no platform", "kind: download\n  source: https://x/{version}/t_{os}.tgz\n  pins: {linux/amd64: " + strings.Repeat("a", 64) + "}",
@@ -419,9 +423,27 @@ func TestAnEntryNamesTheCommandThatMovesIt(t *testing.T) {
 	if err != nil || string(out) != strings.Replace(string(raw), "version: v1", "version: v2", 1) {
 		t.Errorf("a rewrite of an entry with a bump command: %v\n%s", err, out)
 	}
-	theirs := spin
-	theirs.Bump = "spin-os upgrade"
-	if spin.equal(theirs) {
-		t.Error("two entries moved by different commands are called the same")
+}
+
+// Two entries are the same only when every field is: a rewrite that changed any one of another
+// entry's is a rewrite Set refuses, since this is how it reads its own work back.
+func TestTwoEntriesAreTheSameOnlyWhenEveryFieldIs(t *testing.T) {
+	e := Entry{Name: "a", Kind: Download, Source: "s", Version: "v1", Pin: "p", Pins: map[string]string{"linux/amd64": "x"},
+		Archive: "r", Track: "t", Bump: "b", Note: "n"}
+	if !e.equal(e) {
+		t.Error("an entry is not itself")
+	}
+	for field, change := range map[string]func(*Entry){
+		"name": func(o *Entry) { o.Name = "z" }, "kind": func(o *Entry) { o.Kind = Git }, "source": func(o *Entry) { o.Source = "z" },
+		"version": func(o *Entry) { o.Version = "z" }, "pin": func(o *Entry) { o.Pin = "z" },
+		"pins":    func(o *Entry) { o.Pins = map[string]string{"linux/amd64": "z"} },
+		"archive": func(o *Entry) { o.Archive = "z" }, "track": func(o *Entry) { o.Track = "z" },
+		"bump": func(o *Entry) { o.Bump = "z" }, "note": func(o *Entry) { o.Note = "z" },
+	} {
+		o := e
+		change(&o)
+		if e.equal(o) || o.equal(e) {
+			t.Errorf("two entries that differ in their %s are called the same", field)
+		}
 	}
 }
