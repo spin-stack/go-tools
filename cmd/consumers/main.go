@@ -142,7 +142,7 @@ func report(ctx context.Context, t consumers.Table, c consumers.Consumer, s sour
 	}
 	lines = append(lines, copies(ctx, c, s, p, at)...)
 	if c.Packages != "" {
-		pkgs, err := packages(ctx, t.Scope, c, s, p, at)
+		pkgs, err := packages(ctx, t.Scopes, c, s, p, at)
 		if err != nil {
 			return append(lines, "unread   "+err.Error())
 		}
@@ -230,8 +230,8 @@ const npm = "https://registry.npmjs.org/"
 // packages holds what the consumer installs to the npm packages this repository's versions.yaml
 // pinned at commit at - for brand, the faces the stylesheets of that commit name, which a
 // consumer installs and does not copy. One it lacks or has at another version is said, and so is
-// one of scope it installs that was not pinned here.
-func packages(ctx context.Context, scope string, c consumers.Consumer, s source, p producer, at string) ([]string, error) {
+// one of scopes it installs that was not pinned here.
+func packages(ctx context.Context, scopes []string, c consumers.Consumer, s source, p producer, at string) ([]string, error) {
 	want, err := p.pinnedPackages(ctx, at)
 	if err != nil {
 		return nil, err
@@ -264,7 +264,8 @@ func packages(ctx context.Context, scope string, c consumers.Consumer, s source,
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(has)) {
-		if _, ok := want[name]; !ok && scope != "" && strings.HasPrefix(name, scope+"/") {
+		scope, _, _ := strings.Cut(name, "/")
+		if _, ok := want[name]; !ok && slices.Contains(scopes, scope) {
 			off = append(off, fmt.Sprintf("  %s %s is no package %s pins", name, has[name], p.name))
 		}
 	}

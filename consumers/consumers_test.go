@@ -3,6 +3,7 @@ package consumers_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ func write(t *testing.T, table string) string {
 
 func TestATableIsItsRepositoryAndItsConsumers(t *testing.T) {
 	got, err := consumers.Load(write(t, `name = "brand"
-scope = "@fontsource"
+scopes = ["@fontsource", "@fontsource-variable"]
 
 [[consumer]]
 name = "website"
@@ -38,7 +39,7 @@ pin = "versions.yaml"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != "brand" || got.Scope != "@fontsource" || len(got.Consumers) != 2 {
+	if got.Name != "brand" || !slices.Equal(got.Scopes, []string{"@fontsource", "@fontsource-variable"}) || len(got.Consumers) != 2 {
 		t.Fatalf("read %+v", got)
 	}
 	site := got.Consumers[0]
@@ -60,6 +61,10 @@ func TestATableThatCannotBeHeldIsRefused(t *testing.T) {
 		"one name twice":         {"name = \"brand\"\n" + row + row, `a consumer's name is its own: "a"`},
 		"a repo with a URL":      {"name = \"brand\"\n[[consumer]]\nname = \"a\"\nrepo = \"https://github.com/o/a\"\npin = \"v\"\n", "is not owner/name"},
 		"no place for its pin":   {"name = \"brand\"\n[[consumer]]\nname = \"a\"\nrepo = \"o/a\"\n", "a names no versions.yaml"},
+		"a scope with its slash": {"name = \"brand\"\nscopes = [\"@fontsource\", \"@fontsource/\"]\n" + row, `scope "@fontsource/" is not an npm scope`},
+		"a scope with no @":      {"name = \"brand\"\nscopes = [\"fontsource\"]\n" + row, `scope "fontsource" is not an npm scope`},
+		"a scope and more":       {"name = \"brand\"\nscopes = [\"x@fontsource\"]\n" + row, `scope "x@fontsource" is not an npm scope`},
+		"one scope, not a list":  {"name = \"brand\"\nscope = \"@fontsource\"\n" + row, "scope is no field"},
 		"what is not TOML":       {"name = brand", "expected value"},
 		"a file that is not one": {"", ""},
 	} {

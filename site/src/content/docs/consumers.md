@@ -10,7 +10,7 @@ every place that copies, and `consumers` reads each one and says where it is.
 
 ```toml title="consumers.toml"
 name = "brand"            # what a consumer's versions.yaml calls this repository
-scope = "@fontsource"     # optional: the npm scope whose packages are this repository's to pin
+scopes = ["@fontsource", "@fontsource-variable"]   # optional: the npm scopes whose packages are this repository's to pin
 
 [[consumer]]
 name = "website"          # what the report calls it
@@ -33,8 +33,16 @@ For each consumer, read at its default branch through `gh api`, or from a checko
   and how many commits behind main it is. A consumer with no pin is compared with main.
 - **copies** - whether each copied file is byte for byte what this repository had at that commit.
 - **packages** - whether its `package.json` installs the npm packages this repository's
-  `versions.yaml` pinned at that commit, at those versions, and nothing else of `scope`. For
+  `versions.yaml` pinned at that commit, at those versions, and nothing else of `scopes`. For
   brand these are the faces its stylesheets name, which a consumer installs and does not copy.
+  A scope is whole, the name before a package's slash, and each one is listed: `@fontsource`
+  does not hold `@fontsourcery/x`, and it does not hold `@fontsource-variable/inter` either,
+  which is why brand lists both - the variable package is the wrong Inter a fork comes with, and
+  the report says `@fontsource-variable/inter ^5.3.0 is no package brand pins`.
+
+The report's lines are `pin`, `copies` and `packages`, and a package is called a package. brand's
+own command, which this one replaced, said `fonts` and `face`: anything that reads the report
+for those words reads `packages` and `package` now.
 
 It exits 0 whatever it finds. A consumer that is behind is that repository's to fix, and the
 gate of the one it copies from must not fail for it. A repository that cannot be read is said

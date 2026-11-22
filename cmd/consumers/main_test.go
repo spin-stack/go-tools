@@ -103,13 +103,14 @@ func TestEachConsumerIsReportedAsWhatItIs(t *testing.T) {
 		"behind":  {"versions.yaml": pin(first, "v20261101.01", "github-release"), "brand.css": "old\n", "package.json": brandsFaces},
 		"edited":  {"versions.yaml": pin(head, "main", "branch"), "brand.css": "new\nand a line by hand\n", "package.json": brandsFaces},
 		"faces": {"versions.yaml": pin(head, "main", "branch"), "brand.css": "new\n",
-			"package.json": `{"dependencies": {"@fontsource/inter": "^5.3.0", "@fontsource/ibm-plex-mono": "5.3.0", "@fontsourcery/x": "1.0.0"}}`},
+			"package.json": `{"dependencies": {"@fontsource/inter": "^5.3.0", "@fontsource/ibm-plex-mono": "5.3.0", "@fontsourcery/x": "1.0.0",
+				"@fontsource-variable/inter": "^5.3.0", "fontsource": "1.0.0"}}`},
 		"unpinned": {"brand.css": "a palette of its own\n", "package.json": brandsFaces},
 		"other":    {"versions.yaml": "- name: task\n  version: 3.54.0\n- name: brand\n  version: main\n", "brand.css": "new\n", "package.json": brandsFaces},
 		"copyless": {"versions.yaml": pin(head, "main", "branch"), "package.json": brandsFaces},
 		"bare":     {"versions.yaml": pin(head, "main", "branch"), "brand.css": "new\n"},
 	}
-	content := "name = \"brand\"\nscope = \"@fontsource\"\n\n"
+	content := "name = \"brand\"\nscopes = [\"@fontsource\", \"@fontsource-variable\"]\n\n"
 	args := []string{"-dir", b.dir, "-main", "main"}
 	for _, name := range []string{"current", "behind", "edited", "faces", "unpinned", "other", "copyless", "bare", "gone"} {
 		content += "[[consumer]]\nname = \"" + name + "\"\nrepo = \"example/" + name + "\"\npin = \"versions.yaml\"\npackages = \"package.json\"\n" +
@@ -138,7 +139,7 @@ func TestEachConsumerIsReportedAsWhatItIs(t *testing.T) {
 		"faces": "  pin      HEAD (main, track branch), the newest release v20261102.01; 0 commits behind main\n" +
 			"  copies   all 1 are brand's at HEAD\n  packages not brand's at HEAD, which pins 2:\n" +
 			"    @fontsource/inter is ^5.3.0, and brand's is 5.3.0\n    @fontsource/jetbrains-mono 5.3.0 is not installed\n" +
-			"    @fontsource/ibm-plex-mono 5.3.0 is no package brand pins",
+			"    @fontsource-variable/inter ^5.3.0 is no package brand pins\n    @fontsource/ibm-plex-mono 5.3.0 is no package brand pins",
 		"unpinned": "  pin      none: it has no versions.yaml. Held to nothing, and compared with main\n" +
 			"  copies   1 of 1 are not brand's at main:\n    brand.css is not dist/tokens.css\n" +
 			"  packages brand's at main: @fontsource/inter, @fontsource/jetbrains-mono",
@@ -201,13 +202,13 @@ func TestPackagesAreHeldToThePinnedCommitNotToMain(t *testing.T) {
 	p := producer{"brand", b.dir, "main"}
 	at := checkout{c.dir, "HEAD"}
 
-	got := strings.Join(report(t.Context(), consumers.Table{Scope: "@fontsource"}, row, at, p), "\n")
+	got := strings.Join(report(t.Context(), consumers.Table{Scopes: []string{"@fontsource"}}, row, at, p), "\n")
 	if want := "\npackages brand pinned none at " + before[:12] + ", and it installs:\n  @fontsource/ibm-plex-sans 5.3.0 is no package brand pins"; !strings.HasSuffix(got, want) {
 		t.Errorf("got:\n%s\nwant it to end:%s", got, want)
 	}
 	// At a commit with no versions.yaml at all, the same: nothing was pinned.
 	c.commit(map[string]string{"versions.yaml": pin(unpinned, "main", "branch")})
-	got = strings.Join(report(t.Context(), consumers.Table{Scope: "@fontsource"}, row, at, p), "\n")
+	got = strings.Join(report(t.Context(), consumers.Table{Scopes: []string{"@fontsource"}}, row, at, p), "\n")
 	if want := "\npackages brand pinned none at " + unpinned[:12] + ", and it installs:\n  @fontsource/ibm-plex-sans 5.3.0 is no package brand pins"; !strings.HasSuffix(got, want) {
 		t.Errorf("got:\n%s\nwant it to end:%s", got, want)
 	}
