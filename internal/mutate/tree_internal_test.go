@@ -1,7 +1,6 @@
 package mutate
 
 import (
-	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,8 +11,8 @@ import (
 	"github.com/spin-stack/go-tools/internal/gittest"
 )
 
-// A tree copies the module as git sees it - what it tracks and what it does not ignore - links a
-// directory it ignores, leaves out a file it ignores, and after each run puts back whatever the
+// A tree copies the module as git sees it - what it tracks and what it does not ignore - leaves
+// out a directory or a file it ignores, and after each run puts back whatever the
 // run left, changed or removed, naming each by its path in the source, which is never written.
 func TestATreeIsTheModuleAsGitSeesItPutBackAfterEachRun(t *testing.T) {
 	root := gitModule(t)
@@ -221,11 +220,8 @@ func copiedAsGitSeesIt(t *testing.T, dir string) {
 			t.Errorf("%s is not copied: %v", name, err)
 		}
 	}
-	if info, err := os.Lstat(filepath.Join(dir, "../out")); err != nil || info.Mode()&fs.ModeSymlink == 0 {
-		t.Errorf("the ignored directory is not linked: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "../out/built.txt")); err != nil {
-		t.Errorf("the ignored directory is not read through its link: %v", err)
+	if _, err := os.Lstat(filepath.Join(dir, "../out")); err == nil {
+		t.Error("an ignored directory is in the copy")
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "skipped.log")); err == nil {
 		t.Error("an ignored file was copied")

@@ -22,9 +22,11 @@ import (
 // files stayed in the checkout when the run was over.
 //
 // The copy is the module as git sees it: its tracked files and those it does not ignore, so a
-// test reads testdata/ and ../../docs as it would in place. A directory git ignores (node_modules,
-// a build's output) and a repository nested in the module are linked, not copied: read as they
-// are, and shared. It is a git repository of its own, those files staged (copyModule says why).
+// test reads testdata/ and ../../docs as it would in place. What git ignores is left out, as a
+// clean checkout - CI's - has none of it. Shared, a developer's _output was one directory for
+// tests run side by side in different copies, which collided there and refused edits CI let
+// through (spin-stack/machine#418). A repository nested in the module is linked, not
+// copied. It is a git repository of its own, those files staged (copyModule says why).
 // Outside a git work tree it is every file under the module's root. The tests
 // are built where the sources are, and only run here.
 type Tree struct {
@@ -181,8 +183,8 @@ func copyModule(src, dst string) (*treeCopy, error) {
 }
 
 // moduleFiles is what of the module under root is copied, by its path from root: what git
-// tracks or does not ignore, and each directory it ignores whole, which is linked; and whether
-// root is in a git work tree, which is what said so.
+// tracks or does not ignore, a nested repository as its directory; and whether root is in a git
+// work tree, which is what said so.
 func moduleFiles(root string) ([]string, bool, error) {
 	inside := exec.Command("git", "rev-parse", "--is-inside-work-tree")
 	inside.Dir = root
@@ -190,25 +192,15 @@ func moduleFiles(root string) ([]string, bool, error) {
 		files, err := walkFiles(root)
 		return files, false, err
 	}
+	list := exec.Command("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	list.Dir = root
+	said, err := output("listing", list)
+	if err != nil {
+		return nil, false, fmt.Errorf("git ls-files: %w", err)
+	}
 	var out []string
-	for _, args := range [][]string{
-		{"ls-files", "-z", "--cached", "--others", "--exclude-standard"},
-		{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"},
-	} {
-		list := exec.Command("git", args...)
-		list.Dir = root
-		said, err := output("listing", list)
-		if err != nil {
-			return nil, false, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-		}
-		ignored := slices.Contains(args, "--ignored")
-		for path := range strings.SplitSeq(string(said), "\x00") {
-			dir := strings.HasSuffix(path, "/")
-			// An ignored file is a build's or a run's output, which no test reads in place of
-			// the source; a directory may be what one does read, node_modules or a checkout.
-			if path == "" || ignored && !dir {
-				continue
-			}
+	for path := range strings.SplitSeq(string(said), "\x00") {
+		if path != "" {
 			out = append(out, filepath.FromSlash(strings.TrimSuffix(path, "/")))
 		}
 	}
@@ -236,7 +228,7 @@ func walkFiles(root string) ([]string, error) {
 }
 
 // put makes rel in the copy as it is in the source: a regular file copied, a symlink with the
-// same target, and a directory - a nested repository, an ignored one - linked to the source's.
+// same target, and a directory - a nested repository - linked to the source's.
 func (c *treeCopy) put(rel string) error {
 	src, dst := filepath.Join(c.src, rel), filepath.Join(c.dst, rel)
 	if err := os.RemoveAll(dst); err != nil {
