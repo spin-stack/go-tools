@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/spin-stack/go-tools/internal/gittest"
 	"github.com/spin-stack/go-tools/internal/mutate"
 )
 
@@ -331,4 +332,57 @@ func TestEachTestProcessHasATemporaryDirectoryOfItsOwn(t *testing.T) {
 	for _, e := range left {
 		assert.NotContains(t, e.Name(), "claimed-", "a test's temporary file was left in the temporary directory mutate was given")
 	}
+}
+
+// A directory git ignores is not in the copy, as it is not in a clean checkout: a developer's
+// _output, where a build put its binaries, was linked into every copy, so tests run side by side
+// in different copies wrote into one directory, collided, and failed. Each failure refused an edit
+// that CI, whose checkout had no _output, let through (spin-stack/machine#418). Here each test
+// claims a file in ../_output and leaves it: shared, Half's edit, which nothing checks, is refused
+// by a claim another run made. The checkout's _output keeps only what it held.
+func TestADirectoryGitIgnoresIsNotSharedWithTheCopies(t *testing.T) {
+	dir := t.TempDir()
+	claim := "\tif err := os.MkdirAll(\"_output\", 0o700); err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+		"\tf, err := os.OpenFile(filepath.Join(\"_output\", \"claimed-\"+t.Name()), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)\n" +
+		"\tif err != nil {\n\t\tt.Fatal(\"_output is shared: \", err)\n\t}\n\t_ = f.Close()\n"
+	for name, body := range map[string]string{
+		"go.mod":             "module example.com/ignored\n\ngo 1.24\n",
+		".gitignore":         "_output/\n",
+		"_output/bin/a-tool": "built by the checkout's own build\n",
+		"code.go":            "package ignored\n\nfunc Double(n int) int {\n\treturn n + n\n}\n\nfunc Half(n int) int {\n\treturn n / 2\n}\n",
+		"code_test.go": "package ignored\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n\t\"testing\"\n)\n\n" +
+			"func TestDouble(t *testing.T) {\n" + claim + "\tif Double(2) != 4 {\n\t\tt.Fatal(\"not doubled\")\n\t}\n}\n\n" +
+			"func TestHalf(t *testing.T) {\n" + claim + "\t_ = Half(4)\n}\n",
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	}
+	gittest.Run(t, dir, "init", "-q")
+	gittest.Run(t, dir, "add", ".")
+	plan, err := mutate.Plan(filepath.Join(dir, "code.go"), map[int]bool{4: true, 8: true})
+	require.NoError(t, err)
+	var double, half int
+	for i := range plan {
+		plan[i].ID = i + 1
+		if plan[i].Func == "Double" {
+			double++
+		} else {
+			half++
+		}
+	}
+	require.Positive(t, double)
+	require.Positive(t, half)
+	var said strings.Builder
+	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
+	require.NoError(t, err)
+	assert.Equal(t, double, tally.Killed, "only Double's edits are refused: %s", said.String())
+	assert.Len(t, tally.Survived, half, "Half's edits, which nothing checks, were refused by a claim another copy made: %s", said.String())
+	left, err := os.ReadDir(filepath.Join(dir, "_output"))
+	require.NoError(t, err)
+	var names []string
+	for _, e := range left {
+		names = append(names, e.Name())
+	}
+	assert.Equal(t, []string{"bin"}, names, "a test wrote into the checkout's _output")
 }
