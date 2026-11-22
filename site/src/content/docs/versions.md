@@ -121,8 +121,11 @@ go tool versions bump kernel 7.2.9    # or to a version you name
 A bump downloads what the new version names and pins its hash; for an image, it asks the registry
 for the digest. It builds nothing, and the entry's `note` says what to run before committing.
 
-`GITHUB_TOKEN`, when set, is sent to api.github.com, which answers only sixty unauthenticated
-requests an hour.
+`GITHUB_TOKEN` or `GH_TOKEN`, when set, is sent to api.github.com, which answers only sixty
+unauthenticated requests an hour, and nothing of a private repository. Through
+[the common tasks](../tasks/) a person needs neither: `go tool task versions` and
+`go tool task bump` take `gh`'s token when no token is set and `gh` is logged in, as `release`
+does.
 
 ### An entry check could not read
 

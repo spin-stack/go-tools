@@ -24,18 +24,19 @@ func taskExe(t *testing.T) string {
 // stubs is a directory of the commands tasks.yml calls, each a program that writes its name and
 // arguments as a line of log and answers what a task reads from it. `versions check` fails for
 // a file named behind.yaml, and as it does for an entry it could not read for one named
-// unread.yaml; `proven` fails when REFUSE is set.
+// unread.yaml, and with SHOW_TOKEN set `versions` also logs the tokens it was run with; `proven`
+// fails when REFUSE is set, and `gh auth token` when LOGGED_OUT is.
 func stubs(t *testing.T) (bin, log string) {
 	t.Helper()
 	bin, log = t.TempDir(), filepath.Join(t.TempDir(), "log")
 	for name, answer := range map[string]string{
-		"versions":  `case "$*" in "version actionlint") echo v1.7.12 ;; *behind.yaml) exit 1 ;; *unread.yaml) exit 2 ;; esac`,
+		"versions":  `[ -z "${SHOW_TOKEN:-}" ] || echo "GITHUB_TOKEN=${GITHUB_TOKEN:-} GH_TOKEN=${GH_TOKEN:-}" >> '` + log + `'; case "$*" in "version actionlint") echo v1.7.12 ;; *behind.yaml) exit 1 ;; *unread.yaml) exit 2 ;; esac`,
 		"proven":    `[ -z "${REFUSE:-}" ]`,
 		"release":   `echo v20261122.01`,
 		"consumers": ``,
 		"go":        ``,
 		"git":       `case "$1" in rev-parse) echo 0123abc ;; esac`,
-		"gh":        `case "$1" in auth) echo a-token ;; repo) echo o/r ;; esac`,
+		"gh":        `case "$1" in auth) [ -z "${LOGGED_OUT:-}" ] && echo a-token ;; repo) echo o/r ;; esac`,
 	} {
 		script := "#!/bin/sh\necho \"" + name + " $*\" >> '" + log + "'\n" + answer + "\n"
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o700); err != nil { //nolint:gosec // a program the test runs
@@ -142,11 +143,11 @@ func TestARepositoryThatIncludesTheTasksHasThem(t *testing.T) {
 		t.Errorf("%d tasks, and the repository wrote none: %v", len(listed.Tasks), has)
 	}
 
-	if out, ok, ran := r.task("internal/x", "versions"); !ok || len(ran) != 1 || ran[0] != "versions check -file versions.yaml" {
+	if out, ok, ran := r.task("internal/x", "versions"); !ok || strings.Join(ran, "\n") != "gh auth token\nversions check -file versions.yaml" {
 		t.Errorf("from a directory of the repository, task versions passed=%t and ran %v\n%s", ok, ran, out)
 	}
-	r.ran([]string{"versions bump -file versions.yaml golangci-lint"}, "bump", "NAME=golangci-lint")
-	r.ran([]string{"versions bump -file cmd/sfw/versions.yaml socket v1.2.0"}, "bump", "NAME=socket", "TO=v1.2.0", "FILE=cmd/sfw/versions.yaml")
+	r.ran([]string{"gh auth token", "versions bump -file versions.yaml golangci-lint"}, "bump", "NAME=golangci-lint")
+	r.ran([]string{"gh auth token", "versions bump -file cmd/sfw/versions.yaml socket v1.2.0"}, "bump", "NAME=socket", "TO=v1.2.0", "FILE=cmd/sfw/versions.yaml")
 	if ran := r.refused("missing required variables: NAME", "bump"); len(ran) != 0 {
 		t.Errorf("a bump of nothing ran %v", ran)
 	}
@@ -162,9 +163,38 @@ func TestVersionsAsksEveryFileOfPins(t *testing.T) {
 	} {
 		r := newRepository(t, map[string]string{"Taskfile.yml": including("VERSIONS_FILES: "+files, "")})
 		ran := r.refused(status, "versions")
-		if want := "versions check -file " + strings.ReplaceAll(files, " ", "\nversions check -file "); strings.Join(ran, "\n") != want {
+		if want := "gh auth token\nversions check -file " + strings.ReplaceAll(files, " ", "\nversions check -file "); strings.Join(ran, "\n") != want {
 			t.Errorf("ran:\n%s\nwant:\n%s", strings.Join(ran, "\n"), want)
 		}
+	}
+}
+
+// The tasks that read upstreams read them with a token: the one a workflow set, untouched and gh
+// not asked, or a person's from gh - and with none, where gh is logged out, they run all the
+// same, since check says of an entry it could not read that it could not.
+func TestVersionsAndBumpReadUpstreamsWithATokenWhereThereIsOne(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env    []string
+		asks   bool
+		tokens string
+	}{
+		"a person, gh logged in":     {nil, true, "GITHUB_TOKEN= GH_TOKEN=a-token"},
+		"a person, gh logged out":    {[]string{"LOGGED_OUT=1"}, true, "GITHUB_TOKEN= GH_TOKEN="},
+		"a workflow's GITHUB_TOKEN":  {[]string{"GITHUB_TOKEN=the-runs"}, false, "GITHUB_TOKEN=the-runs GH_TOKEN="},
+		"a workflow's GH_TOKEN":      {[]string{"GH_TOKEN=an-apps"}, false, "GITHUB_TOKEN= GH_TOKEN=an-apps"},
+		"a workflow's two":           {[]string{"GITHUB_TOKEN=the-runs", "GH_TOKEN=an-apps"}, false, "GITHUB_TOKEN=the-runs GH_TOKEN=an-apps"},
+		"a person's, exported empty": {[]string{"GITHUB_TOKEN=", "GH_TOKEN="}, true, "GITHUB_TOKEN= GH_TOKEN=a-token"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRepository(t, map[string]string{"Taskfile.yml": including("", "")})
+			r.env = append(r.env, append(tc.env, "SHOW_TOKEN=1")...)
+			var asked []string
+			if tc.asks {
+				asked = []string{"gh auth token"}
+			}
+			r.ran(append(asked, "versions check -file versions.yaml", tc.tokens), "versions")
+			r.ran(append(asked, "versions bump -file versions.yaml task", tc.tokens), "bump", "NAME=task")
+		})
 	}
 }
 
@@ -341,8 +371,8 @@ func TestConsumersReadsTheRepositorysTable(t *testing.T) {
 // go-tools sets GO_TOOLS, and each command is then its tree's.
 func TestGoToolsRunsItsTreesCommands(t *testing.T) {
 	r := newRepository(t, map[string]string{"Taskfile.yml": including("GO_TOOLS: 'go run ./cmd/'", ""), "consumers.toml": ""})
-	r.ran([]string{"go run ./cmd/versions check -file versions.yaml"}, "versions")
-	r.ran([]string{"go run ./cmd/versions bump -file versions.yaml task"}, "bump", "NAME=task")
+	r.ran([]string{"gh auth token", "go run ./cmd/versions check -file versions.yaml"}, "versions")
+	r.ran([]string{"gh auth token", "go run ./cmd/versions bump -file versions.yaml task"}, "bump", "NAME=task")
 	r.ran([]string{"git fetch --quiet --tags origin main", "go run ./cmd/consumers -table consumers.toml"}, "consumers")
 }
 
