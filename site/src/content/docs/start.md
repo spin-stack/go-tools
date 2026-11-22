@@ -46,11 +46,13 @@ move it as any dependency, and `go get github.com/spin-stack/go-tools@latest` ta
 
 ```yaml title="Taskfile.yml"
 includes:
-  common: {taskfile: '{{.GO_TOOLS_TASKS}}', flatten: true, vars: {GATE_WORKFLOW: ci.yml, GATE_JOBS: Gate}}
+  common: {taskfile: '{{.GO_TOOLS_TASKS}}', flatten: true}
 ```
 
 gives the repository `versions`, `bump`, `release`, `lint:workflows` and `consumers` as every
-other has them. [The common tasks](../tasks/) says what each does and what the vars are.
+other has them. [The common tasks](../tasks/) says what each does, and what a repository states
+in the include's `vars`: among them [how it is released](../tasks/#releasing), without which
+`release` refuses.
 
 ## Run them where developers already run checks
 

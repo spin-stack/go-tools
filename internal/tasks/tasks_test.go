@@ -160,10 +160,10 @@ func TestVersionsAsksEveryFileOfPins(t *testing.T) {
 	}
 }
 
-// A repository's parameters reach release: its gate's workflow and jobs are what proven is
-// asked, and its files are on the release - of main's head, or of the commit named.
-func TestReleaseIsOfTheRepositorysGateAndFiles(t *testing.T) {
-	r := newRepository(t, map[string]string{"Taskfile.yml": including("GATE_WORKFLOW: pages.yml, GATE_JOBS: 'Gate,Site', RELEASE_FILES: _output/a.tar.gz _output/checksums.txt", "")})
+// What a repository states of its release reaches it: its proof's workflow and jobs are what
+// proven is asked, and its files are on the release - of main's head, or of the commit named.
+func TestReleaseIsOfTheRepositorysProofAndFiles(t *testing.T) {
+	r := newRepository(t, map[string]string{"Taskfile.yml": including("RELEASE: {map: {proof: pages.yml, jobs: 'Gate,Site', files: _output/a.tar.gz _output/checksums.txt}}", "")})
 	asked := "proven release -repo o/r -sha 0123abc -workflow pages.yml -events push,pull_request -ran Gate,Site -also "
 	r.ran([]string{
 		"git fetch --quiet --tags origin main", "gh auth token", "git rev-parse --verify origin/main^{commit}",
@@ -190,7 +190,7 @@ func TestReleaseIsOfTheRepositorysGateAndFiles(t *testing.T) {
 // asked of proven and named, the files a release carries are listed, and gh creates nothing. A
 // commit proven refuses is refused dry too, and so is a file that is not there.
 func TestADryReleaseRefusesWhatAReleaseWouldAndReleasesNothing(t *testing.T) {
-	r := newRepository(t, map[string]string{"Taskfile.yml": including("GATE_WORKFLOW: ci.yml, GATE_JOBS: Gate, RELEASE_FILES: _output/*.tar.gz _output/checksums.txt", ""),
+	r := newRepository(t, map[string]string{"Taskfile.yml": including("RELEASE: {map: {proof: ci.yml, jobs: Gate, files: _output/*.tar.gz _output/checksums.txt}}", ""),
 		"_output/a.tar.gz": "", "_output/checksums.txt": ""})
 	dry := []string{
 		"git fetch --quiet --tags origin main", "gh auth token", "git rev-parse --verify origin/main^{commit}",
@@ -207,7 +207,7 @@ func TestADryReleaseRefusesWhatAReleaseWouldAndReleasesNothing(t *testing.T) {
 		}
 	}
 
-	bare := newRepository(t, map[string]string{"Taskfile.yml": including("GATE_WORKFLOW: ci.yml, GATE_JOBS: Gate", "")})
+	bare := newRepository(t, map[string]string{"Taskfile.yml": including("RELEASE: {map: {proof: ci.yml, jobs: Gate}}", "")})
 	bare.ran(dry, "release", "RELEASE_DRY=1")
 
 	if err := os.Remove(filepath.Join(r.dir, "_output/checksums.txt")); err != nil {
@@ -222,12 +222,62 @@ func TestADryReleaseRefusesWhatAReleaseWouldAndReleasesNothing(t *testing.T) {
 	}
 }
 
-// A repository that names no gate does not release, and is told so before anything runs.
-func TestARepositoryWithNoGateDoesNotRelease(t *testing.T) {
-	r := newRepository(t, map[string]string{"Taskfile.yml": including("", "")})
-	if ran := r.refused("missing required variables: GATE_WORKFLOW, GATE_JOBS", "release"); len(ran) != 0 {
-		t.Errorf("ran %v", ran)
+// A repository this task does not release cannot be made to: one that states nothing of its
+// release, one that releases elsewhere, one that does not release, and one whose statement proves nothing are
+// each refused with that reason before anything runs, whatever the command line and the
+// environment say - the vars the task reads, the vars it had before, the map spelled as a string.
+// spin-machine and spin-ami both have a ci.yml with a Gate job, and two words were a release.
+func TestNoCommandLineReleasesARepositoryThatDoesNot(t *testing.T) {
+	said := []string{
+		"RELEASE=ci.yml", "RELEASE={proof: ci.yml, jobs: Gate}", `RELEASE={"proof":"ci.yml","jobs":"Gate"}`, "RELEASE=map[jobs:Gate proof:ci.yml]",
+		"RELEASE_STATED=true", "RELEASE_ELSEWHERE=", "RELEASE_NONE=", "RELEASE_PROOF=ci.yml", "RELEASE_JOBS=Gate", "RELEASE_FILES=a.tar.gz",
+		"GATE_WORKFLOW=ci.yml", "GATE_JOBS=Gate", "proof=ci.yml", "jobs=Gate",
 	}
+	for name, tc := range map[string]struct{ vars, says string }{
+		"states nothing":               {"", "states no RELEASE, so nothing says how it is released"},
+		"states something else":        {"VERSIONS_FILES: versions.yaml", "states no RELEASE, so nothing says how it is released"},
+		"states a word":                {"RELEASE: ci.yml", "states no RELEASE, so nothing says how it is released"},
+		"releases elsewhere":           {"RELEASE: {map: {elsewhere: release.yml}}", "this repository releases, but not with this task: release.yml does"},
+		"does not release":             {"RELEASE: {map: {none: its workflow publishes another's}}", "this repository does not release. Its Taskfile says why (RELEASE's none): its workflow publishes another's"},
+		"elsewhere, and a proof":       {"RELEASE: {map: {proof: ci.yml, jobs: Gate, elsewhere: release.yml}}", "this repository releases, but not with this task: release.yml does"},
+		"none, and a proof":            {"RELEASE: {map: {proof: ci.yml, jobs: Gate, none: nothing releases it}}", "this repository does not release."},
+		"names a proof and no jobs":    {"RELEASE: {map: {proof: ci.yml}}", "RELEASE names no proof and jobs"},
+		"names jobs and no proof":      {"RELEASE: {map: {jobs: Gate}}", "RELEASE names no proof and jobs"},
+		"names files and nothing else": {"RELEASE: {map: {files: a.tar.gz}}", "RELEASE names no proof and jobs"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRepository(t, map[string]string{"Taskfile.yml": including(tc.vars, "")})
+			lines := [][]string{{"release"}, {"release", "RELEASE_DRY=1"}, append([]string{"release"}, said...), append([]string{"release", "RELEASE_DRY=1"}, said...)}
+			for _, one := range said {
+				lines = append(lines, []string{"release", one})
+			}
+			for _, args := range lines {
+				if ran := r.refused(tc.says, args...); len(ran) != 0 {
+					t.Errorf("task %v ran %v", args, ran)
+				}
+			}
+			r.env = append(r.env, said...)
+			if ran := r.refused(tc.says, "release"); len(ran) != 0 {
+				t.Errorf("with %v in the environment, task release ran %v", said, ran)
+			}
+		})
+	}
+}
+
+// What a repository states is what is asked, whatever the command line and the environment say
+// beside it: another proof, other jobs, more files.
+func TestNoCommandLineChangesWhatARepositoryStatesOfItsRelease(t *testing.T) {
+	r := newRepository(t, map[string]string{"Taskfile.yml": including("RELEASE: {map: {proof: pages.yml, jobs: Site}}", "")})
+	stated := []string{
+		"git fetch --quiet --tags origin main", "gh auth token", "git rev-parse --verify origin/main^{commit}",
+		"gh repo view --json nameWithOwner --jq .nameWithOwner",
+		"proven release -repo o/r -sha 0123abc -workflow pages.yml -events push,pull_request -ran Site -also ", "release 0123abc",
+		"gh release create v20261122.01 --repo o/r --target 0123abc --title v20261122.01 --latest --generate-notes",
+	}
+	said := []string{"RELEASE=ci.yml", "RELEASE_PROOF=ci.yml", "RELEASE_JOBS=Gate", "RELEASE_FILES=a.tar.gz", "RELEASE_ELSEWHERE=x", "RELEASE_NONE=x", "RELEASE_STATED=false"}
+	r.ran(stated, append([]string{"release"}, said...)...)
+	r.env = append(r.env, said...)
+	r.ran(stated, "release")
 }
 
 // A repository that defines a common name itself is refused by Task, whatever task is asked for:

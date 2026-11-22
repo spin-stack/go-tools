@@ -7,17 +7,14 @@
 #     common:
 #       taskfile: '{{.GO_TOOLS_TASKS}}'
 #       flatten: true
-#       vars: {GATE_WORKFLOW: ci.yml, GATE_JOBS: Gate}
 #
 # flatten: the tasks keep these names, `task versions` and not `task common:versions`, and a
 # repository that defines one of them itself is refused by Task ("Found multiple tasks"), so a
 # name here has one meaning everywhere. What differs between repositories is the include's vars,
 # and nothing else:
 #
-#   GATE_WORKFLOW   the workflow whose pass proves a commit, as ci.yml; a repository that sets
-#   GATE_JOBS       neither does not release, and `task release` says so. The jobs are those the
-#                   pass must have run, by the start of their name and comma-separated.
-#   RELEASE_FILES   what a release carries besides its tag: files, or globs of them.
+#   RELEASE         how the repository is released, a map: `release` below says what it holds and
+#                   why it is one.
 #   VERSIONS_FILES  every file of pins the repository has, when versions.yaml is not the only one.
 #   WORKFLOWS_ALSO  a second .github directory the repository holds - an example it publishes.
 #   CONSUMERS       where the consumers table is, when it is not consumers.toml.
@@ -53,13 +50,53 @@ tasks:
       - '{{.GO_TOOLS}}versions bump -file {{.FILE | default "versions.yaml"}} {{.NAME}} {{.TO}}'
 
   release:
-    desc: Release main's head (or SHA) as the next v<YYYYMMDD>.<NN> of today, in UTC, with RELEASE_FILES. A person runs it, with gh logged in, or a workflow with GH_TOKEN; it refuses a commit GATE_JOBS of GATE_WORKFLOW has not passed on, and one released already. RELEASE_DRY=1 refuses what a release would and prints the name, and releases nothing.
-    requires:
-      vars: [GATE_WORKFLOW, GATE_JOBS]
+    desc: Release main's head (or SHA) as the next v<YYYYMMDD>.<NN> of today, in UTC, with RELEASE's files - in a repository whose include states RELEASE's proof and jobs, and refused in every other. A person runs it, with gh logged in, or a workflow with GH_TOKEN; it refuses a commit the jobs of the proof workflow have not passed on, and one released already. RELEASE_DRY=1 refuses what a release would and prints the name, and releases nothing.
+    # RELEASE is a map, of the include's vars:
+    #
+    #   vars:
+    #     RELEASE:
+    #       map: {proof: ci.yml, jobs: Gate, files: _output/*.tar.gz}
+    #
+    #   proof      the workflow whose pass proves a commit can be released.
+    #   jobs       the jobs that pass must have run, by the start of their name and comma-separated.
+    #   files      what the release carries besides its tag: files, or globs of them.
+    #   elsewhere  the repository releases, but not with this task: the file under
+    #              .github/workflows that does, as release.yml. A release built from its tag - by
+    #              GoReleaser, an image, a signature - is one this task cannot cut.
+    #   none       the repository does not release, and why in a sentence.
+    #
+    # The task refuses with `elsewhere` or `none`, whatever else the map holds. They are keys of
+    # the Taskfile and not a comment in it so that a gate can read them: a repository with a
+    # release workflow that has not said `elsewhere` is one a check can find.
+    #
+    # A map because the command line and the environment hold strings and nothing else. Under Task
+    # 3.54.0 a var of the command line or the environment reaches an included task wherever the
+    # include states none of that name, so two plain vars would be two words away from a release: in a
+    # repository that releases by its own workflow and has a ci.yml with a Gate job, `task release`
+    # with those two words would publish an empty release marked latest. No string is a map, and where
+    # the include states one it wins over both. So a repository that states nothing, `elsewhere`
+    # or `none` is one this task cannot be made to release. The vars below are the task's own, which Task
+    # reads after every other: none of them is the command line's either.
+    vars:
+      RELEASE_STATED: '{{kindIs "map" .RELEASE}}'
+      RELEASE_ELSEWHERE: '{{if kindIs "map" .RELEASE}}{{.RELEASE.elsewhere}}{{end}}'
+      RELEASE_NONE: '{{if kindIs "map" .RELEASE}}{{.RELEASE.none}}{{end}}'
+      RELEASE_PROOF: '{{if kindIs "map" .RELEASE}}{{.RELEASE.proof}}{{end}}'
+      RELEASE_JOBS: '{{if kindIs "map" .RELEASE}}{{.RELEASE.jobs}}{{end}}'
+      RELEASE_FILES: '{{if kindIs "map" .RELEASE}}{{.RELEASE.files}}{{end}}'
+    preconditions:
+      - sh: '{{.RELEASE_STATED}}'
+        msg: "release: this repository's include of the common tasks states no RELEASE, so nothing says how it is released and this task releases nothing. RELEASE is a map of the include's vars, written in the Taskfile - `map: {proof: <workflow>, jobs: <jobs>}` where this task cuts the releases, `map: {elsewhere: <the workflow that does>}` where the repository releases but not with this task, `map: {none: <why>}` where it does not release - and a value on the command line or in the environment is not one."
+      - sh: '{{if .RELEASE_ELSEWHERE}}false{{else}}true{{end}}'
+        msg: "release: this repository releases, but not with this task: {{.RELEASE_ELSEWHERE}} does. Its Taskfile says so (RELEASE's elsewhere), and this task releases nothing here."
+      - sh: '{{if .RELEASE_NONE}}false{{else}}true{{end}}'
+        msg: "release: this repository does not release. Its Taskfile says why (RELEASE's none): {{.RELEASE_NONE}}"
+      - sh: '{{if and .RELEASE_PROOF .RELEASE_JOBS}}true{{else}}false{{end}}'
+        msg: "release: this repository's RELEASE names no proof and jobs, the workflow whose pass proves a commit and the jobs that pass must have run: without both nothing is proven, and nothing released."
     cmds:
       # The name is counted from every tag there is, and main's head is origin's as it is now.
       - git fetch --quiet --tags origin main
-      # proven: the gate passed on this commit, or on a pull request's with the same tree, which
+      # proven: the proof passed on this commit, or on a pull request's with the same tree, which
       # is what a rebase merge leaves main with. The release makes the tag, last, so one that
       # failed to publish is no tag naming a commit with no files. --latest: a repository
       # publishes other things as releases too (brand its screens, with --latest=false), and
@@ -70,7 +107,7 @@ tasks:
         sha="$(git rev-parse --verify '{{.SHA | default "origin/main"}}^{commit}')"
         repo="${GITHUB_REPOSITORY:-}"
         [ -n "$repo" ] || repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
-        {{.GO_TOOLS}}proven release -repo "$repo" -sha "$sha" -workflow '{{.GATE_WORKFLOW}}' -events push,pull_request -ran '{{.GATE_JOBS}}' -also ''
+        {{.GO_TOOLS}}proven release -repo "$repo" -sha "$sha" -workflow '{{.RELEASE_PROOF}}' -events push,pull_request -ran '{{.RELEASE_JOBS}}' -also ''
         name="$({{.GO_TOOLS}}release "$sha")"
         # Every refusal above has been made, and gh's own for a file that is not there: what is
         # left is the release. Its files are listed, so a glob that matches nothing is seen.
