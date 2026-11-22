@@ -361,3 +361,16 @@ func TestASupersededPullThatStaysOpenIsSaid(t *testing.T) {
 	r := refresher{file: "versions.yaml", git: runGit, gh: f.serve(t), label: "versions", base: "main", out: io.Discard}
 	assert.ErrorContains(t, r.refresh(t.Context(), []string{"snapshot"}), "PATCH /pulls/3 answered 404")
 }
+
+// An entry pinned past what its upstream calls the newest is at its newest to a refresh: it is
+// not moved back, and it is no failure of the run.
+func TestARefreshLeavesAPinPastItsNewestWhereItIs(t *testing.T) {
+	latestRelease(t, "v1.9.0")
+	inRepository(t, aheadFile)
+	var out bytes.Buffer
+	r := refresher{file: "versions.yaml", git: runGit, label: "versions", base: "main", out: &out}
+	require.NoError(t, r.refresh(t.Context(), []string{"tool"}))
+	assert.Equal(t, "Every entry is at its newest.\n", out.String())
+	assert.Equal(t, "1", git(t, "rev-list", "--count", "HEAD"))
+	assert.Empty(t, git(t, "status", "--porcelain"))
+}

@@ -627,3 +627,164 @@ func TestAnotherRepositorysFileIsReadOrRefused(t *testing.T) {
 		})
 	}
 }
+
+// Two versions are ordered by the numbers they start with, and only when both start with some.
+func TestVersionsAreOrderedByTheirNumbers(t *testing.T) {
+	for _, tc := range []struct {
+		a, b    string
+		c       int
+		ordered bool
+	}{
+		{"v20261024.01", "v20261114.01", -1, true},
+		{"v1.2.0", "v1.10.0", -1, true},
+		{"7.3", "7.3.1", -1, true},
+		{"1.27.5-bookworm", "1.27.4-bookworm", 1, true},
+		{"11.2.0-rc0", "11.2.0", 0, true},
+		{"v3.54.0", "3.54.0", 0, true},
+		{"main", "v20261114.01", 0, false},
+		{"v20261114.01", "main", 0, false},
+		{"51f7e0dea53e6f85aa855753766b688634487168", "358445c95280923876ef3e95658fe45e367462a1", 0, false},
+		{"20260101T000000Z", "20270101T000000Z", 0, false},
+	} {
+		if c, ordered := compare(tc.a, tc.b); ordered != tc.ordered || (ordered && c != tc.c) {
+			t.Errorf("%s against %s: %d, ordered %v; want %d, %v", tc.a, tc.b, c, ordered, tc.c, tc.ordered)
+		}
+	}
+}
+
+// A bump to a version whose numbers are lower than the pin's is refused before anything is
+// fetched, named or found: website's spin went from v20261114.01 to v20261024.01 with exit 0.
+// BumpBackwards is the same bump meant, and moves the entries with it too.
+func TestABumpDoesNotMoveAVersionBackwards(t *testing.T) {
+	v, err := versions.Parse([]byte(withLead))
+	require.NoError(t, err)
+	serve(t, nil)
+	_, out, err := Bump(t.Context(), v, "lead", "v0.9")
+	require.ErrorIs(t, err, ErrBackwards)
+	require.ErrorContains(t, err, "lead is at v1.0, and v0.9 is older")
+	assert.Nil(t, out)
+
+	leadSum := sumOf("lead 0.9")
+	serve(t, map[string]string{
+		"https://example.test/lead-v0.9.tgz":              "lead 0.9",
+		"https://example.test/utils-0.9.tgz":              "utils 0.9",
+		"https://example.test/by-pin-" + leadSum + ".tgz": "by-pin 0.9",
+	})
+	e, out, err := BumpBackwards(t.Context(), v, "lead", "v0.9")
+	require.NoError(t, err)
+	assert.Equal(t, "v0.9", e.Version)
+	back, err := versions.Parse(out)
+	require.NoError(t, err)
+	utils, err := back.Get("utils")
+	require.NoError(t, err)
+	assert.Equal(t, "0.9", utils.Version)
+
+	// The version it is at is no move, and not backwards.
+	serve(t, map[string]string{"https://example.test/lead-v1.0.tgz": "lead 1", "https://example.test/utils-1.0.tgz": "utils 1",
+		"https://example.test/by-pin-" + sumOf("lead 1") + ".tgz": "by-pin 1"})
+	e, _, err = Bump(t.Context(), v, "lead", "v1.0")
+	require.NoError(t, err)
+	assert.Equal(t, "v1.0", e.Version)
+
+	// The newest an upstream names can be older than the pin: its latest release is not its newest.
+	ahead, err := versions.Parse([]byte("- name: tool\n  kind: download\n  source: https://example.test/tool-{version}.tgz\n  version: v2.0.0\n  pin: " +
+		strings.Repeat("a", 64) + "\n  track: github-release https://github.com/o/tool\n"))
+	require.NoError(t, err)
+	serve(t, map[string]string{"https://api.github.com/repos/o/tool/releases/latest": `{"tag_name": "v1.9.0"}`})
+	_, _, err = Bump(t.Context(), ahead, "tool", "")
+	require.ErrorIs(t, err, ErrBackwards)
+	require.ErrorContains(t, err, "tool is at v2.0.0, and v1.9.0 is older")
+}
+
+// An entry tracked with another goes where that one is, which a bump of it is for: a file in
+// which it is ahead of the entry it is with is one the gate refuses, and the bump mends it.
+func TestAnEntryWithAnotherIsMovedBackToIt(t *testing.T) {
+	v, err := versions.Parse([]byte(strings.Replace(withLead, `version: "1.0"`, `version: "3.0"`, 1)))
+	require.NoError(t, err)
+	serve(t, map[string]string{"https://example.test/utils-1.0.tgz": "utils 1"})
+	e, _, err := Bump(t.Context(), v, "utils", "")
+	require.NoError(t, err)
+	assert.Equal(t, "1.0", e.Version)
+}
+
+// github makes https://github.com/o/r the repository at dir for every git this process starts,
+// as the code under test names it, and answers GitHub's compare of two of its commits with status.
+func github(t *testing.T, dir string, compared map[string]string) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url."+dir+".insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/o/r")
+	files := map[string]string{}
+	for commits, status := range compared {
+		files["https://api.github.com/repos/o/r/compare/"+commits] = `{"status": "` + status + `"}`
+	}
+	serve(t, files)
+}
+
+// A git entry whose version says neither way - a branch moved to another, a branch's commit to a
+// tag - is not moved to a commit the pinned one already holds: website pins a commit of main
+// until a release holds it, and the release before it would take the site backwards. GitHub is
+// asked, since a bump has neither commit; what it cannot be asked is refused, not guessed.
+func TestABumpDoesNotMoveACommitBackwards(t *testing.T) {
+	r := newGitRepo(t)
+	bytes := "- name: g\n  kind: git\n  source: https://github.com/o/r\n  version: master\n  pin: " + r.head + "\n  track: branch\n"
+	onMaster, err := versions.Parse([]byte(bytes))
+	require.NoError(t, err)
+
+	for status, backwards := range map[string]bool{"behind": true, "ahead": false, "diverged": false, "identical": false} {
+		github(t, r.dir, map[string]string{r.head + "..." + r.second: status})
+		e, _, err := Bump(t.Context(), onMaster, "g", "topic")
+		if backwards {
+			require.ErrorIs(t, err, ErrBackwards, status)
+			require.ErrorContains(t, err, "g is at "+r.head+", which already holds topic "+r.second)
+			continue
+		}
+		require.NoError(t, err, status)
+		assert.Equal(t, r.second, e.Pin, status)
+	}
+
+	// GitHub does not answer: refused, as neither backwards nor moved. Told to, it is not asked.
+	github(t, r.dir, nil)
+	_, _, err = Bump(t.Context(), onMaster, "g", "topic")
+	require.ErrorContains(t, err, "could not be asked")
+	require.NotErrorIs(t, err, ErrBackwards)
+	e, _, err := BumpBackwards(t.Context(), onMaster, "g", "topic")
+	require.NoError(t, err)
+	assert.Equal(t, r.second, e.Pin)
+
+	// The same commit is no move, and higher numbers are a later release wherever its commit is:
+	// neither is asked of GitHub, which answers nothing here.
+	e, _, err = Bump(t.Context(), onMaster, "g", "master")
+	require.NoError(t, err)
+	assert.Equal(t, r.head, e.Pin)
+	tagged, err := versions.Parse([]byte(strings.NewReplacer("version: master", "version: v1.0.0", r.head, r.first, "o/r\n", "o/r.git\n").Replace(bytes)))
+	require.NoError(t, err)
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/o/r.git")
+	e, _, err = Bump(t.Context(), tagged, "g", "v1.2.0")
+	require.NoError(t, err)
+	assert.Equal(t, r.second, e.Pin)
+	// Numbers that are the same, or that only one of the two versions has, say neither way, and
+	// the commits are asked: a tag moved to an older commit, and a branch's head moved to a tag.
+	github(t, r.dir, map[string]string{r.second + "..." + r.first: "behind", r.head + "..." + r.first: "behind"})
+	moved, err := versions.Parse([]byte(strings.NewReplacer("version: master", "version: v1.0.0", r.head, r.second).Replace(bytes)))
+	require.NoError(t, err)
+	_, _, err = Bump(t.Context(), moved, "g", "v1.0.0")
+	require.ErrorIs(t, err, ErrBackwards)
+	_, _, err = Bump(t.Context(), onMaster, "g", "v1.0.0")
+	require.ErrorIs(t, err, ErrBackwards)
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/o/r.git")
+	// A repository named with .git is the same one to the API.
+	serve(t, map[string]string{"https://api.github.com/repos/o/r/compare/" + r.first + "..." + r.head: `{"status": "ahead"}`})
+	e, _, err = Bump(t.Context(), tagged, "g", "master")
+	require.NoError(t, err)
+	assert.Equal(t, r.head, e.Pin)
+
+	// A repository that is not GitHub's has nobody to ask, and moves.
+	local, err := versions.Parse([]byte(strings.Replace(bytes, "https://github.com/o/r", "https://example.test/o/r", 1)))
+	require.NoError(t, err)
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://example.test/o/r")
+	serve(t, nil)
+	e, _, err = Bump(t.Context(), local, "g", "topic")
+	require.NoError(t, err)
+	assert.Equal(t, r.second, e.Pin)
+}

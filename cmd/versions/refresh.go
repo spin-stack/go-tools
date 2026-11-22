@@ -105,6 +105,11 @@ func (r refresher) move(ctx context.Context, name string) (m []moved, major bool
 		return nil, false, err
 	}
 	e, out, err := upstream.Bump(ctx, v, name, "")
+	// Pinned past what its upstream calls the newest - a release candidate, a release its
+	// publisher has not marked latest: it is at its newest, as far as a schedule is concerned.
+	if errors.Is(err, upstream.ErrBackwards) {
+		return nil, false, nil
+	}
 	if err != nil {
 		return nil, false, err
 	}

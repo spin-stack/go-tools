@@ -252,3 +252,48 @@ func TestCheckCountsARowItCouldNotReadAndFailsApartForIt(t *testing.T) {
 		})
 	}
 }
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// latestRelease answers GitHub's latest release of o/tool with tag, for the test.
+func latestRelease(t *testing.T, tag string) {
+	t.Helper()
+	before := http.DefaultClient.Transport
+	http.DefaultClient.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+		status, body := http.StatusNotFound, ""
+		if r.URL.String() == "https://api.github.com/repos/o/tool/releases/latest" {
+			status, body = http.StatusOK, `{"tag_name": "`+tag+`"}`
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Request: r, Header: http.Header{}}, nil
+	})
+	t.Cleanup(func() { http.DefaultClient.Transport = before })
+}
+
+// aheadFile is an entry pinned past what its upstream calls its latest release.
+const aheadFile = "- name: tool\n  kind: date\n  version: v2.0.0\n  track: github-release https://github.com/o/tool\n"
+
+// A bump to an older version is refused and writes nothing, named or found; -back is the same
+// bump meant.
+func TestABumpBackwardsIsRefusedUnlessMeant(t *testing.T) {
+	latestRelease(t, "v1.9.0")
+	file := filepath.Join(t.TempDir(), "versions.yaml")
+	require.NoError(t, os.WriteFile(file, []byte(aheadFile), 0o600))
+	for _, argv := range [][]string{{"bump", "-file", file, "tool"}, {"bump", "-file", file, "tool", "v1.9.0"}, {"bump", "-file", file, "tool", "v1.0.0"}} {
+		var err error
+		out := stdout(t, func() { err = run(t.Context(), argv) })
+		require.ErrorContains(t, err, "a bump does not move a pin backwards", "%v", argv)
+		assert.Empty(t, out)
+		raw, err := os.ReadFile(file) //nolint:gosec // the test's own file
+		require.NoError(t, err)
+		assert.Equal(t, aheadFile, string(raw), "%v", argv)
+	}
+	var err error
+	out := stdout(t, func() { err = run(t.Context(), []string{"bump", "-file", file, "-back", "tool", "v1.0.0"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "tool: v2.0.0  -> v1.0.0 \n", out)
+	out = stdout(t, func() { err = run(t.Context(), []string{"bump", "-file", file, "-back", "tool"}) })
+	require.NoError(t, err)
+	assert.Equal(t, "tool: v1.0.0  -> v1.9.0 \n", out)
+}

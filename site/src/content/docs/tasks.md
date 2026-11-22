@@ -70,7 +70,7 @@ gate says it once `go.mod` has moved.
 | task | what it does |
 |---|---|
 | `versions` | says which pins are behind their upstream, in every file of pins; exits 1 when any is |
-| `bump NAME=<entry> [TO=<version>] [FILE=<file>]` | pins one entry at a version, the newest by default |
+| `bump NAME=<entry> [TO=<version>] [FILE=<file>] [BACK=1]` | pins one entry at a version, the newest by default, and [never at an older one](../versions/#never-backwards) unless `BACK=1` |
 | `release [SHA=<commit>] [RELEASE_DRY=1]` | in a repository whose include [says this task releases it](#releasing), releases main's head as the next `v<YYYYMMDD>.<NN>`: asks [`proven`](../proven/) that the proof passed on the commit, names it with [`release`](../release/), and publishes it with `gh`, which tags it |
 | `lint:workflows` | `actionlint` at the version `versions.yaml` pins (an `actionlint` entry of kind `module`), and a failure for an action used by a tag rather than a commit |
 | `consumers` | the [`consumers`](../consumers/) report, for a repository with a `consumers.toml` |

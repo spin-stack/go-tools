@@ -51,14 +51,14 @@ tasks:
         exit $status
 
   bump:
-    desc: Pin one entry of versions.yaml at a version, the newest by default (task bump NAME=golangci-lint [TO=v2.14.0] [FILE=another/versions.yaml]).
+    desc: Pin one entry of versions.yaml at a version, the newest by default, and never at an older one than it is at unless BACK=1 says so (task bump NAME=golangci-lint [TO=v2.14.0] [FILE=another/versions.yaml] [BACK=1]).
     requires:
       vars: [NAME]
     cmds:
       # A bump reads the upstreams check reads, with the token check has.
       - |
         if [ -z "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ] && token="$(gh auth token 2>/dev/null)"; then export GH_TOKEN="$token"; fi
-        {{.GO_TOOLS}}versions bump -file {{.FILE | default "versions.yaml"}} {{.NAME}} {{.TO}}
+        {{.GO_TOOLS}}versions bump -file {{.FILE | default "versions.yaml"}} {{if .BACK}}-back {{end}}{{.NAME}} {{.TO}}
 
   release:
     desc: Release main's head (or SHA) as the next v<YYYYMMDD>.<NN> of today, in UTC, with RELEASE's files - in a repository whose include states RELEASE's proof and jobs, and refused in every other. A person runs it, with gh logged in, or a workflow with GH_TOKEN; it refuses a commit the jobs of the proof workflow have not passed on, and one released already. RELEASE_DRY=1 refuses what a release would and prints the name, and releases nothing.
