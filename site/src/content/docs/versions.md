@@ -121,6 +121,31 @@ go tool versions bump kernel 7.2.9    # or to a version you name
 A bump downloads what the new version names and pins its hash; for an image, it asks the registry
 for the digest. It builds nothing, and the entry's `note` says what to run before committing.
 
+### Never backwards
+
+A bump does not move a pin to something older than it, named or found:
+
+```
+$ go tool versions bump spin v20261024.01
+versions: spin is at v20261114.01, and v20261024.01 is older: a bump does not move a pin backwards (versions bump -back, or BACK=1 to the task, moves it there all the same)
+```
+
+"Older" is what the tool can order, and nothing else:
+
+- **A version**, by the numbers it starts with: `v20261024.01` is older than `v20261114.01`,
+  `7.3` than `7.3.1`, `1.27.4-bookworm` than `1.27.5-bookworm`. This also stops a bump with no
+  version named when the upstream's "latest" is older than the pin, and a `refresh` leaves such
+  an entry where it is.
+- **A commit**, for a `git` entry of a GitHub repository whose versions say neither way - a
+  branch, or a branch's commit moved to a tag: the bump asks GitHub's compare whether the pinned
+  commit already holds the new one, and refuses if it does. A pin at a commit of main does not
+  move to a release cut before that commit. If GitHub cannot be asked the bump is refused, not
+  guessed. Two commits on branches that parted are not called backwards.
+
+A version that starts with no number (a date, a word) and a `git` entry of another host are not
+ordered, and move as asked. An entry tracked `with` another goes where that one is.
+`go tool versions bump -back <name> <version>` is the bump of a person who means it.
+
 `GITHUB_TOKEN` or `GH_TOKEN`, when set, is sent to api.github.com, which answers only sixty
 unauthenticated requests an hour, and nothing of a private repository. Through
 [the common tasks](../tasks/) a person needs neither: `go tool task versions` and

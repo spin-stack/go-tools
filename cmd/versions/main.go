@@ -66,7 +66,8 @@ Usage:
                                       and 2 when an entry could not be read, which may be
                                       behind
   versions bump    <name> [version]   pin an entry at a version, the newest by default, and
-                                      every entry tracked with it at the same
+                                      every entry tracked with it at the same; never at an
+                                      older version or commit than the pin's, unless -back
   versions refresh <name>...          bump each to its newest, a commit each, and say what moved
                                       and what is a new major, left for a person;
                                       -propose pushes them as refresh/<label>-<sum> and opens
@@ -93,6 +94,7 @@ func run(ctx context.Context, argv []string) error {
 	propose := fs.Bool("propose", false, "refresh: open a pull request of what moved")
 	label := fs.String("label", "versions", "refresh: the name of the branches it proposes")
 	base := fs.String("base", "main", "refresh: the branch the pull request is into")
+	back := fs.Bool("back", false, "bump: move the pin to an older version or commit too")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Print(usage)
@@ -132,7 +134,7 @@ func run(ctx context.Context, argv []string) error {
 		}
 		return check(os.Stdout, upstream.Check(ctx, v))
 	case "bump":
-		return bump(ctx, v, *file, names)
+		return bump(ctx, v, *file, names, *back)
 	case "refresh":
 		r := refresher{file: *file, git: runGit, label: *label, base: *base, out: os.Stdout, now: time.Now()}
 		return refresh(ctx, r, *propose, names)
@@ -203,8 +205,9 @@ func newer(w io.Writer, v *versions.Versions, names []string) error {
 	return err
 }
 
-// bump pins an entry at a version, the newest by default, and writes the file.
-func bump(ctx context.Context, v *versions.Versions, file string, names []string) error {
+// bump pins an entry at a version, the newest by default, and writes the file. back is a person
+// saying the version is older than the pin and meant: without it that is refused.
+func bump(ctx context.Context, v *versions.Versions, file string, names []string, back bool) error {
 	if len(names) < 1 || len(names) > 2 {
 		return errors.New("bump: <name> [version]")
 	}
@@ -216,7 +219,11 @@ func bump(ctx context.Context, v *versions.Versions, file string, names []string
 	if err != nil {
 		return err
 	}
-	_, out, err := upstream.Bump(ctx, v, was.Name, version)
+	to := upstream.Bump
+	if back {
+		to = upstream.BumpBackwards
+	}
+	_, out, err := to(ctx, v, was.Name, version)
 	if err != nil {
 		return err
 	}

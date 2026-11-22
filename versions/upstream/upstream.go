@@ -139,11 +139,31 @@ func resolve(ctx context.Context, e versions.Entry, version string) (string, err
 	return "", fmt.Errorf("versions: %s is a %s, which nothing resolves", e.Name, e.Kind)
 }
 
+// ErrBackwards is a bump refused because it would move a pin to what is older than it.
+var ErrBackwards = errors.New("a bump does not move a pin backwards")
+
 // Bump is v's file with name pinned at version - the newest its track finds when version is "" -
 // and the entry as that file has it. Every entry tracked with name moves in the same file, to
 // what name is then at: one moved without the other is a file the gate refuses, so they are one
 // bump. Nothing is written: that is the caller's.
+//
+// It never moves a pin backwards, and refuses with ErrBackwards what would: a version whose
+// numbers are lower than the pin's, and for a git entry of a GitHub repository whose version
+// says neither way - a branch, or a branch's commit moved to a tag - a commit the pinned one
+// already holds. `versions bump spin v20261024.01` moved website's pin three weeks back and
+// exited 0, and an upstream whose "latest" is older than the pin did the same with no version
+// named. An entry tracked with another is not asked: it goes where that one is. BumpBackwards is
+// the bump of a person who means it.
 func Bump(ctx context.Context, v *versions.Versions, name, version string) (versions.Entry, []byte, error) {
+	return bump(ctx, v, name, version, false)
+}
+
+// BumpBackwards is Bump, to an older version or commit too.
+func BumpBackwards(ctx context.Context, v *versions.Versions, name, version string) (versions.Entry, []byte, error) {
+	return bump(ctx, v, name, version, true)
+}
+
+func bump(ctx context.Context, v *versions.Versions, name, version string, backwards bool) (versions.Entry, []byte, error) {
 	e, err := v.Get(name)
 	if err != nil {
 		return versions.Entry{}, nil, err
@@ -177,7 +197,12 @@ func Bump(ctx context.Context, v *versions.Versions, name, version string) (vers
 			return versions.Entry{}, nil, fmt.Errorf("%w; name the version", err)
 		}
 	}
-	moved, out, err := pinAt(ctx, v, e, version)
+	// An entry with another goes where that one is, and a person who said backwards meant it.
+	pin := pinLater
+	if _, follows, _ := e.With(); backwards || follows {
+		pin = pinAt
+	}
+	moved, out, err := pin(ctx, v, e, version)
 	if err != nil {
 		return versions.Entry{}, nil, err
 	}
@@ -528,6 +553,82 @@ func branchHead(ctx context.Context, repo, branch string) (string, error) {
 		return "", fmt.Errorf("versions: %s has no branch %s", repo, branch)
 	}
 	return sha, nil
+}
+
+// pinLater is pinAt, refused with ErrBackwards for a version or a commit older than e's. The
+// commits are asked only where the versions say neither way: higher numbers are a later release
+// wherever its commit is, since a release branch does not hold main's.
+func pinLater(ctx context.Context, v *versions.Versions, e versions.Entry, version string) (versions.Entry, []byte, error) {
+	later, err := laterVersion(e, version)
+	if err != nil {
+		return versions.Entry{}, nil, err
+	}
+	moved, out, err := pinAt(ctx, v, e, version)
+	if err != nil || later {
+		return moved, out, err
+	}
+	if err := laterCommit(ctx, e, moved); err != nil {
+		return versions.Entry{}, nil, err
+	}
+	return moved, out, nil
+}
+
+// laterVersion is whether version's numbers are higher than e's, and ErrBackwards when they are
+// lower. Neither is said of two versions that are not both numbers, or whose numbers are the same.
+func laterVersion(e versions.Entry, version string) (bool, error) {
+	c, ordered := compare(version, e.Version)
+	if ordered && c < 0 {
+		return false, fmt.Errorf("versions: %s is at %s, and %s is older: %w (versions bump -back, or BACK=1 to the task, moves it there all the same)",
+			e.Name, e.Version, version, ErrBackwards)
+	}
+	return ordered && c > 0, nil
+}
+
+// laterCommit is ErrBackwards when moved, a git entry of e's repository, is at a commit e's pin
+// already holds, and an error when GitHub could not be asked: a bump that may be backwards is
+// refused, not guessed.
+func laterCommit(ctx context.Context, e, moved versions.Entry) error {
+	if e.Kind != versions.Git || moved.Pin == e.Pin {
+		return nil
+	}
+	held, err := holds(ctx, e.Source, e.Pin, moved.Pin)
+	if err != nil {
+		return fmt.Errorf("versions: %s: whether %s %s is behind the pin, %s, could not be asked: %w "+
+			"(GITHUB_TOKEN or GH_TOKEN reads a private repository; versions bump -back, or BACK=1 to the task, moves it without asking)",
+			e.Name, moved.Version, moved.Pin, e.Pin, err)
+	}
+	if held {
+		return fmt.Errorf("versions: %s is at %s, which already holds %s %s: %w (versions bump -back, or BACK=1 to the task, moves it there all the same)",
+			e.Name, e.Pin, moved.Version, moved.Pin, ErrBackwards)
+	}
+	return nil
+}
+
+// compare orders two versions by their numbers: below zero when a's are lower than b's. ordered
+// is false when either starts with no number - a branch, a commit, a date - and the two are then
+// not said to be in any order.
+func compare(a, b string) (c int, ordered bool) {
+	x, _, okA := numbered(a)
+	y, _, okB := numbered(b)
+	return slices.Compare(x, y), okA && okB
+}
+
+// holds is whether the commit from already holds the commit to - to is an ancestor of it - in the
+// GitHub repository source, as GitHub's compare says: a bump has neither commit on this machine,
+// and the API knows the history. Two commits on branches that parted hold neither the other, and
+// are not called backwards. A repository that is not GitHub's is not asked, and holds nothing.
+func holds(ctx context.Context, source, from, to string) (bool, error) {
+	repo, ok := strings.CutPrefix(source, "https://github.com/")
+	if !ok {
+		return false, nil
+	}
+	var cmp struct {
+		Status string `json:"status"`
+	}
+	if err := getJSON(ctx, "https://api.github.com/repos/"+strings.TrimSuffix(repo, ".git")+"/compare/"+from+"..."+to, &cmp); err != nil {
+		return false, err
+	}
+	return cmp.Status == "behind", nil
 }
 
 // numbered is a version as the numbers it starts with, a leading v apart, and whether a -suffix

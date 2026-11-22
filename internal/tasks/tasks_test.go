@@ -148,6 +148,7 @@ func TestARepositoryThatIncludesTheTasksHasThem(t *testing.T) {
 	}
 	r.ran([]string{"gh auth token", "versions bump -file versions.yaml golangci-lint"}, "bump", "NAME=golangci-lint")
 	r.ran([]string{"gh auth token", "versions bump -file cmd/sfw/versions.yaml socket v1.2.0"}, "bump", "NAME=socket", "TO=v1.2.0", "FILE=cmd/sfw/versions.yaml")
+	r.ran([]string{"gh auth token", "versions bump -file versions.yaml -back spin v20261024.01"}, "bump", "NAME=spin", "TO=v20261024.01", "BACK=1")
 	if ran := r.refused("missing required variables: NAME", "bump"); len(ran) != 0 {
 		t.Errorf("a bump of nothing ran %v", ran)
 	}
