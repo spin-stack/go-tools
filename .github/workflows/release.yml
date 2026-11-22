@@ -64,8 +64,20 @@ jobs:
         if: steps.name.outputs.new == 'true'
         run: task release:build
 
+      # Sigstore's transparency log answers the entry it has just written with a 404 at times
+      # ("error fetching tlog entry - (404) Not Found"): two of the three releases on 2026-11-22
+      # failed so, and a rerun of each passed (runs 45025234508, 45027479631). So a failed attempt
+      # is made once more; a second failure fails the release, before anything is published.
       - name: Their provenance
+        id: provenance
         if: steps.name.outputs.new == 'true'
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: _output/release/*.tar.gz
+
+      - name: Their provenance, once more
+        if: steps.name.outputs.new == 'true' && steps.provenance.outcome == 'failure'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: _output/release/*.tar.gz
