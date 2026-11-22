@@ -218,6 +218,7 @@ func TestCheckCountsARowItCouldNotReadAndFailsApartForIt(t *testing.T) {
 	const unknown = "- name: unknown\n  kind: date\n  version: v1\n  track: rumour\n"
 	for name, tc := range map[string]struct {
 		file   string
+		argv   []string
 		rows   []string
 		says   string
 		status int
@@ -225,6 +226,8 @@ func TestCheckCountsARowItCouldNotReadAndFailsApartForIt(t *testing.T) {
 		"nothing behind": {file: lead, rows: []string{"lead v2 v2"}}, //nolint:dupword // a row: its pin, then its newest
 		"one behind": {file: lead + behind, rows: []string{"behind v1 v2 behind"},
 			says: "1 behind; versions bump <name> moves one", status: 1},
+		"one behind, through the task": {file: lead + behind, argv: []string{"-task"},
+			says: "1 behind; go tool task bump NAME=<name> moves one", status: 1},
 		"one behind that another command moves": {file: lead + behind + "  bump: spin-os upgrade\n", rows: []string{"behind v1 v2 behind moved by `spin-os upgrade`"},
 			says: "1 behind; versions bump <name> moves one, and the command a row names moves that one", status: 1},
 		"one that another command moves, not behind": {file: lead + "  bump: spin-os upgrade\n", rows: []string{"lead v2 v2 moved by `spin-os upgrade`"}}, //nolint:dupword // a row: its pin, then its newest
@@ -239,7 +242,7 @@ func TestCheckCountsARowItCouldNotReadAndFailsApartForIt(t *testing.T) {
 			file := filepath.Join(t.TempDir(), "versions.yaml")
 			require.NoError(t, os.WriteFile(file, []byte(tc.file), 0o600))
 			var err error
-			out := stdout(t, func() { err = run(t.Context(), []string{"check", "-file", file}) })
+			out := stdout(t, func() { err = run(t.Context(), append(append([]string{"check"}, tc.argv...), "-file", file)) })
 			// A row's columns, whatever the widest entry made their width.
 			var rows []string
 			for line := range strings.Lines(out) {

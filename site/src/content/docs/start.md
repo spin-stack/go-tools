@@ -52,7 +52,8 @@ includes:
 gives the repository `versions`, `bump`, `release`, `lint:workflows` and `consumers` as every
 other has them. [The common tasks](../tasks/) says what each does, and what a repository states
 in the include's `vars`: among them [how it is released](../tasks/#releasing), without which
-`release` refuses.
+`release` refuses. Double quotes are the same include, and what a repository formatted by Biome
+writes.
 
 ## Run them where developers already run checks
 

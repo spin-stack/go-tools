@@ -32,7 +32,7 @@ version: '3'
 tasks:
 
   versions:
-    desc: Say which pins of versions.yaml (and of every file in VERSIONS_FILES) are behind their upstream. It fails when any is, and when an entry could not be read, which may be behind; the last line of a file's rows says which.
+    desc: Say which pins of versions.yaml (and of every file in VERSIONS_FILES) are behind their upstream. It fails when any is, and when an entry could not be read, which may be behind; the last line of a file's rows says which. Through Task either is exit 201.
     cmds:
       # Every file, whichever is behind. The status is the worst any file had: 2, an entry that
       # could not be read, is not hidden by a later file's 1 or 0.
@@ -46,7 +46,7 @@ tasks:
         if [ -z "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ] && token="$(gh auth token 2>/dev/null)"; then export GH_TOKEN="$token"; fi
         status=0
         for file in {{.VERSIONS_FILES | default "versions.yaml"}}; do
-          {{.GO_TOOLS}}versions check -file "$file" || { s=$?; [ "$s" -le "$status" ] || status=$s; }
+          {{.GO_TOOLS}}versions check -task -file "$file" || { s=$?; [ "$s" -le "$status" ] || status=$s; }
         done
         exit $status
 

@@ -64,7 +64,8 @@ Usage:
   versions newer   <name> <version>   <version> when it is newer than the pin, nothing when not
   versions check                      what is behind its upstream; exits 1 when anything is,
                                       and 2 when an entry could not be read, which may be
-                                      behind
+                                      behind (-task: its last line names the task that
+                                      moves one, for a run through the common tasks)
   versions bump    <name> [version]   pin an entry at a version, the newest by default, and
                                       every entry tracked with it at the same; never at an
                                       older version or commit than the pin's, unless -back,
@@ -95,6 +96,7 @@ func run(ctx context.Context, argv []string) error {
 	propose := fs.Bool("propose", false, "refresh: open a pull request of what moved")
 	label := fs.String("label", "versions", "refresh: the name of the branches it proposes")
 	base := fs.String("base", "main", "refresh: the branch the pull request is into")
+	byTask := fs.Bool("task", false, "check: name the common task that moves an entry, as a repository runs it")
 	back := fs.Bool("back", false, "bump: move the pin to an older version or commit too")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -133,7 +135,7 @@ func run(ctx context.Context, argv []string) error {
 		if len(names) != 0 {
 			return errors.New("check: takes no names; it checks every entry")
 		}
-		return check(os.Stdout, upstream.Check(ctx, v))
+		return check(os.Stdout, upstream.Check(ctx, v), *byTask)
 	case "bump":
 		return bump(ctx, v, *file, names, *back)
 	case "refresh":
@@ -277,7 +279,9 @@ func pins(v *versions.Versions, names []string, prefix string) ([]string, error)
 // check prints where each entry stands and fails when one is behind, or could not be read. The
 // two are counted apart and fail apart: a row not read - a private upstream asked without a token
 // answers 404 - may be behind, so a count of what is behind says "of those read" beside it.
-func check(w io.Writer, rows []upstream.Status) error {
+// The last line names the command that moves an entry as the person who ran this would type it:
+// the task every repository has when byTask says that is what ran it, and this command otherwise.
+func check(w io.Writer, rows []upstream.Status, byTask bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tPINNED\tNEWEST\t")
 	behind, unreadRows, anothers := 0, 0, false
@@ -308,7 +312,11 @@ func check(w io.Writer, rows []upstream.Status) error {
 		if anothers {
 			also = ", and the command a row names moves that one"
 		}
-		return fmt.Errorf("%d behind; versions bump <name> moves one%s", behind, also)
+		bump := "versions bump <name>"
+		if byTask {
+			bump = "go tool task bump NAME=<name>"
+		}
+		return fmt.Errorf("%d behind; %s moves one%s", behind, bump, also)
 	}
 	return nil
 }

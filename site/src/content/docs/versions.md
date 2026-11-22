@@ -112,6 +112,10 @@ that arrived whole: a file that is not the pin is refused, not tried again.
 
 ## Keeping up
 
+In a repository that includes [the common tasks](../tasks/), these are `go tool task versions`
+and `go tool task bump NAME=kernel [TO=7.2.9]`: the same commands, over every file of pins the
+repository has, with `gh`'s token. The commands themselves:
+
 ```sh
 go tool versions check                # what is behind; exits 1 when anything is, 2 when an entry could not be read
 go tool versions bump kernel          # to the newest the track finds
@@ -254,9 +258,9 @@ GitHub Actions pinned by commit (Dependabot moves those, as `go.sum` is Go's). A
 when some file runs `versions args|env|version|ref <name>...` or `{{.VERSIONS}} ...`, a test
 included; `Gate.Reads` changes what counts. Two reads are in no file of the repository, and the
 gate counts them from what it knows of go-tools: `task`, which `go tool task` reads when `go.mod`
-takes it, and what the common tasks read when a Taskfile includes `'{{.GO_TOOLS_TASKS}}'` - found
-in those tasks' own file, at the go-tools version `go.mod` requires. The include has to be one: a
-comment that names the variable reads nothing.
+takes it, and what the common tasks read when a Taskfile includes `{{.GO_TOOLS_TASKS}}` - found
+in those tasks' own file, at the go-tools version `go.mod` requires. The include has to be one, in
+single quotes or double: a comment that names the variable reads nothing.
 
 ## As a library
 

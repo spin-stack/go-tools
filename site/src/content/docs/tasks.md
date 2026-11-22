@@ -30,6 +30,58 @@ cache `go tool task` already keeps, at the release its commands are from.
 It needs `go tool task`. A Task run directly has no `GO_TOOLS_TASKS`, and says `include cycle
 detected`, since an empty path is the Taskfile itself.
 
+The quotes are YAML's and either kind will do: `"{{.GO_TOOLS_TASKS}}"` is the same include to
+Task and to the [versions gate](../versions/#the-gate), which reads the value and not how it is
+written. A repository that formats its YAML with Biome writes double quotes: the blog and
+website each failed their own lint on the single-quoted line.
+
+### A task of the repository's with one of these names
+
+A repository whose Taskfile already has a `release`, a `versions` or a `bump` that means something
+else renames its own, after what the task does: devcontainer-cli's `release` ran GoReleaser and is
+`release:artifacts` now. `excludes: [release]` on the include is not a way out. Task accepts it,
+and `go tool task release` would then run GoReleaser in that repository and cut a release in every
+other, when the one thing the include is for is that a name means the same everywhere.
+
+### Put `lint:workflows` in what CI runs
+
+Nothing runs a common task unless the repository's own tasks do. `lint:workflows` belongs in the
+task the workflow runs - `lint`, `check` or `gate`, whichever the repository has:
+
+```yaml title="Taskfile.yml"
+tasks:
+  lint:
+    cmds:
+      - task: lint:workflows
+```
+
+It needs two things in the repository. An `actionlint` entry in `versions.yaml`, at the version
+the other repositories pin, which is go-tools' own (`versions.yaml` at its root):
+
+```yaml title="versions.yaml"
+- name: actionlint
+  kind: module
+  source: github.com/rhysd/actionlint/cmd/actionlint
+  version: v1.7.12
+  track: github-release https://github.com/rhysd/actionlint
+  note: task lint:workflows.
+```
+
+And, in a repository whose jobs run on spin-stack's own runners, the labels those runners have:
+actionlint knows GitHub's, and fails the first run on any other with
+`label "runs-on/fleet=docker8/env=production" is unknown`.
+
+```yaml title=".github/actionlint.yaml"
+self-hosted-runner:
+  labels:
+    # spin-stack/ci's fleets this repository's workflows run on.
+    - runs-on/fleet=kvm/env=production
+    - runs-on/fleet=docker8/env=production
+```
+
+On a pass the task prints nothing but the commands it ran. Its first run in a repository often
+finds something real: an action used by a tag, or by a commit with no `# vX.Y.Z` after it.
+
 ## Which release the tasks are from
 
 Two versions of go-tools are at work in a repository, and they are not the same one:
@@ -43,6 +95,22 @@ Two versions of go-tools are at work in a repository, and they are not the same 
   everywhere, the day it changes - and it means a red `lint:workflows` on an untouched branch can
   be a release of go-tools: [its releases](https://github.com/spin-stack/go-tools/releases) say
   what changed.
+
+Two rules follow, and both were learned by breaking brand
+([#135](https://github.com/spin-stack/go-tools/issues/135)):
+
+- **A file read by both a task and a test moves with `go.mod`, in one commit.** The task reads
+  `consumers.toml` or `versions.yaml` with the latest release; the repository's test reads the same
+  file with the module `go.mod` requires. When a release changes what the file may say - a field
+  renamed, a field added - the new spelling fails the test until `go.mod` moves, and the old one
+  fails the task from the day of the release. There is no order of two commits in which both pass.
+- **After a go-tools release, a task that is not in the repository's CI can be broken with no
+  commit, and nothing is red.** CI proves the tasks its own task calls and no others. brand's
+  `consumers` failed on a branch that showed green, because the release had renamed a field of its
+  table and `consumers` is in no workflow. After a release that says it changed a task, and
+  before a bump of `go.mod`, run each common task the repository uses on an untouched branch:
+  `go tool task --list`, `versions`, `consumers`, and `release RELEASE_DRY=1` where this task
+  releases the repository.
 
 The latest release is never one from before `go.mod`'s. Which release is the latest is asked at
 most every ten minutes, so a machine can go on naming the one before for that long; but
@@ -69,10 +137,10 @@ gate says it once `go.mod` has moved.
 
 | task | what it does |
 |---|---|
-| `versions` | says which pins are behind their upstream, in every file of pins; exits 1 when any is |
+| `versions` | says which pins are behind their upstream, in every file of pins, with `gh`'s token when none is set. It fails when any is behind and when [an entry could not be read](../versions/#an-entry-check-could-not-read): through Task both are exit 201, and the last line of each file's rows says which (`N behind; go tool task bump NAME=<name> moves one`, or `N not read, and ...`) |
 | `bump NAME=<entry> [TO=<version>] [FILE=<file>] [BACK=1]` | pins one entry at a version, the newest by default, and [never at an older one](../versions/#never-backwards) unless `BACK=1` |
 | `release [SHA=<commit>] [RELEASE_DRY=1]` | in a repository whose include [says this task releases it](#releasing), releases main's head as the next `v<YYYYMMDD>.<NN>`: asks [`proven`](../proven/) that the proof passed on the commit, names it with [`release`](../release/), and publishes it with `gh`, which tags it |
-| `lint:workflows` | `actionlint` at the version `versions.yaml` pins (an `actionlint` entry of kind `module`), and a failure for an action used by a tag rather than a commit |
+| `lint:workflows` | `actionlint` at the version `versions.yaml` pins (an `actionlint` entry of kind `module`), and a failure for an action used by a tag rather than a commit; nothing is printed on a pass. [It goes in the task CI runs](#put-lintworkflows-in-what-ci-runs) |
 | `consumers` | the [`consumers`](../consumers/) report, for a repository with a `consumers.toml` |
 
 ## What a repository states
@@ -169,13 +237,6 @@ task: release: this repository releases, but not with this task: release.yml doe
 `RELEASE` at all is refused too, and told to state one of the three. `elsewhere` and `none` win
 over the other keys, and `proof` without `jobs` proves nothing and is refused.
 
-### A repository whose own `release` task means something else
-
-It renames its own, after what the task does: devcontainer-cli's `release` ran GoReleaser and is
-`release:artifacts`. `excludes: [release]` on the include is not a way out. Task accepts it, and
-`go tool task release` would then run GoReleaser in that repository and cut a release in every
-other, when the one thing the include is for is that a name means the same everywhere.
-
 ### Why a map
 
 Under Task 3.54.0 a var given on the command line, or set in the environment, reaches an included
@@ -194,6 +255,12 @@ under Task.
 
 A release is cut by a person: `go tool task release`, with `gh` logged in. go-tools' own
 `release.yml` runs the same task once its binaries are built, with the run's `GH_TOKEN`.
+
+It is public the moment the task returns: `gh release create` publishes the release, marked
+latest, and makes its tag in the same call. There is no draft to look at first, which is what
+`RELEASE_DRY=1` is for. And the tag is made with the token the task ran with: a person's token
+starts every workflow of the repository that has `on: push: tags`, where a workflow's own
+`GITHUB_TOKEN` starts none.
 
 `go tool task release RELEASE_DRY=1` is the release without the release. It fetches, asks
 `proven`, names the commit and lists the files, so it refuses what a release would - a
@@ -228,9 +295,11 @@ apply there. The ones that do not apply refuse, before running anything:
 | `include cycle detected between <Taskfile> <--> <Taskfile>` (exit 110), for every task | `GO_TOOLS_TASKS` is empty: Task was run directly, or `go.mod` requires a go-tools from before `v0.20261122.4`, whose `go tool task` does not set it | run `go tool task`; `go get github.com/spin-stack/go-tools@latest` |
 | `Found multiple tasks (versions) included by "common"` (exit 203), for every task | the repository's Taskfile defines a common task itself | delete the repository's own: the name has one meaning |
 | `No Taskfile found at ".../tasks.yml"` (exit 100), for every task, after a line from `go tool task` that starts `the go-tools release this machine has ... has no tasks.yml` | the release in the cache is from before the tasks shipped, and no newer one could be had: GitHub could not be reached, or `go tool task` was built from a commit that is no release's and the cache named the latest less than ten minutes ago | run it again when `https://github.com/spin-stack/go-tools/releases/latest` can be reached, or ten minutes later |
+| `label "runs-on/fleet=.../env=production" is unknown`, from `lint:workflows` | a job runs on one of spin-stack's own runners, and actionlint knows only GitHub's labels | name the labels in [`.github/actionlint.yaml`](#put-lintworkflows-in-what-ci-runs) |
+| `task: Failed to run task "versions": exit status 1` or `exit status 2` (exit 201) | an entry is behind (1), or [could not be read](../versions/#an-entry-check-could-not-read) and may be (2). Task's own exit status is 201 for both, and for any task whose command failed | `go tool task bump NAME=<name>`; for 2, read the row: usually a private upstream and no token |
 | `versions: there is no actionlint in versions.yaml`, from `lint:workflows` | the task runs `actionlint` at the repository's pin, and there is none | add the `actionlint` entry (kind `module`, source `github.com/rhysd/actionlint/cmd/actionlint`) |
 | `Taskfile.yml includes go-tools' tasks, and its task lint:workflows reads actionlint: versions: there is no actionlint in versions.yaml`, from the repository's tests | the same, found by the [versions gate](../versions/#the-gate) before the task is run | the same |
-| `versions.yaml pins actionlint, and nothing reads it`, from the repository's tests, in a repository that includes the tasks | `go.mod` requires a go-tools whose gate does not count what the common tasks read (`v0.20261122.4` or before), or the include is not one the gate reads: it is a Taskfile's `includes` entry whose `taskfile` is `'{{.GO_TOOLS_TASKS}}'` | `go get github.com/spin-stack/go-tools@latest`; never a comment that spells the read |
+| `versions.yaml pins actionlint, and nothing reads it`, from the repository's tests, in a repository that includes the tasks | `go.mod` requires a go-tools whose gate does not count what the common tasks read (`v0.20261122.4` or before), or the include is not one the gate reads: it is a Taskfile's `includes` entry whose `taskfile` is `{{.GO_TOOLS_TASKS}}`, in either kind of quotes | `go get github.com/spin-stack/go-tools@latest`; never a comment that spells the read |
 | `release: this repository releases, but not with this task` or `release: this repository does not release` (exit 201), `no consumers.toml` (exit 201) | a task that does not apply to this repository | nothing: see above |
 | `release: this repository's include of the common tasks states no RELEASE` (exit 201) | the Taskfile does not say how the repository is released. `GATE_WORKFLOW` and `GATE_JOBS`, where an include still has them, are read by nothing | state `RELEASE` in the include: [Releasing](#releasing) |
 | `consumers.toml: scope is no field of the table`, from `consumers` | the table has `scope = "..."`; it is `scopes`, a list | `scopes = ["@fontsource", "@fontsource-variable"]` |
