@@ -198,12 +198,18 @@ It reads every file git lists, tracked or untracked and not ignored, and fails o
   default, or with no entry to supply it;
 - an entry nothing reads;
 - an entry a bump could not rewrite in place;
-- an entry tracked `with` another that is not at its version.
+- an entry tracked `with` another that is not at its version;
+- an entry one of [the common tasks](../tasks/) reads - `actionlint`, for `lint:workflows` - that a
+  repository whose Taskfile includes them does not have.
 
 Excused: the files `Elsewhere` names, tests, `_output/`, dot-directories other than `.github`, and
 GitHub Actions pinned by commit (Dependabot moves those, as `go.sum` is Go's). An entry is read
 when some file runs `versions args|env|version|ref <name>...` or `{{.VERSIONS}} ...`, a test
-included; `Gate.Reads` changes what counts.
+included; `Gate.Reads` changes what counts. Two reads are in no file of the repository, and the
+gate counts them from what it knows of go-tools: `task`, which `go tool task` reads when `go.mod`
+takes it, and what the common tasks read when a Taskfile includes `'{{.GO_TOOLS_TASKS}}'` - found
+in those tasks' own file, at the go-tools version `go.mod` requires. The include has to be one: a
+comment that names the variable reads nothing.
 
 ## As a library
 

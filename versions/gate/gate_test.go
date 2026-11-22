@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -182,5 +183,86 @@ func TestTheTaskCommandReadsTask(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A repository whose Taskfile includes go-tools' common tasks reads versions.yaml through them:
+// the entry a task of theirs reads is read, though no line of the repository spells it, and a
+// repository without that entry is told which task wants it. Mentioning the variable is no include.
+func TestARepositoryThatIncludesTheCommonTasksOwesWhatTheyRead(t *testing.T) {
+	const actionlint = "- name: actionlint\n  kind: module\n  source: github.com/rhysd/actionlint/cmd/actionlint\n  version: v1.7.12\n  track: github-release https://github.com/rhysd/actionlint\n"
+	const other = "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n"
+	const reads = "tasks:\n  build:\n    cmds: [versions args go]\n"
+	const unread = "pins actionlint, and nothing reads it"
+	const owed = "Taskfile.yml includes go-tools' tasks, and its task lint:workflows reads actionlint: versions: there is no actionlint in versions.yaml"
+	for _, tc := range []struct {
+		name, taskfile, file string
+		also                 map[string]string
+		says                 string
+	}{
+		{name: "the include, and the entry its tasks read",
+			taskfile: "includes:\n  common:\n    taskfile: '{{.GO_TOOLS_TASKS}}'\n    flatten: true\n", file: actionlint},
+		{name: "the include as a path alone", taskfile: "includes:\n  common: '{{.GO_TOOLS_TASKS}}'\n", file: actionlint},
+		{name: "the include with the template spaced", taskfile: "includes:\n  common: {taskfile: '{{ .GO_TOOLS_TASKS }}', flatten: true}\n", file: actionlint},
+		{name: "the include after another", taskfile: "includes:\n  build: taskfiles/build.yml\n  common: {taskfile: '{{.GO_TOOLS_TASKS}}'}\n", file: actionlint},
+		{name: "the include in a Taskfile the root one includes", taskfile: "includes:\n  lint: taskfiles/lint.yml\n", file: actionlint,
+			also: map[string]string{"taskfiles/lint.yml": "includes:\n  common: {taskfile: '{{.GO_TOOLS_TASKS}}'}\n"}},
+		{name: "the include, and no entry for its tasks", taskfile: "includes:\n  common: {taskfile: '{{.GO_TOOLS_TASKS}}', flatten: true}\n" + reads, file: other,
+			says: owed},
+		{name: "no include: nothing reads the entry", taskfile: reads, file: other + actionlint, says: unread},
+		{name: "no include: nothing is owed", taskfile: reads, file: other},
+		{name: "a comment that names the variable", taskfile: "# includes: {common: {taskfile: '{{.GO_TOOLS_TASKS}}'}}\n" + reads, file: other + actionlint,
+			says: unread},
+		{name: "another include, and the variable elsewhere",
+			taskfile: "includes:\n  build: {taskfile: taskfiles/build.yml, vars: {SHARED: '{{.GO_TOOLS_TASKS}}'}}\n" + reads, file: other + actionlint, says: unread},
+		{name: "a page that shows the include", taskfile: reads, file: other + actionlint,
+			also: map[string]string{"README.md": "Take them:\n\n\tincludes:\n\t  common: {taskfile: '{{.GO_TOOLS_TASKS}}'}\n"}, says: unread},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{versions.File: tc.file, "Taskfile.yml": "version: '3'\n" + tc.taskfile}
+			for rel, body := range tc.also {
+				files[rel] = body
+			}
+			err := Gate{Root: repo(t, files)}.Check()
+			switch {
+			case tc.says == "" && err != nil:
+				t.Fatal(err)
+			case tc.says != "" && (err == nil || !strings.Contains(err.Error(), tc.says)):
+				t.Errorf("the gate said %v, want %q", err, tc.says)
+			case tc.says == owed && strings.Contains(err.Error(), "nothing reads"):
+				t.Errorf("an entry the repository does read is called unread: %v", err)
+			}
+		})
+	}
+}
+
+// What the common tasks read is read from their Taskfile: each task's reads, once each and in
+// the tasks' order, whichever way the versions command is run; and a file that is no Taskfile is
+// said, not taken as tasks that read nothing.
+func TestWhatATaskReadsIsFoundInItsTaskfile(t *testing.T) {
+	const taskfile = `version: '3'
+tasks:
+  lint:
+    desc: Lint.
+    cmds:
+      - docker run $({{.VERSIONS}} ref golangci-lint)
+      - cmd: go run x@$({{.GO_TOOLS}}versions version actionlint) && versions env go actionlint
+  build:
+    vars:
+      GO: {sh: versions version go}
+    cmds: [go build ./...]
+  test:
+    cmds: [go test ./...]
+`
+	got, err := taskReads([]byte(taskfile))
+	want := []taskRead{{"build", "go"}, {"lint", "actionlint"}, {"lint", "go"}, {"lint", "golangci-lint"}}
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("taskReads = %v, %v; want %v", got, err, want)
+	}
+	if got, err := taskReads([]byte("tasks: [")); err == nil || !strings.Contains(err.Error(), "go-tools' common tasks") {
+		t.Errorf("of what is no Taskfile: %v, %v", got, err)
+	}
+	if errs := commonTasks(&versions.Versions{}, map[string]string{"Taskfile.yml": "includes: {common: '{{.GO_TOOLS_TASKS}}'}\n"}, []byte("tasks: ["), map[string]bool{}); len(errs) != 1 {
+		t.Errorf("a repository that includes tasks that do not read is told so once, not %v", errs)
 	}
 }
