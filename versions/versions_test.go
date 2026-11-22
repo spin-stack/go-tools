@@ -193,6 +193,8 @@ func TestAnEntryOutOfItsKindsFormIsRefused(t *testing.T) {
 			"only a download has a pin per platform"},
 		{"a module named by a URL", "kind: module\n  source: https://x/y", "a module with no package path"},
 		{"a module with no source", "kind: module", "a module with no package path"},
+		{"a bump command over two lines", "kind: date\n  bump: \"spin-os upgrade\\nand more\"", "is not one line, as a person types it"},
+		{"a bump command with space around it", "kind: date\n  bump: \" spin-os upgrade\"", "is not one line, as a person types it"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Parse([]byte("- name: a\n  " + tc.entry + "\n  version: v1\n  track: tags x\n"))
@@ -397,5 +399,29 @@ func TestAnEntryWithAnotherIsAtItsVersionOrPin(t *testing.T) {
 	}
 	if !slices.Equal(names, []string{"bare", "commit", "spelled"}) || len(v.Followers("bare")) != 0 {
 		t.Errorf("followers of lead: %v", names)
+	}
+}
+
+// An entry says which command moves it when that is not `versions bump`, and the rewrite such a
+// command makes through Set leaves the field as it is written.
+func TestAnEntryNamesTheCommandThatMovesIt(t *testing.T) {
+	raw := []byte("- name: spin\n  kind: date\n  version: v1\n  track: today\n  bump: go tool task sources:bump\n- name: other\n  kind: date\n  version: v1\n  track: today\n")
+	v, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spin, _ := v.Get("spin")
+	other, _ := v.Get("other")
+	if spin.Bump != "go tool task sources:bump" || other.Bump != "" {
+		t.Errorf("bump: %q and %q", spin.Bump, other.Bump)
+	}
+	out, err := v.Set("spin", "v2", "")
+	if err != nil || string(out) != strings.Replace(string(raw), "version: v1", "version: v2", 1) {
+		t.Errorf("a rewrite of an entry with a bump command: %v\n%s", err, out)
+	}
+	theirs := spin
+	theirs.Bump = "spin-os upgrade"
+	if spin.equal(theirs) {
+		t.Error("two entries moved by different commands are called the same")
 	}
 }

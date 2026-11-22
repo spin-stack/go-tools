@@ -225,6 +225,11 @@ func TestCheckCountsARowItCouldNotReadAndFailsApartForIt(t *testing.T) {
 		"nothing behind": {file: lead, rows: []string{"lead v2 v2"}}, //nolint:dupword // a row: its pin, then its newest
 		"one behind": {file: lead + behind, rows: []string{"behind v1 v2 behind"},
 			says: "1 behind; versions bump <name> moves one", status: 1},
+		"one behind that another command moves": {file: lead + behind + "  bump: spin-os upgrade\n", rows: []string{"behind v1 v2 behind moved by `spin-os upgrade`"},
+			says: "1 behind; versions bump <name> moves one, and the command a row names moves that one", status: 1},
+		"one that another command moves, not behind": {file: lead + "  bump: spin-os upgrade\n", rows: []string{"lead v2 v2 moved by `spin-os upgrade`"}}, //nolint:dupword // a row: its pin, then its newest
+		"one behind, and another that another command moves": {file: lead + "  bump: spin-os upgrade\n" + behind,
+			says: "1 behind; versions bump <name> moves one", status: 1},
 		"one not read": {file: lead + unknown, rows: []string{"unknown v1 not read: versions: unknown tracks \"rumour\", which check does not know"},
 			says: "1 not read, and 0 behind of the 1 that were: a row not read may be behind", status: 2},
 		"one behind and two not read": {file: lead + behind + unknown + "- name: other\n  kind: date\n  version: v1\n  track: gossip\n",
@@ -296,4 +301,21 @@ func TestABumpBackwardsIsRefusedUnlessMeant(t *testing.T) {
 	out = stdout(t, func() { err = run(t.Context(), []string{"bump", "-file", file, "-back", "tool"}) })
 	require.NoError(t, err)
 	assert.Equal(t, "tool: v1.0.0  -> v1.9.0 \n", out)
+}
+
+// An entry whose file names another command for its bump is not moved by this one, with a version
+// or without, told to go backwards or not: the refusal names the command, and the file is as it was.
+func TestABumpOfAnEntryAnotherCommandMovesIsRefused(t *testing.T) {
+	const theirs = "- name: spin\n  kind: date\n  version: 20260101T000000Z\n  track: today\n  bump: go tool task sources:bump\n"
+	file := filepath.Join(t.TempDir(), "versions.yaml")
+	require.NoError(t, os.WriteFile(file, []byte(theirs), 0o600))
+	for _, argv := range [][]string{{"bump", "-file", file, "spin"}, {"bump", "-file", file, "spin", "20270101T000000Z"}, {"bump", "-file", file, "-back", "spin", "20250101T000000Z"}} {
+		var err error
+		out := stdout(t, func() { err = run(t.Context(), argv) })
+		require.ErrorContains(t, err, "spin is moved by `go tool task sources:bump`, as its entry says (bump:), and not by this command", "%v", argv)
+		assert.Empty(t, out)
+		raw, err := os.ReadFile(file) //nolint:gosec // the test's own file
+		require.NoError(t, err)
+		assert.Equal(t, theirs, string(raw), "%v", argv)
+	}
 }

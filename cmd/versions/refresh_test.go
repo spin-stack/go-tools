@@ -374,3 +374,17 @@ func TestARefreshLeavesAPinPastItsNewestWhereItIs(t *testing.T) {
 	assert.Equal(t, "1", git(t, "rev-list", "--count", "HEAD"))
 	assert.Empty(t, git(t, "status", "--porcelain"))
 }
+
+// An entry another command moves is not one a refresh moves: it is said, with the command, and the
+// others still move.
+func TestARefreshLeavesAnEntryAnotherCommandMoves(t *testing.T) {
+	inRepository(t, strings.Replace(refreshFile(), "  note: build everything again\n", "  bump: go tool task sources:bump\n", 1)+
+		"- name: plain\n  kind: date\n  version: 20260101T000000Z\n  track: today\n")
+	var out bytes.Buffer
+	r := refresher{file: "versions.yaml", git: runGit, label: "versions", base: "main", out: &out}
+	err := r.refresh(t.Context(), []string{"snapshot", "plain"})
+	require.ErrorContains(t, err, "snapshot: versions: snapshot is moved by `go tool task sources:bump`")
+	assert.Equal(t, "versions: plain "+today(), git(t, "log", "-1", "--format=%s"))
+	assert.Equal(t, "2", git(t, "rev-list", "--count", "HEAD"), "one commit, for plain")
+	assert.NotContains(t, out.String(), "| snapshot |")
+}
