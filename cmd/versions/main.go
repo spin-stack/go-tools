@@ -67,7 +67,8 @@ Usage:
                                       behind
   versions bump    <name> [version]   pin an entry at a version, the newest by default, and
                                       every entry tracked with it at the same; never at an
-                                      older version or commit than the pin's, unless -back
+                                      older version or commit than the pin's, unless -back,
+                                      and not an entry whose bump: names another command
   versions refresh <name>...          bump each to its newest, a commit each, and say what moved
                                       and what is a new major, left for a person;
                                       -propose pushes them as refresh/<label>-<sum> and opens
@@ -219,6 +220,9 @@ func bump(ctx context.Context, v *versions.Versions, file string, names []string
 	if err != nil {
 		return err
 	}
+	if err := anothers(was); err != nil {
+		return err
+	}
 	to := upstream.Bump
 	if back {
 		to = upstream.BumpBackwards
@@ -241,6 +245,16 @@ func bump(ctx context.Context, v *versions.Versions, file string, names []string
 		}
 	}
 	return nil
+}
+
+// anothers refuses an entry whose file says another command moves it, and names the command:
+// what that command checks, waits for or writes besides the pin is not something this one does.
+func anothers(e versions.Entry) error {
+	if e.Bump == "" {
+		return nil
+	}
+	return fmt.Errorf("versions: %s is moved by `%s`, as its entry says (bump:), and not by this command: "+
+		"that one knows what a bump of %s needs", e.Name, e.Bump, e.Name)
 }
 
 // pins is each KEY=value the entries named are handed over as, after prefix, sorted: the same
@@ -266,7 +280,7 @@ func pins(v *versions.Versions, names []string, prefix string) ([]string, error)
 func check(w io.Writer, rows []upstream.Status) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tPINNED\tNEWEST\t")
-	behind, unreadRows := 0, 0
+	behind, unreadRows, anothers := 0, 0, false
 	for _, st := range rows {
 		mark := ""
 		switch {
@@ -274,8 +288,13 @@ func check(w io.Writer, rows []upstream.Status) error {
 			mark, unreadRows = "not read:", unreadRows+1
 		case st.Behind:
 			mark, behind = "behind", behind+1
+			anothers = anothers || st.Entry.Bump != ""
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s %s\n", st.Entry.Name, st.Entry.Version, st.Newest, mark, st.Note)
+		note := st.Note
+		if st.Entry.Bump != "" {
+			note = strings.TrimSpace("moved by `" + st.Entry.Bump + "` " + note)
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s %s\n", st.Entry.Name, st.Entry.Version, st.Newest, mark, note)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -285,7 +304,11 @@ func check(w io.Writer, rows []upstream.Status) error {
 		return unread{fmt.Errorf("%d not read, and %d behind of the %d that were: a row not read may be behind, and says why "+
 			"(GITHUB_TOKEN or GH_TOKEN reads a private repository, and more than sixty requests an hour)", unreadRows, behind, len(rows)-unreadRows)}
 	case behind > 0:
-		return fmt.Errorf("%d behind; versions bump <name> moves one", behind)
+		also := ""
+		if anothers {
+			also = ", and the command a row names moves that one"
+		}
+		return fmt.Errorf("%d behind; versions bump <name> moves one%s", behind, also)
 	}
 	return nil
 }

@@ -57,7 +57,13 @@ type Entry struct {
 	// measured. Only a build can compute it, since it depends on the git that writes it.
 	Archive string `yaml:"archive,omitempty"`
 	Track   string `yaml:"track"`
-	Note    string `yaml:"note,omitempty"`
+	// Bump is the command that moves the entry, when that is not `versions bump`: a repository's
+	// own, which knows what a bump of this entry needs that the shared one does not - a release
+	// that must hold the pinned commit, data to generate again, a version that moves only with
+	// another repository's release. `versions bump` and `versions refresh` refuse the entry and
+	// name the command; upstream.Bump, which such a command is built on, does not read it.
+	Bump string `yaml:"bump,omitempty"`
+	Note string `yaml:"note,omitempty"`
 }
 
 var (
@@ -79,6 +85,7 @@ func (e Entry) validate() error {
 	check(name.MatchString(e.Name), "not a name: lowercase, digits and -")
 	check(e.Version != "", "no version")
 	check(e.Track != "", "no track: how check finds the newest")
+	check(e.Bump == strings.TrimSpace(e.Bump) && !strings.Contains(e.Bump, "\n"), "the bump command %q is not one line, as a person types it", e.Bump)
 	check(e.Archive == "" || e.Kind == Git, "only a git entry has an archive")
 	check(len(e.Pins) == 0 || e.Kind == Download, "only a download has a pin per platform")
 	switch e.Kind {
@@ -123,7 +130,7 @@ func (e Entry) validate() error {
 // equal is whether two entries say the same thing; an entry with pins is no comparable value.
 func (e Entry) equal(o Entry) bool {
 	return e.Name == o.Name && e.Kind == o.Kind && e.Source == o.Source && e.Version == o.Version &&
-		e.Pin == o.Pin && maps.Equal(e.Pins, o.Pins) && e.Archive == o.Archive && e.Track == o.Track && e.Note == o.Note
+		e.Pin == o.Pin && maps.Equal(e.Pins, o.Pins) && e.Archive == o.Archive && e.Track == o.Track && e.Bump == o.Bump && e.Note == o.Note
 }
 
 // Ref is an image's reference, by its digest: what `docker run` and FROM are given.

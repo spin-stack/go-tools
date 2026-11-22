@@ -97,6 +97,15 @@ repository with a root `VERSION`, `task bump` and `task bump VERSION=v9` both re
 value - so a refusal would refuse every bump in spin. Read the line `bump` prints: it names the
 version it pinned.
 
+## A repository with a bump of its own
+
+Four of seven repositories have a command that moves some entries with rules `bump` does not
+have (website's `sources:bump`, spin-machine's `spin-machine-dev bump`, spin-ami's
+`spin-os upgrade`). Such an entry says so in `versions.yaml`, with
+[`bump: <the command>`](../versions/reference/#an-entry-another-command-moves), and
+`go tool task bump NAME=<that entry>` refuses and names the command. The rule every one of those
+commands had in common is everybody's now: [no bump moves a pin backwards](../versions/#never-backwards).
+
 ## Releasing
 
 Every repository that includes the tasks has a `release` task, and in most of them it must do

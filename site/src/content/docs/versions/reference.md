@@ -15,6 +15,7 @@ description: Every kind of entry versions.yaml takes, the build arguments each b
 | `pins` | for a `download` with one file per platform: the sha256 of each, by `os/arch` as Go names them, in place of `pin` |
 | `archive` | for `git`: the sha256 of `git archive` at the commit, bumped by hand |
 | `track` | how `check` and `bump` find a newer version |
+| `bump` | the command that moves the entry, when that is not `versions bump`: see [An entry another command moves](#an-entry-another-command-moves) |
 | `note` | what a bump has to be checked with |
 
 ## Kinds
@@ -96,3 +97,34 @@ An entry can be with another repository's: spin-ami rebuilds the Grafana spin la
 pins, so its entry is `with spin-stack/spin grafana`. When spin moves Grafana, spin-ami's
 `versions check` says its own is behind, and `versions bump grafana` takes the version spin's file
 has, spelled as spin-ami's entry spells its own.
+
+## An entry another command moves
+
+```yaml title="versions.yaml"
+- name: spin
+  kind: git
+  source: https://github.com/spin-stack/spin
+  version: v20261114.01
+  pin: 51f7e0dea53e6f85aa855753766b688634487168
+  track: github-release
+  bump: go tool task sources:bump
+```
+
+Some entries move with rules the shared bump does not have. website's `sources:bump` waits for a
+release to carry the screenshots the site needs and generates data again; spin-ami's
+`spin-os upgrade` holds entries that move only with spin's release; spin-machine's
+`spin-machine-dev bump` prints what a new machine type changes. `bump` is that command, one line,
+as a person types it. Then:
+
+- `versions bump spin`, `go tool task bump NAME=spin` and `versions refresh spin` refuse, and
+  name it: ``spin is moved by `go tool task sources:bump`, as its entry says (bump:), and not by
+  this command``. `-back` does not change that.
+- `versions check` says it in the entry's row, `` moved by `go tool task sources:bump` ``, behind
+  or not.
+- The repository's command is not refused: it is built on `versions/upstream`'s `Bump`, which
+  does not read the field. A command that shells out to `versions bump` for such an entry would
+  be, and calls the library instead.
+
+A `versions` from before the field refuses a file that has it (`field bump not found`), and
+`go tool task` reads `versions.yaml` with the go-tools `go.mod` requires. So the field is added in
+the commit that moves `go.mod` to a release that knows it, or after.
