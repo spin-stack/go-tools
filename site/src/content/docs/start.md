@@ -33,7 +33,8 @@ and Task in `versions.yaml`, pinned by the sha256 of every platform's archive:
 user's cache - Task held to its pin, the tools to the sha256 their release's `checksums.txt` gives
 - unpacks each once, and runs Task with every go-tools command on its `PATH`: a Taskfile says
 `mutate -base origin/main`. The first run on a machine takes a second or two. Which release is the
-latest is asked at most every ten minutes, and a machine that cannot ask goes on with the one it
+latest is asked at most every ten minutes - and again at once when the cache names one from
+before the release `go.mod` requires - and a machine that cannot ask goes on with the one it
 has. Task's and the tools' own modules - about 450 together - are in no `go.mod` and no CI cache.
 
 No repository bumps the tools: a release of go-tools is in every repository's next run. What a

@@ -93,12 +93,18 @@ const fresh = 10 * time.Minute
 // is unpacked in under root: its archive <name>_<os>_<arch>.tar.gz, held to the sha256 the
 // release's checksums file gives it. The name of the latest release is asked at most every ten
 // minutes, and a machine that cannot ask goes on with the last one it had.
-func Latest(ctx context.Context, base, name, root string) (string, error) {
-	return latest(ctx, base, name, root, runtime.GOOS, runtime.GOARCH, time.Now())
+//
+// since is the release the caller is of, "" when it is of none: a name recorded that is before it
+// is not the latest however lately it was asked, because the caller is proof of a later one, and
+// is asked again. Without it a command taken from a release minutes old would run for ten minutes
+// beside the release before, which has nothing that command and its release added. Releases are
+// in the order of their names, as v<YYYYMMDD>.<NN> is.
+func Latest(ctx context.Context, base, name, root, since string) (string, error) {
+	return latest(ctx, base, name, root, since, runtime.GOOS, runtime.GOARCH, time.Now())
 }
 
-func latest(ctx context.Context, base, name, root, goos, goarch string, now time.Time) (string, error) {
-	tag, err := latestTag(ctx, base, filepath.Join(root, name, "latest"), now)
+func latest(ctx context.Context, base, name, root, since, goos, goarch string, now time.Time) (string, error) {
+	tag, err := latestTag(ctx, base, filepath.Join(root, name, "latest"), since, now)
 	if err != nil {
 		return "", err
 	}
@@ -142,12 +148,12 @@ func exists(p string) bool {
 }
 
 // latestTag is the name of base's latest release: the one stamp records when it was written less
-// than fresh ago, else asked of GitHub - where /releases/latest redirects to the release, which no
+// than fresh ago and is not before since, else asked of GitHub - where /releases/latest redirects to the release, which no
 // API quota counts - and recorded; the one stamp records, however old, when GitHub cannot answer.
-func latestTag(ctx context.Context, base, stamp string, now time.Time) (string, error) {
+func latestTag(ctx context.Context, base, stamp, since string, now time.Time) (string, error) {
 	raw, _ := os.ReadFile(stamp) //nolint:gosec // this cache's own file
 	recorded := string(raw)
-	if st, err := os.Stat(stamp); recorded != "" && err == nil && now.Sub(st.ModTime()) < fresh {
+	if st, err := os.Stat(stamp); recorded != "" && recorded >= since && err == nil && now.Sub(st.ModTime()) < fresh {
 		return recorded, nil
 	}
 	tag, err := askLatest(ctx, base)

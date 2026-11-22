@@ -49,6 +49,22 @@ func Module(release string) (string, error) {
 	return fmt.Sprintf("v0.%s.%d", m[1], seq), nil
 }
 
+// module is a release's module version, and not one built on it: a pseudo-version of a commit
+// after the release, a tree with changes.
+var module = regexp.MustCompile(`^v0\.(\d{8})\.(\d{1,2})$`)
+
+// Named is the release that module, a version of this module, is the tag of; "" when it is no
+// release's - a commit between two, a build of a checkout. It is what a command built from the
+// module knows of itself: the release it is of.
+func Named(version string) string {
+	m := module.FindStringSubmatch(version)
+	if m == nil {
+		return ""
+	}
+	seq, _ := strconv.Atoi(m[2]) //nolint:errcheck // digits, by the pattern
+	return fmt.Sprintf("v%s.%02d", m[1], seq)
+}
+
 // Of is the release among tags, the ones that point at a commit, that names it; "" when the
 // commit is not released. A run asked again of a commit it released answers that release rather
 // than making a second one of the same bytes.
