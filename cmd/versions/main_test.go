@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/spin-stack/go-tools/versions"
+	"github.com/spin-stack/go-tools/versions/upstream"
 )
 
 // stdout is what f printed to os.Stdout.
@@ -251,12 +252,15 @@ func TestCheckCountsARowItCouldNotReadAndFailsApartForIt(t *testing.T) {
 			for _, row := range tc.rows {
 				assert.Contains(t, rows, row)
 			}
+			msg, code := failure(err)
+			assert.Equal(t, tc.status, code)
 			if tc.says == "" {
 				require.NoError(t, err)
+				assert.Empty(t, msg)
 				return
 			}
 			require.ErrorContains(t, err, tc.says)
-			assert.Equal(t, tc.status, status(err))
+			assert.True(t, strings.HasPrefix(msg, "versions: "+tc.says), msg)
 		})
 	}
 }
@@ -321,4 +325,25 @@ func TestABumpOfAnEntryAnotherCommandMovesIsRefused(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, theirs, string(raw), "%v", argv)
 	}
+}
+
+// A failure is said once under the command's name, whoever worded it, and a help that was asked
+// for is no failure. The table's columns are two spaces apart.
+func TestAFailureIsSaidUnderTheCommandsName(t *testing.T) {
+	msg, code := failure(run(t.Context(), nil))
+	assert.Equal(t, "versions: no command given", msg)
+	assert.Equal(t, 1, code)
+	msg, code = failure(run(t.Context(), []string{"version", "-file", filepath.Join(t.TempDir(), "none"), "kernel"}))
+	assert.True(t, strings.HasPrefix(msg, "versions: open "), msg)
+	assert.Equal(t, 1, code)
+	var err error
+	stdout(t, func() { err = run(t.Context(), []string{"version", "-h"}) })
+	require.Error(t, err)
+	msg, code = failure(err)
+	assert.Empty(t, msg)
+	assert.Zero(t, code)
+
+	var table bytes.Buffer
+	require.NoError(t, check(&table, []upstream.Status{{Entry: versions.Entry{Name: "kernel", Version: "7.2.8"}, Newest: "7.2.8"}}, false))
+	assert.Equal(t, "NAME    PINNED  NEWEST  \nkernel  7.2.8   7.2.8    \n", table.String())
 }

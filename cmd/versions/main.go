@@ -26,17 +26,26 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	err := run(ctx, os.Args[1:])
+	err := run(ctx, os.Args[1:]) // mutate-exempt: the process's own arguments; run is what the tests drive
 	stop()
-	if err != nil && !errors.Is(err, flag.ErrHelp) {
-		// The package names itself in its errors already; this names the rest.
-		msg := err.Error()
-		if !strings.HasPrefix(msg, "versions: ") {
-			msg = "versions: " + msg
-		}
+	if msg, code := failure(err); code != 0 { // mutate-exempt: the process's exit; failure is what the tests drive
 		fmt.Fprintln(os.Stderr, msg)
-		os.Exit(status(err))
+		os.Exit(code)
 	}
+}
+
+// failure is what a command that failed says and the status it exits with: nothing and 0 for one
+// that did not, and for a help that was asked for.
+func failure(err error) (string, int) {
+	if err == nil || errors.Is(err, flag.ErrHelp) {
+		return "", 0
+	}
+	// The package names itself in its errors already; this names the rest.
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "versions: ") {
+		msg = "versions: " + msg
+	}
+	return msg, status(err)
 }
 
 // unread is check's failure when it could not read a row: another exit status than a row behind,
@@ -282,6 +291,7 @@ func pins(v *versions.Versions, names []string, prefix string) ([]string, error)
 // The last line names the command that moves an entry as the person who ran this would type it:
 // the task every repository has when byTask says that is what ran it, and this command otherwise.
 func check(w io.Writer, rows []upstream.Status, byTask bool) error {
+	// mutate-exempt: of the three zeros, a minimum width of one is under every cell's, a tab's width is unused where the padding is spaces, and the flag that edit sets reads HTML entities, which no row has
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tPINNED\tNEWEST\t")
 	behind, unreadRows, anothers := 0, 0, false
