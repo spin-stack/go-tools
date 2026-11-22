@@ -143,7 +143,7 @@ func TestARepositoryThatIncludesTheTasksHasThem(t *testing.T) {
 		t.Errorf("%d tasks, and the repository wrote none: %v", len(listed.Tasks), has)
 	}
 
-	if out, ok, ran := r.task("internal/x", "versions"); !ok || strings.Join(ran, "\n") != "gh auth token\nversions check -file versions.yaml" {
+	if out, ok, ran := r.task("internal/x", "versions"); !ok || strings.Join(ran, "\n") != "gh auth token\nversions check -task -file versions.yaml" {
 		t.Errorf("from a directory of the repository, task versions passed=%t and ran %v\n%s", ok, ran, out)
 	}
 	r.ran([]string{"gh auth token", "versions bump -file versions.yaml golangci-lint"}, "bump", "NAME=golangci-lint")
@@ -164,7 +164,7 @@ func TestVersionsAsksEveryFileOfPins(t *testing.T) {
 	} {
 		r := newRepository(t, map[string]string{"Taskfile.yml": including("VERSIONS_FILES: "+files, "")})
 		ran := r.refused(status, "versions")
-		if want := "gh auth token\nversions check -file " + strings.ReplaceAll(files, " ", "\nversions check -file "); strings.Join(ran, "\n") != want {
+		if want := "gh auth token\nversions check -task -file " + strings.ReplaceAll(files, " ", "\nversions check -task -file "); strings.Join(ran, "\n") != want {
 			t.Errorf("ran:\n%s\nwant:\n%s", strings.Join(ran, "\n"), want)
 		}
 	}
@@ -193,7 +193,7 @@ func TestVersionsAndBumpReadUpstreamsWithATokenWhereThereIsOne(t *testing.T) {
 			if tc.asks {
 				asked = []string{"gh auth token"}
 			}
-			r.ran(append(asked, "versions check -file versions.yaml", tc.tokens), "versions")
+			r.ran(append(asked, "versions check -task -file versions.yaml", tc.tokens), "versions")
 			r.ran(append(asked, "versions bump -file versions.yaml task", tc.tokens), "bump", "NAME=task")
 		})
 	}
@@ -372,7 +372,7 @@ func TestConsumersReadsTheRepositorysTable(t *testing.T) {
 // go-tools sets GO_TOOLS, and each command is then its tree's.
 func TestGoToolsRunsItsTreesCommands(t *testing.T) {
 	r := newRepository(t, map[string]string{"Taskfile.yml": including("GO_TOOLS: 'go run ./cmd/'", ""), "consumers.toml": ""})
-	r.ran([]string{"gh auth token", "go run ./cmd/versions check -file versions.yaml"}, "versions")
+	r.ran([]string{"gh auth token", "go run ./cmd/versions check -task -file versions.yaml"}, "versions")
 	r.ran([]string{"gh auth token", "go run ./cmd/versions bump -file versions.yaml task"}, "bump", "NAME=task")
 	r.ran([]string{"git fetch --quiet --tags origin main", "go run ./cmd/consumers -table consumers.toml"}, "consumers")
 }
