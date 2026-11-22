@@ -41,6 +41,16 @@ repository imports of go-tools as a library - `versions`, `provenance` - is `go.
 release is also tagged `v0.<YYYYMMDD>.<N>`, a module version, so Dependabot's `gomod` updates
 move it as any dependency, and `go get github.com/spin-stack/go-tools@latest` takes the newest.
 
+## Take the tasks every repository has
+
+```yaml title="Taskfile.yml"
+includes:
+  common: {taskfile: '{{.GO_TOOLS_TASKS}}', flatten: true, vars: {GATE_WORKFLOW: ci.yml, GATE_JOBS: Gate}}
+```
+
+gives the repository `versions`, `bump`, `release`, `lint:workflows` and `consumers` as every
+other has them. [The common tasks](../tasks/) says what each does and what the vars are.
+
 ## Run them where developers already run checks
 
 The spin-stack repositories put the quick gates in `task lint` and the test-driven ones after
@@ -61,12 +71,13 @@ already answered, and mutate's base on a pull request and on a push.
 | whether every package install is pnpm, through Socket Firewall | [sfw](../sfw/) |
 | whether every workflow step is a task a developer can run too | [taskgate](../taskgate/) |
 | what a repository would show if it were made public | [exposure](../exposure/) |
+| which of a repository's commits each place that copies from it is on | [consumers](../consumers/) |
 | what a release was built from, signed | [provenance, attestgate, sbom](../supply-chain/) |
 
 ## Libraries
 
 Some of these are also packages another repository imports: `versions` (reading
-`versions.yaml`), `versions/upstream`, `versions/gate`, `provenance`, `attestgate`, `sbom` and
-`trustroot`. The rest is `internal/`. Only two are linked into anything spin-stack ships:
+`versions.yaml`), `versions/upstream`, `versions/gate`, `provenance`, `attestgate`, `sbom`,
+`consumers` and `trustroot`. The rest is `internal/`. Only two are linked into anything spin-stack ships:
 `versions`, which spin's binaries use to read the pins they carry, and `trustroot`, which they
 verify release signatures against.

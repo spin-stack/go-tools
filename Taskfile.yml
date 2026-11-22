@@ -8,11 +8,36 @@
 #   task coverage     coverage.out's numbers, to the terminal or the workflow run's summary
 #   task trace        where a workflow run's time went (ghatrace), to its summary and _output/ghatrace
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
+#   task release      what release.yml runs once the binaries are built: the next v<YYYYMMDD>.<NN>
+#
+# versions, bump, release, lint:workflows and consumers are cmd/task/tasks.yml's, which every
+# repository includes: none of them is written here.
 #   task site         the documentation site under site/, built into site/dist
 
 version: '3'
 
 silent: true
+
+# The Task this runs under, for the tests that run cmd/task/tasks.yml under Task itself.
+env:
+  TASK_EXE: '{{.TASK_EXE}}'
+
+includes:
+  # The tree's file, as another repository includes the released one ({{.GO_TOOLS_TASKS}}), and
+  # with the tree's commands: a change to a task or to what it calls is held to this repository
+  # before any release carries it.
+  common:
+    taskfile: cmd/task/tasks.yml
+    flatten: true
+    vars:
+      GO_TOOLS: 'go run ./cmd/'
+      GATE_WORKFLOW: ci.yml
+      GATE_JOBS: Gate
+      RELEASE_FILES: _output/release/*.tar.gz _output/release/checksums.txt
+      # The others are the pins go tool sfw and go tool exposure embed for every repository.
+      VERSIONS_FILES: versions.yaml cmd/sfw/versions.yaml cmd/exposure/versions.yaml
+      # The site's CI page shows this workflow for a repository to copy.
+      WORKFLOWS_ALSO: site/examples/github/.github
 
 vars:
   OUT: '{{.ROOT_DIR}}/_output'
@@ -68,21 +93,6 @@ tasks:
       - go run ./cmd/trustroot -check
       - task: lint:workflows
 
-  lint:workflows:
-    desc: actionlint over .github/, and every action pinned by its commit.
-    cmds:
-      # -shellcheck= because actionlint runs whatever shellcheck is on PATH: a runner has one and
-      # a laptop may not, and a gate whose answer depends on the machine is not a gate.
-      - go run github.com/rhysd/actionlint/cmd/actionlint@$({{.VERSIONS}} version actionlint) -shellcheck=
-      # The site's CI page shows this workflow for a repository to copy.
-      - go run github.com/rhysd/actionlint/cmd/actionlint@$({{.VERSIONS}} version actionlint) -shellcheck= site/examples/github/.github/workflows/*.yml
-      # A tag is whatever its owner points it at; the comment is the version Dependabot moves.
-      - cmd: |
-          if grep -rnE '^\s*(- )?uses: [^./][^ ]*@' .github site/examples/github/.github | grep -vE '@[0-9a-f]{40} # v[0-9]'; then
-            echo "an action above is used by a tag its owner can move: pin it by commit SHA, with '# vX.Y.Z' after it"
-            exit 1
-          fi
-
   mutate:
     desc: Break what the change against BASE touched and fail on an edit no test refuses (BASE=origin/main; in CI, what the run's event diffs against).
     cmds:
@@ -115,13 +125,14 @@ tasks:
       - go run ./cmd/ghatrace run -spans "${RUNNER_TEMP:-}"
 
   release:build:
-    desc: Every command, for each platform a repository runs them on, as _output/release/go-tools_<os>_<arch>.tar.gz.
+    desc: Every command and the tasks every repository includes, for each platform a repository runs them on, as _output/release/go-tools_<os>_<arch>.tar.gz.
     # What a repository's `go tool task` (cmd/task) unpacks onto Task's PATH, so that no repository
     # compiles these commands or takes their modules. Stripped and without cgo: a program that runs
     # on any machine of its platform, the same bytes from the same commit. The archive's members
     # are sorted, owned by nobody and dated by the commit, for the same reason. cmd/task is not in
     # it: it is the command a repository compiles, and its directory is first on Task's PATH, where
-    # a second task would stand in front of Task.
+    # a second task would stand in front of Task. Its tasks.yml is: the tasks a repository includes
+    # are of the release their commands are from.
     vars:
       PLATFORMS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
       COMMANDS:
@@ -146,6 +157,8 @@ tasks:
             | go run ./internal/release/cmd/notices -go "$(go env GOVERSION)" -goroot "$(go env GOROOT)" \
             > {{.OUT}}/release/{{replace "/" "_" .ITEM}}/THIRD_PARTY_NOTICES
       - for: {var: PLATFORMS, split: ' '}
+        cmd: cp cmd/task/tasks.yml {{.OUT}}/release/{{replace "/" "_" .ITEM}}/
+      - for: {var: PLATFORMS, split: ' '}
         cmd: >-
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$(git show -s --format=%ct HEAD)"
           -C {{.OUT}}/release/{{replace "/" "_" .ITEM}} -czf {{.OUT}}/release/go-tools_{{replace "/" "_" .ITEM}}.tar.gz .
@@ -157,19 +170,7 @@ tasks:
     requires:
       vars: [SHA]
     cmds:
-      - go run ./internal/release/cmd/releasename {{.SHA}} >> "${GITHUB_OUTPUT:-/dev/stdout}"
-
-  release:publish:
-    desc: Publish _output/release as the GitHub release VERSION of SHA, which tags it (GH_TOKEN).
-    # The tag is made by the release, last: a release that failed to publish is no tag that names a
-    # commit with no files.
-    requires:
-      vars: [SHA, VERSION]
-    cmds:
-      - >-
-        gh release create {{.VERSION}} {{.OUT}}/release/*.tar.gz {{.OUT}}/release/checksums.txt
-        --target {{.SHA}} --title {{.VERSION}}
-        --notes "Every go-tools command at {{.SHA}}, attested as built by release.yml. A repository's \`go tool task\` runs the latest."
+      - go run ./cmd/release -outputs {{.SHA}} >> "${GITHUB_OUTPUT:-/dev/stdout}"
 
   release:module:
     desc: Tag SHA as MODULE, its release's module version, unless it is already (GH_TOKEN).
@@ -199,24 +200,3 @@ tasks:
     cmds:
       - go run ./cmd/sfw pnpm --dir site install --frozen-lockfile
       - pnpm --dir site dev
-
-  versions:
-    desc: Say which of versions.yaml's pins are behind their upstream, and of those cmd/sfw and cmd/exposure carry (exits 1 when any is).
-    cmds:
-      # Every file, whichever is behind: the others are the pins go tool sfw and go tool exposure
-      # embed for every repository.
-      - |
-        status=0
-        {{.VERSIONS}} check || status=1
-        {{.VERSIONS}} check -file cmd/sfw/versions.yaml || status=1
-        {{.VERSIONS}} check -file cmd/exposure/versions.yaml || status=1
-        exit $status
-
-  bump:
-    desc: Pin one entry of versions.yaml at a version, the newest by default (task bump NAME=golangci-lint [VERSION=v2.14.0]; FILE=cmd/sfw/versions.yaml or cmd/exposure/versions.yaml for what those commands embed).
-    requires:
-      vars: [NAME]
-    vars:
-      FILE: '{{.FILE | default "versions.yaml"}}'
-    cmds:
-      - '{{.VERSIONS}} bump -file {{.FILE}} {{.NAME}} {{.VERSION}}'
