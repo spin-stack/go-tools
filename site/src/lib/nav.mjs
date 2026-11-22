@@ -11,6 +11,7 @@ export const sidebar = [
 		label: 'Gates for tests and code',
 		items: [
 			{ label: 'mutate', slug: 'mutate' },
+			{ label: 'coverfloor', slug: 'coverfloor' },
 			{ label: 'testquality', slug: 'testquality' },
 			{ label: 'ctxlife', slug: 'ctxlife' },
 			{ label: 'refs', slug: 'refs' },

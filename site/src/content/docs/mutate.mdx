@@ -65,7 +65,7 @@ An edit that survives means one of three things, and each has its own answer:
 |---|---|
 | Behaviour a caller depends on, and no test checks it. | **Write the test.** That's the common case, as in the example above. |
 | The edit changes nothing a caller can see: `-1` and `-2` both mean "no limit". | `// mutate-exempt: <reason>` on the line, or on the line above it. |
-| Only a test this run cannot reach checks the function, one that needs root, KVM or a cloud account. | `mutate-lane: <TestName>` in the function's doc comment, naming that test. |
+| Only a test this run cannot reach checks the function, one that needs root, KVM or a cloud account. | `mutate-lane: <TestName>` in the function's doc comment, naming that test. [`coverfloor`](../coverfloor/) leaves the function out of the coverage floor too. |
 
 ```go
 for _, sub := range m.re.FindAllStringSubmatch(text, -1) { // mutate-exempt: any n < 0 is every match

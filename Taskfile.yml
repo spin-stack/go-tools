@@ -25,20 +25,15 @@ tasks:
   test:
     desc: The Go tests, under the race detector, with their coverage in coverage.out and held to a floor.
     vars:
-      # Below today's 61.4%. Raise it when the number has moved up and stayed; never lower it to
+      # Below 85.61% of what CI runs, on 2026-11-22. Raise it when the number has moved up and stayed; never lower it to
       # let a change through, or it is a gate that reports whatever it is given.
       COVERAGE_FLOOR: 60
     cmds:
       # Each package and each test of a second or more a span of the run's trace (task trace);
       # off a runner only go test.
       - go run ./cmd/ghatrace gotest -name "go test" -- go test -race -covermode=atomic -coverprofile=coverage.out ./...
-      # The anchor makes it the total line, not a function with "total" in its name.
-      - |
-        total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')
-        awk -v got="$total" -v floor={{.COVERAGE_FLOOR}} 'BEGIN {
-          if (got + 0 < floor + 0) { printf "coverage is %s%%, below the floor of %s%%\n", got, floor; exit 1 }
-          printf "coverage: %s%% (floor %s%%)\n", got, floor
-        }'
+      # The floor every repository holds its profile to, held to this one first.
+      - go run ./cmd/coverfloor {{.COVERAGE_FLOOR}} coverage.out
 
   lint:
     desc: golangci-lint with spin's rules (.golangci.yml), at spin's version, over the Go.

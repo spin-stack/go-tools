@@ -599,6 +599,32 @@ func heldByLane(path string, fn *ast.FuncDecl) (bool, error) {
 	return false, fmt.Errorf("%s: %s is marked as held by %s, and no test in %s is called that", path, fn.Name.Name, test, dir)
 }
 
+// LaneFunctions is the first and last line of each function in the file at path that a lane's
+// test holds, as mutate reads laneMarker: coverfloor leaves these out of a coverage floor for the
+// reason mutate makes no edit in them, and asks here so the two cannot drift.
+func LaneFunctions(path string) ([][2]int, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s for %s: %w", path, laneMarker, err)
+	}
+	var lanes [][2]int
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		held, err := heldByLane(path, fn)
+		if err != nil {
+			return nil, err
+		}
+		if held {
+			lanes = append(lanes, [2]int{fset.Position(fn.Pos()).Line, fset.Position(fn.End()).Line})
+		}
+	}
+	return lanes, nil
+}
+
 // moduleRoot is the directory above dir that holds go.mod.
 func moduleRoot(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
