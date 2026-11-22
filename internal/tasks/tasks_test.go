@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -182,6 +183,42 @@ func TestReleaseIsOfTheRepositorysGateAndFiles(t *testing.T) {
 	r.env = append(r.env, "REFUSE=1")
 	if ran := r.refused("exit status 1", "release"); ran[len(ran)-1] != asked[:len("proven release -repo ")]+"spin-stack/go-tools"+asked[len("proven release -repo o/r"):] {
 		t.Errorf("after proven refused, the task went on: %v", ran)
+	}
+}
+
+// RELEASE_DRY makes every refusal a release would and stops before the release: the commit is
+// asked of proven and named, the files a release carries are listed, and gh creates nothing. A
+// commit proven refuses is refused dry too, and so is a file that is not there.
+func TestADryReleaseRefusesWhatAReleaseWouldAndReleasesNothing(t *testing.T) {
+	r := newRepository(t, map[string]string{"Taskfile.yml": including("GATE_WORKFLOW: ci.yml, GATE_JOBS: Gate, RELEASE_FILES: _output/*.tar.gz _output/checksums.txt", ""),
+		"_output/a.tar.gz": "", "_output/checksums.txt": ""})
+	dry := []string{
+		"git fetch --quiet --tags origin main", "gh auth token", "git rev-parse --verify origin/main^{commit}",
+		"gh repo view --json nameWithOwner --jq .nameWithOwner",
+		"proven release -repo o/r -sha 0123abc -workflow ci.yml -events push,pull_request -ran Gate -also ", "release 0123abc",
+	}
+	out, ok, ran := r.task("", "release", "RELEASE_DRY=1")
+	if !ok || strings.Join(ran, "\n") != strings.Join(dry, "\n") {
+		t.Errorf("a dry release passed=%t and ran:\n  %s\nwant:\n  %s\n%s", ok, strings.Join(ran, "\n  "), strings.Join(dry, "\n  "), out)
+	}
+	for _, says := range []string{"_output/a.tar.gz\n_output/checksums.txt\n", "RELEASE_DRY: 0123abc would be released to o/r as v20261122.01, and is not"} {
+		if !strings.Contains(out, says) {
+			t.Errorf("a dry release does not say %q:\n%s", says, out)
+		}
+	}
+
+	bare := newRepository(t, map[string]string{"Taskfile.yml": including("GATE_WORKFLOW: ci.yml, GATE_JOBS: Gate", "")})
+	bare.ran(dry, "release", "RELEASE_DRY=1")
+
+	if err := os.Remove(filepath.Join(r.dir, "_output/checksums.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if ran := r.refused("_output/checksums.txt", "release", "RELEASE_DRY=1"); slices.ContainsFunc(ran, func(c string) bool { return strings.HasPrefix(c, "gh release") }) {
+		t.Errorf("a dry release with a file missing ran %v", ran)
+	}
+	r.env = append(r.env, "REFUSE=1")
+	if ran := r.refused("exit status 1", "release", "RELEASE_DRY=1"); !strings.HasPrefix(ran[len(ran)-1], "proven release ") {
+		t.Errorf("after proven refused, a dry release went on: %v", ran)
 	}
 }
 

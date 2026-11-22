@@ -72,7 +72,7 @@ gate says it once `go.mod` has moved.
 |---|---|
 | `versions` | says which pins are behind their upstream, in every file of pins; exits 1 when any is |
 | `bump NAME=<entry> [TO=<version>] [FILE=<file>]` | pins one entry at a version, the newest by default |
-| `release [SHA=<commit>]` | releases main's head as the next `v<YYYYMMDD>.<NN>`: asks [`proven`](../proven/) that the gate passed on the commit, names it with [`release`](../release/), and publishes it with `gh`, which tags it |
+| `release [SHA=<commit>] [RELEASE_DRY=1]` | releases main's head as the next `v<YYYYMMDD>.<NN>`: asks [`proven`](../proven/) that the gate passed on the commit, names it with [`release`](../release/), and publishes it with `gh`, which tags it |
 | `lint:workflows` | `actionlint` at the version `versions.yaml` pins (an `actionlint` entry of kind `module`), and a failure for an action used by a tag rather than a commit |
 | `consumers` | the [`consumers`](../consumers/) report, for a repository with a `consumers.toml` |
 
@@ -92,5 +92,26 @@ They are the include's vars and not the Taskfile's own because of how Task order
 included task a Taskfile's own var wins over the command line's. A repository with a root
 `VERSION` would have it answer for `bump VERSION=...`, which is why the argument is `TO`.
 
+`bump VERSION=<version>`, the spelling three repositories had, is not refused: it pins the newest,
+as `bump` with no version does. The task cannot refuse it. Under Task 3.54.0 an included task
+reads `VERSION` the same whether the command line set it or the repository's Taskfile did - in a
+repository with a root `VERSION`, `task bump` and `task bump VERSION=v9` both read the root's
+value - so a refusal would refuse every bump in spin. Read the line `bump` prints: it names the
+version it pinned.
+
+## Releasing
+
 A release is cut by a person: `go tool task release`, with `gh` logged in. go-tools' own
 `release.yml` runs the same task once its binaries are built, with the run's `GH_TOKEN`.
+
+`go tool task release RELEASE_DRY=1` is the release without the release. It fetches, asks
+`proven`, names the commit and lists `RELEASE_FILES`, so it refuses what a release would - a
+commit the gate has not passed on, one released already, a file that is not there - and then
+prints the name and stops before `gh release create`:
+
+```
+RELEASE_DRY: 0123abc would be released to spin-stack/brand as v20261122.01, and is not
+```
+
+It is how a repository that has just taken the tasks proves its `GATE_WORKFLOW` and `GATE_JOBS`
+on a main that is proven and not yet released.
