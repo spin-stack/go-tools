@@ -115,3 +115,27 @@ RELEASE_DRY: 0123abc would be released to spin-stack/brand as v20261122.01, and 
 
 It is how a repository that has just taken the tasks proves its `GATE_WORKFLOW` and `GATE_JOBS`
 on a main that is proven and not yet released.
+
+## Every task is listed everywhere
+
+`go tool task --list` shows all five in every repository that includes them, whether or not they
+apply there. The ones that do not apply refuse, before running anything:
+
+| task | where | it says | exit |
+|---|---|---|---|
+| `release` | the include sets no `GATE_WORKFLOW` and `GATE_JOBS`: the repository does not release | `Task "release" cancelled because it is missing required variables: GATE_WORKFLOW, GATE_JOBS` | 206 |
+| `consumers` | there is no `consumers.toml` | `no consumers.toml: this repository names nobody that copies from it` | 201 |
+| `bump` | no `NAME` was given | `Task "bump" cancelled because it is missing required variables: NAME` | 206 |
+
+## What a failure means
+
+| it says | what happened | what to do |
+|---|---|---|
+| `include cycle detected between <Taskfile> <--> <Taskfile>` (exit 110), for every task | `GO_TOOLS_TASKS` is empty: Task was run directly, or `go.mod` requires a go-tools from before `v0.20261122.4`, whose `go tool task` does not set it | run `go tool task`; `go get github.com/spin-stack/go-tools@latest` |
+| `Found multiple tasks (versions) included by "common"` (exit 203), for every task | the repository's Taskfile defines a common task itself | delete the repository's own: the name has one meaning |
+| `No Taskfile found at ".../tasks.yml"` (exit 100), for every task, after a line from `go tool task` that starts `the go-tools release this machine has ... has no tasks.yml` | the release in the cache is from before the tasks shipped, and no newer one could be had: GitHub could not be reached, or `go tool task` was built from a commit that is no release's and the cache named the latest less than ten minutes ago | run it again when `https://github.com/spin-stack/go-tools/releases/latest` can be reached, or ten minutes later |
+| `versions: there is no actionlint in versions.yaml`, from `lint:workflows` | the task runs `actionlint` at the repository's pin, and there is none | add the `actionlint` entry (kind `module`, source `github.com/rhysd/actionlint/cmd/actionlint`) |
+| `Taskfile.yml includes go-tools' tasks, and its task lint:workflows reads actionlint: versions: there is no actionlint in versions.yaml`, from the repository's tests | the same, found by the [versions gate](../versions/#the-gate) before the task is run | the same |
+| `versions.yaml pins actionlint, and nothing reads it`, from the repository's tests, in a repository that includes the tasks | `go.mod` requires a go-tools whose gate does not count what the common tasks read (`v0.20261122.4` or before), or the include is not one the gate reads: it is a Taskfile's `includes` entry whose `taskfile` is `'{{.GO_TOOLS_TASKS}}'` | `go get github.com/spin-stack/go-tools@latest`; never a comment that spells the read |
+| `missing required variables: GATE_WORKFLOW, GATE_JOBS` (exit 206), `no consumers.toml` (exit 201) | a task that does not apply to this repository | nothing: see above |
+| `consumers.toml: scope is no field of the table`, from `consumers` | the table has `scope = "..."`; it is `scopes`, a list | `scopes = ["@fontsource", "@fontsource-variable"]` |
