@@ -190,9 +190,10 @@ reaches would be let through. The directory is made directly under your own `TMP
 the copy: a test with a long name that binds a unix socket in its `t.TempDir()` stays under the
 108 bytes such a path may have.
 
-The copy holds what git sees: tracked files and files git doesn't ignore. Directories git ignores
-(`node_modules`, a build's output) and repositories nested in the module are linked rather than
-copied, so tests can read them, but those are shared. The copy is a git repository of its own with
+The copy holds what git sees: tracked files and files git doesn't ignore. What git ignores, such
+as a build's `_output`, isn't in the copy, just as it isn't in a fresh CI checkout. A test that
+reads or writes there gets the same verdict on your machine as in CI, and two copies never share
+it. Repositories nested in the module are linked rather than copied. The copy is a git repository of its own with
 every file it holds staged, never your checkout's `.git`: a test that asks git which files the
 module has gets the same answer as in your checkout. Outside a git work tree, the copy is every
 file under the module's root, and no repository. Packages are still built from your checkout, and only their tests run
