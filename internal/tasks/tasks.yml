@@ -36,7 +36,14 @@ tasks:
     cmds:
       # Every file, whichever is behind. The status is the worst any file had: 2, an entry that
       # could not be read, is not hidden by a later file's 1 or 0.
+      #
+      # The token is a person's, as release's is: GitHub answers sixty requests an hour without
+      # one, and a private repository none - an entry check then cannot read. A workflow sets
+      # GITHUB_TOKEN or GH_TOKEN and the line does nothing; a person has gh logged in, and the
+      # token is gh's. With neither - no gh, or not logged in - the task goes on without, and
+      # says of each entry it could not read that it could not.
       - |
+        if [ -z "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ] && token="$(gh auth token 2>/dev/null)"; then export GH_TOKEN="$token"; fi
         status=0
         for file in {{.VERSIONS_FILES | default "versions.yaml"}}; do
           {{.GO_TOOLS}}versions check -file "$file" || { s=$?; [ "$s" -le "$status" ] || status=$s; }
@@ -48,7 +55,10 @@ tasks:
     requires:
       vars: [NAME]
     cmds:
-      - '{{.GO_TOOLS}}versions bump -file {{.FILE | default "versions.yaml"}} {{.NAME}} {{.TO}}'
+      # A bump reads the upstreams check reads, with the token check has.
+      - |
+        if [ -z "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ] && token="$(gh auth token 2>/dev/null)"; then export GH_TOKEN="$token"; fi
+        {{.GO_TOOLS}}versions bump -file {{.FILE | default "versions.yaml"}} {{.NAME}} {{.TO}}
 
   release:
     desc: Release main's head (or SHA) as the next v<YYYYMMDD>.<NN> of today, in UTC, with RELEASE's files - in a repository whose include states RELEASE's proof and jobs, and refused in every other. A person runs it, with gh logged in, or a workflow with GH_TOKEN; it refuses a commit the jobs of the proof workflow have not passed on, and one released already. RELEASE_DRY=1 refuses what a release would and prints the name, and releases nothing.
