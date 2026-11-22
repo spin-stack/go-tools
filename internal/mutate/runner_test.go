@@ -119,6 +119,39 @@ func TestATestThatAlwaysFailsRefusesNothing(t *testing.T) {
 	assert.Len(t, tally.Survived, 2, "every edit is still asked, and said: %s", said.String())
 }
 
+// An importer's test that fails with nothing broken would refuse every edit asked of it, and the
+// run would report none survived: an always-failing test in spin-stack/machine#418 gave
+// "0 survived" on every run, all of them invalid. Each importer's tests are run once on the code
+// as it is before any edit, and the run refuses to start, naming the test.
+func TestAnImporterTestThatAlwaysFailsStopsTheRunBeforeAnyEdit(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod":          "module example.com/importerbroken\n\ngo 1.24\n",
+		"lib/lib.go":      "package lib\n\nfunc Double(n int) int {\n\treturn n + n\n}\n",
+		"lib/lib_test.go": "package lib\n\nimport \"testing\"\n\nfunc TestRuns(t *testing.T) {\n\t_ = Double(2)\n}\n",
+		"use/use.go":      "package use\n\nimport \"example.com/importerbroken/lib\"\n\nfunc Four() int { return lib.Double(2) }\n",
+		"use/use_test.go": "package use\n\nimport \"testing\"\n\nfunc TestFour(t *testing.T) {\n\t_ = Four()\n}\n\n" +
+			"func TestBroken(t *testing.T) {\n\tt.Fatal(\"broken regardless\")\n}\n",
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, filepath.Dir(name)), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	t.Chdir(dir)
+	plan, err := mutate.Plan(filepath.Join("lib", "lib.go"), map[int]bool{4: true})
+	require.NoError(t, err)
+	require.NotEmpty(t, plan)
+	for i := range plan {
+		plan[i].ID = i + 1
+	}
+	var said strings.Builder
+	tally, err := mutate.RunAll(plan, map[string][]string{"lib": {"./use"}}, "2m", 2, &said)
+	require.Error(t, err, "a run whose importer has a test that fails with nothing broken started: %s", said.String())
+	assert.Contains(t, err.Error(), "./use: TestBroken")
+	assert.Equal(t, []string{"./use: TestBroken"}, tally.Broken)
+	assert.Zero(t, tally.Killed, "an edit was asked, and refused by a test broken regardless: %s", said.String())
+	assert.NotContains(t, said.String(), "refused", "an edit was asked before the importers were: %s", said.String())
+}
+
 // A package with no tests of its own is asked through the packages that import it, each built
 // once: Double's edits are refused by the importer's test and Half's, which it never calls, are not.
 func TestAPackageWithNoTestsIsAskedThroughItsImporters(t *testing.T) {
