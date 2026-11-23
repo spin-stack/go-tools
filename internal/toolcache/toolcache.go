@@ -99,12 +99,27 @@ const fresh = 10 * time.Minute
 // is asked again. Without it a command taken from a release minutes old would run for ten minutes
 // beside the release before, which has nothing that command and its release added. Releases are
 // in the order of their names, as v<YYYYMMDD>.<NN> is.
+//
+// GitHub's own answer can be before since too: for a minute or two after a release is published,
+// /releases/latest still redirects some requests to the one before. That answer is asked again,
+// and when it stays it is an error and no release is run: the tasks of the release before are not
+// the ones the caller's Taskfile was written for.
 func Latest(ctx context.Context, base, name, root, since string) (string, error) {
-	return latest(ctx, base, name, root, since, runtime.GOOS, runtime.GOARCH, time.Now())
+	return latest(ctx, base, name, root, since, runtime.GOOS, runtime.GOARCH, time.Now(), sleep)
 }
 
-func latest(ctx context.Context, base, name, root, since, goos, goarch string, now time.Time) (string, error) {
-	tag, err := latestTag(ctx, base, filepath.Join(root, name, "latest"), since, now)
+// sleep waits d, or less when ctx ends first.
+func sleep(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	}
+}
+
+func latest(ctx context.Context, base, name, root, since, goos, goarch string, now time.Time, wait func(context.Context, time.Duration)) (string, error) {
+	tag, err := latestTag(ctx, base, filepath.Join(root, name, "latest"), since, now, wait)
 	if err != nil {
 		return "", err
 	}
@@ -147,21 +162,40 @@ func exists(p string) bool {
 	return err == nil
 }
 
+// again is how long each further question waits when GitHub's answer is a release before the
+// caller's: seconds, because a person is waiting on the command, and fourteen of them in all,
+// after which it is theirs to run again.
+var again = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+
 // latestTag is the name of base's latest release: the one stamp records when it was written less
 // than fresh ago and is not before since, else asked of GitHub - where /releases/latest redirects to the release, which no
 // API quota counts - and recorded; the one stamp records, however old, when GitHub cannot answer.
-func latestTag(ctx context.Context, base, stamp, since string, now time.Time) (string, error) {
+// An answer before since is not the latest and is not recorded: it is asked again after each of
+// again, and is an error when it is still the answer.
+func latestTag(ctx context.Context, base, stamp, since string, now time.Time, wait func(context.Context, time.Duration)) (string, error) {
 	raw, _ := os.ReadFile(stamp) //nolint:gosec // this cache's own file
 	recorded := string(raw)
 	if st, err := os.Stat(stamp); recorded != "" && recorded >= since && err == nil && now.Sub(st.ModTime()) < fresh {
 		return recorded, nil
 	}
 	tag, err := askLatest(ctx, base)
+	for _, d := range again {
+		if err != nil || tag >= since {
+			break
+		}
+		wait(ctx, d)
+		tag, err = askLatest(ctx, base)
+	}
 	if err != nil {
 		if recorded != "" {
 			return recorded, nil
 		}
 		return "", fmt.Errorf("toolcache: the latest release of %s: %w", base, err)
+	}
+	if tag < since {
+		return "", fmt.Errorf("toolcache: %s, the release this command is of, is not visible yet: %s/releases/latest still answers %s, "+
+			"the release before it, as GitHub does to some requests for a minute or two after a release is published. "+
+			"Nothing was run, since what would have run is from before this command: run it again", since, base, tag)
 	}
 	if err := os.MkdirAll(filepath.Dir(stamp), 0o750); err != nil {
 		return "", fmt.Errorf("toolcache: %w", err)
