@@ -171,7 +171,9 @@ Four of seven repositories have a command that moves some entries with rules `bu
 have (website's `sources:bump`, spin-machine's `spin-machine-dev bump`, spin-ami's
 `spin-os upgrade`). Such an entry says so in `versions.yaml`, with
 [`bump: <the command>`](../versions/reference/#an-entry-another-command-moves), and
-`go tool task bump NAME=<that entry>` refuses and names the command. The rule every one of those
+`go tool task bump NAME=<that entry>` refuses and names the command. A command that shells out to
+`versions bump` or `versions refresh` passes [`-by`](../versions/reference/#an-entry-another-command-moves)
+with its own name, so the field that names it does not refuse it too. The rule every one of those
 commands had in common is everybody's now: [no bump moves a pin backwards](../versions/#never-backwards).
 
 ## Releasing

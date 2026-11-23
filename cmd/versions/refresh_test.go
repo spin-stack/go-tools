@@ -388,3 +388,13 @@ func TestARefreshLeavesAnEntryAnotherCommandMoves(t *testing.T) {
 	assert.Equal(t, "2", git(t, "rev-list", "--count", "HEAD"), "one commit, for plain")
 	assert.NotContains(t, out.String(), "| snapshot |")
 }
+
+// Run by the command the entry names, which says so (-by), the refresh moves it: a scheduled
+// refresh a repository's own command starts is not stopped by the field that names that command.
+func TestARefreshByTheCommandAnEntryNamesMovesIt(t *testing.T) {
+	inRepository(t, strings.Replace(refreshFile(), "  note: build everything again\n", "  bump: spin-machine-dev refresh\n", 1))
+	var out bytes.Buffer
+	r := refresher{file: "versions.yaml", by: "spin-machine-dev refresh", git: runGit, label: "versions", base: "main", out: &out}
+	require.NoError(t, r.refresh(t.Context(), []string{"snapshot"}))
+	assert.Contains(t, out.String(), "| snapshot |")
+}

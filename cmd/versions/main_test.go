@@ -230,7 +230,11 @@ func TestCheckCountsARowItCouldNotReadAndFailsApartForIt(t *testing.T) {
 		"one behind, through the task": {file: lead + behind, argv: []string{"-task"},
 			says: "1 behind; go tool task bump NAME=<name> moves one", status: 1},
 		"one behind that another command moves": {file: lead + behind + "  bump: spin-os upgrade\n", rows: []string{"behind v1 v2 behind moved by `spin-os upgrade`"},
-			says: "1 behind; versions bump <name> moves one, and the command a row names moves that one", status: 1},
+			says: "1 behind; the command its row names moves each, and versions bump <name> moves none of them", status: 1},
+		"one behind that another command moves, through the task": {file: lead + behind + "  bump: spin-os upgrade\n", argv: []string{"-task"},
+			says: "1 behind; the command its row names moves each, and go tool task bump NAME=<name> moves none of them", status: 1},
+		"two behind, one that another command moves": {file: lead + behind + "  bump: spin-os upgrade\n" + strings.Replace(behind, "name: behind", "name: plain", 1), argv: []string{"-task"},
+			says: "2 behind; go tool task bump NAME=<name> moves one, and the command a row names moves that one", status: 1},
 		"one that another command moves, not behind": {file: lead + "  bump: spin-os upgrade\n", rows: []string{"lead v2 v2 moved by `spin-os upgrade`"}}, //nolint:dupword // a row: its pin, then its newest
 		"one behind, and another that another command moves": {file: lead + "  bump: spin-os upgrade\n" + behind,
 			says: "1 behind; versions bump <name> moves one", status: 1},
@@ -325,6 +329,38 @@ func TestABumpOfAnEntryAnotherCommandMovesIsRefused(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, theirs, string(raw), "%v", argv)
 	}
+}
+
+// The command an entry names is not refused by its own entry when it is built on this one: it says
+// who it is with -by, in the entry's words, and the entry moves. Said of another command, or of an
+// entry that names none, -by changes nothing: the one refuses and says both names, the other moves.
+func TestTheCommandAnEntryNamesMovesItThroughThisOne(t *testing.T) {
+	const theirs = "- name: qemu\n  kind: date\n  version: 20260101T000000Z\n  track: today\n  bump: spin-machine-dev bump\n" +
+		"- name: plain\n  kind: date\n  version: 20260101T000000Z\n  track: today\n"
+	file := filepath.Join(t.TempDir(), "versions.yaml")
+	require.NoError(t, os.WriteFile(file, []byte(theirs), 0o600))
+
+	err := run(t.Context(), []string{"bump", "-file", file, "-by", "spin-os upgrade", "qemu", "20270101T000000Z"})
+	require.ErrorContains(t, err, "qemu is moved by `spin-machine-dev bump`, as its entry says (bump:), and not by this command, which -by says is `spin-os upgrade`: that one knows")
+	raw, err := os.ReadFile(file) //nolint:gosec // the test's own file
+	require.NoError(t, err)
+	assert.Equal(t, theirs, string(raw))
+
+	out := stdout(t, func() {
+		err = run(t.Context(), []string{"bump", "-file", file, "-by", "spin-machine-dev bump", "qemu", "20270101T000000Z"})
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "qemu: 20260101T000000Z  -> 20270101T000000Z \n", out)
+	out = stdout(t, func() {
+		err = run(t.Context(), []string{"bump", "-file", file, "-by", "spin-machine-dev bump", "plain", "20270101T000000Z"})
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "plain: 20260101T000000Z  -> 20270101T000000Z \n", out)
+	v, err := versions.Load(file)
+	require.NoError(t, err)
+	qemu, err := v.Get("qemu")
+	require.NoError(t, err)
+	assert.Equal(t, "spin-machine-dev bump", qemu.Bump, "the bump kept the field")
 }
 
 // A failure is said once under the command's name, whoever worded it, and a help that was asked
