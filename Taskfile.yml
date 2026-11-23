@@ -82,7 +82,9 @@ tasks:
       - go run ./cmd/refs
       - go run ./cmd/mutate -stale-exempts
       - go run ./cmd/sfw check
-      - go run ./cmd/taskgate -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
+      # -common: the common tasks as every repository is held to them, the include being the
+      # tree's file here.
+      - go run ./cmd/taskgate -common -common-include internal/tasks/tasks.yml -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
       # A commit since main whose author is a test's: what a test's git wrote into the checkout's
       # config. On main, the range is empty.
       - go run ./cmd/testidentity -base origin/main

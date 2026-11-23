@@ -46,7 +46,8 @@ other, when the one thing the include is for is that a name means the same every
 ### Put `lint:workflows` in what CI runs
 
 Nothing runs a common task unless the repository's own tasks do. `lint:workflows` belongs in the
-task the workflow runs - `lint`, `check` or `gate`, whichever the repository has:
+task the workflow runs - `lint`, `check` or `gate`, whichever the repository has - and
+[`taskgate -common`](../taskgate/#the-common-tasks--common) fails a repository where none does:
 
 ```yaml title="Taskfile.yml"
 tasks:

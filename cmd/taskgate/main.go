@@ -3,7 +3,12 @@
 // CI does is written once, in the Taskfile, a developer runs the same thing, and what decides
 // anything is Go with a test:
 //
-//	go tool taskgate [-allow file] [-task path] [-command cmd]... [-max-lines n] [-max-script-lines n] [dir]
+//	go tool taskgate [-common] [-allow file] [-task path] [-command cmd]... [-max-lines n] [-max-script-lines n] [dir]
+//
+// -common also holds the repository to go-tools' common tasks (internal/tasks), as every
+// repository has them: included once, none of their names the repository's own, how it is
+// released stated and true of its workflows, and lint:workflows in what CI runs. Without the flag
+// nothing of that is asked.
 //
 // -command is a command of the repository's own that a step may be instead of a task, as it is
 // spelled at the start of the step - `go run ./cmd/spin-os`, or `spin-os` where a step put it on
@@ -12,7 +17,8 @@
 // -allow names what is allowed on purpose, one `<key>  # why` a line: a step as
 // `<file>/<job>/<step>` (a composite action's without the job), a Taskfile's block as
 // `<file>:<task>`, a script by its path, a task a step names that the Taskfile has not as
-// `<file>/<job>/<step>/<task>`. A line that matches nothing fails too.
+// `<file>/<job>/<step>/<task>`, and what -common finds as the `common:...` it prints after the
+// finding. A line that matches nothing fails too.
 //
 // -task is the Task binary that resolves the names a step runs: the one the Taskfile runs under,
 // {{.TASK_EXE}}, so the version that answers is the one a workflow runs.
@@ -32,6 +38,8 @@ func main() {
 	task := flag.String("task", "task", "the Task binary that lists the Taskfile's tasks")
 	maxLines := flag.Int("max-lines", 12, "lines of shell a task's own cmd or sh may hold; 0 is any")
 	maxScript := flag.Int("max-script-lines", 40, "lines of shell a script a task runs may hold; 0 is any")
+	common := flag.Bool("common", false, "hold the repository to go-tools' common tasks too")
+	included := flag.String("common-include", taskgate.CommonInclude, "the `taskfile` an include names to have the common tasks (go-tools' own is its tree's)")
 	var commands []string
 	flag.Func("command", "a command of the repository's own a step may be instead of a task (repeatable)", func(c string) error {
 		commands = append(commands, c)
@@ -47,8 +55,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "taskgate: %v\n", err)
 		os.Exit(2)
 	}
+	var uncommon []taskgate.Finding
+	said := ""
+	if *common {
+		// Before Task is asked anything: a second task of a common name is a Taskfile Task does
+		// not load, and what is wanted then is this gate's finding, which names the file.
+		if uncommon, said, err = taskgate.Common(root, *included); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
 	known, err := taskgate.Tasks(*task, root)
 	if err != nil {
+		for _, f := range uncommon {
+			fmt.Printf("%s (%s)\n", f, f.Key())
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
@@ -57,8 +78,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	unexplained, stale := allow.Split(allowed, findings, taskgate.Finding.Key)
+	unexplained, stale := allow.Split(allowed, append(findings, uncommon...), taskgate.Finding.Key)
 	for _, f := range unexplained {
+		if _, ok := f.(taskgate.Uncommon); ok {
+			// Its key is not one a person can put together from the finding, as a step's is.
+			fmt.Printf("%s (%s)\n", f, f.Key())
+			continue
+		}
 		fmt.Println(f)
 	}
 	for _, k := range stale {
@@ -69,4 +95,7 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("OK: every workflow step runs a task the Taskfile has or one of the repository's commands, and every task is commands (%d exempt).\n", len(allowed))
+	if said != "" {
+		fmt.Println("OK: " + said + ".")
+	}
 }
