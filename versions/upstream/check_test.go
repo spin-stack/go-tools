@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -248,5 +249,54 @@ func TestAnImageWhoseRegistryDoesNotAnswerIsUnread(t *testing.T) {
 	image := versions.Entry{Name: "i", Kind: versions.Image, Source: registry(t) + "/nothing", Version: "1.27", Pin: "sha256:old", Track: "digest"}
 	if st := Check(t.Context(), &versions.Versions{Entries: []versions.Entry{image}})[0]; !st.Unread || st.Behind || st.Note == "" {
 		t.Errorf("an image the registry has not: %+v", st)
+	}
+}
+
+// A pin newer than its track's newest is not behind it, since a bump would refuse that older
+// version: check says the pin is ahead, and of a GitHub release, whether it was withdrawn.
+func TestAPinNewerThanTheTracksNewestIsNotBehind(t *testing.T) {
+	const api = "https://api.github.com/repos/o/tool/releases/"
+	r := newGitRepo(t)
+	for _, tc := range []struct {
+		name    string
+		entry   versions.Entry
+		answers map[string]string
+		newest  string
+		behind  bool
+		note    string
+	}{
+		{"withdrawn", versions.Entry{Version: "v2.0.0", Track: "github-release https://github.com/o/tool"},
+			map[string]string{api + "tags/v2.0.0": `{"prerelease": true}`}, "v1.9.0", false,
+			"pins v2.0.0, newer than the track's newest, v1.9.0: v2.0.0 is a prerelease, as a withdrawn release is"},
+		{"not the latest, its tag with a v the pin has not", versions.Entry{Version: "2.0.0", Track: "github-release https://github.com/o/tool"},
+			map[string]string{api + "tags/v2.0.0": `{"prerelease": false}`}, "1.9.0", false,
+			"v2.0.0 is a release GitHub does not call its latest"},
+		{"an image's variant is not in the tag", versions.Entry{Kind: versions.Image, Version: "v2.0.0-alpine", Track: "github-release https://github.com/o/tool"},
+			map[string]string{api + "tags/v2.0.0": `{"prerelease": true}`}, "v1.9.0-alpine", false,
+			"v2.0.0 is a prerelease"},
+		{"a download at a release candidate, by its own tag", versions.Entry{Kind: versions.Download, Version: "v2.0.0-rc1", Track: "github-release https://github.com/o/tool"},
+			map[string]string{api + "tags/v2.0.0-rc1": `{"prerelease": true}`}, "v1.9.0", false,
+			"v2.0.0-rc1 is a prerelease"},
+		{"a release by its prefix", versions.Entry{Version: "v2.0.0", Track: "github-release https://github.com/o/tool cli-"},
+			map[string]string{api + "latest": `{"tag_name": "cli-v1.9.0"}`, api + "tags/cli-v2.0.0": `{"prerelease": true}`}, "v1.9.0", false,
+			"cli-v2.0.0 is a prerelease"},
+		{"a draft, or none", versions.Entry{Version: "v2.0.0", Track: "github-release https://github.com/o/tool"},
+			nil, "v1.9.0", false, "v2.0.0 is a draft or no release: versions: " + api + "tags/v2.0.0 answered"},
+		{"ahead of another track", versions.Entry{Kind: versions.Git, Source: r.dir, Version: "v9.0.0", Track: "tags " + r.dir},
+			nil, "v1.2.0", false, "pins v9.0.0, newer than the track's newest, v1.2.0: a prerelease, a draft or withdrawn"},
+		{"with another, which a bump moves back to", versions.Entry{Kind: versions.Download, Version: "v3", Track: "with lead"},
+			nil, "v2", true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{api + "latest": `{"tag_name": "v1.9.0"}`}
+			maps.Copy(files, tc.answers)
+			serve(t, files)
+			tc.entry.Name = "tool"
+			lead := versions.Entry{Name: "lead", Kind: versions.Date, Version: "v2", Track: "branch"}
+			st := Check(t.Context(), &versions.Versions{Entries: []versions.Entry{tc.entry, lead}})[0]
+			if st.Newest != tc.newest || st.Behind != tc.behind || st.Unread || !strings.Contains(st.Note, tc.note) || (tc.note == "" && st.Note != "") {
+				t.Errorf("%+v, want newest %q behind %v note %q", st, tc.newest, tc.behind, tc.note)
+			}
+		})
 	}
 }

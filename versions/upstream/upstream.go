@@ -46,10 +46,7 @@ func newest(ctx context.Context, v *versions.Versions, e versions.Entry) (string
 	kind, arg, _ := strings.Cut(e.Track, " ")
 	switch kind {
 	case "github-release":
-		repo, prefix, _ := strings.Cut(arg, " ")
-		if repo == "" {
-			repo = e.Source
-		}
+		repo, prefix := releaseRepo(e, arg)
 		tag, err := githubRelease(ctx, repo)
 		if err != nil {
 			return "", err
@@ -441,6 +438,16 @@ func releaseVersion(tag, prefix string, e versions.Entry) (string, error) {
 // v2.15.0.
 var variant = regexp.MustCompile(`^v?[0-9]+(?:\.[0-9]+)*(.*)$`)
 
+// releaseRepo is the repository a github-release track's arg names, source's when it names none,
+// and the prefix its releases' tags have.
+func releaseRepo(e versions.Entry, arg string) (repo, prefix string) {
+	repo, prefix, _ = strings.Cut(arg, " ")
+	if repo == "" {
+		repo = e.Source
+	}
+	return repo, prefix
+}
+
 func githubRelease(ctx context.Context, repo string) (string, error) {
 	path, ok := strings.CutPrefix(repo, "https://github.com/")
 	if !ok {
@@ -753,6 +760,7 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 	var out []Status
 	for _, e := range v.Entries {
 		st := Status{Entry: e}
+		_, with, _ := e.With()
 		latest, err := newest(ctx, v, e)
 		switch {
 		case errors.Is(err, errFollows):
@@ -764,6 +772,11 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 			st.Unread, st.Note = true, err.Error()
 		default:
 			st.Newest = latest
+			// An entry with another is behind it either way: a bump moves it back.
+			if c, ordered := compare(latest, e.Version); ordered && c < 0 && !with {
+				st.Note = ahead(ctx, e, latest)
+				break
+			}
 			st.Behind = latest != e.Version
 			// A file pinned to a commit of a busy branch: the branch moves several times a day and
 			// the file almost never. Behind is the file changing, not the commit.
@@ -788,4 +801,39 @@ func Check(ctx context.Context, v *versions.Versions) []Status {
 		out = append(out, st)
 	}
 	return out
+}
+
+// ahead is the note of an entry pinned newer than its track's newest, which a bump does not move
+// backwards. GitHub's latest is never a prerelease, and a release taken before it was withdrawn -
+// made a prerelease - is what the consumer pinning it is told: leaving it is a person's downgrade.
+func ahead(ctx context.Context, e versions.Entry, latest string) string {
+	note := "pins " + e.Version + ", newer than the track's newest, " + latest
+	kind, arg, _ := strings.Cut(e.Track, " ")
+	if kind != "github-release" {
+		return note + ": a prerelease, a draft or withdrawn"
+	}
+	repo, prefix := releaseRepo(e, arg)
+	version := e.Version
+	if m := variant.FindStringSubmatch(version); m != nil && e.Kind == versions.Image {
+		version = strings.TrimSuffix(version, m[1])
+	}
+	// The tag has a v the pin may not: releaseVersion takes it off for a pin without one.
+	tags := []string{prefix + version}
+	if !strings.HasPrefix(version, "v") {
+		tags = append(tags, prefix+"v"+version)
+	}
+	var err error
+	for _, tag := range tags {
+		var release struct {
+			Prerelease bool `json:"prerelease"`
+		}
+		if err = getJSON(ctx, "https://api.github.com/repos/"+strings.TrimPrefix(repo, "https://github.com/")+"/releases/tags/"+url.PathEscape(tag), &release); err != nil {
+			continue
+		}
+		if release.Prerelease {
+			return note + ": " + tag + " is a prerelease, as a withdrawn release is; versions bump -back moves off it"
+		}
+		return note + ": " + tag + " is a release GitHub does not call its latest"
+	}
+	return note + ": " + tags[0] + " is a draft or no release: " + err.Error()
 }

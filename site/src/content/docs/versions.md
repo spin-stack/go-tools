@@ -139,7 +139,9 @@ versions: spin is at v20261114.01, and v20261024.01 is older: a bump does not mo
 - **A version**, by the numbers it starts with: `v20261024.01` is older than `v20261114.01`,
   `7.3` than `7.3.1`, `1.27.4-bookworm` than `1.27.5-bookworm`. This also stops a bump with no
   version named when the upstream's "latest" is older than the pin, and a `refresh` leaves such
-  an entry where it is.
+  an entry where it is. `check` does not call it behind: its note says the pin is newer than the
+  track's newest, and for a `github-release` track, whether GitHub withdrew that release - made it
+  a prerelease, which its latest never is.
 - **A commit**, for a `git` entry of a GitHub repository whose versions say neither way - a
   branch, or a branch's commit moved to a tag: the bump asks GitHub's compare whether the pinned
   commit already holds the new one, and refuses if it does. A pin at a commit of main does not
