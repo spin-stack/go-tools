@@ -4,12 +4,14 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -248,7 +250,7 @@ func TestTheLatestReleaseIsAskedForAtMostEveryTenMinutes(t *testing.T) {
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 	holds := func(at time.Time, want string) {
 		t.Helper()
-		dir, err := latest(t.Context(), base, "go-tools", root, "", "linux", "amd64", at)
+		dir, err := latest(t.Context(), base, "go-tools", root, "", "linux", "amd64", at, noWait)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -299,7 +301,7 @@ func TestALatestReleaseThatCannotBeHadIsSaid(t *testing.T) {
 			if tc.name == "no release" {
 				base += "/nothing"
 			}
-			_, err := latest(t.Context(), base, "go-tools", t.TempDir(), "", tc.goos, "amd64", time.Now())
+			_, err := latest(t.Context(), base, "go-tools", t.TempDir(), "", tc.goos, "amd64", time.Now(), noWait)
 			if err == nil || !strings.Contains(err.Error(), tc.says) {
 				t.Errorf("err = %v, want %q", err, tc.says)
 			}
@@ -319,7 +321,7 @@ func TestAReleaseBeforeTheCallersIsNotTheLatestHoweverFresh(t *testing.T) {
 	root := t.TempDir()
 	holds := func(since, want string, asked int32) {
 		t.Helper()
-		dir, err := latest(t.Context(), base, "go-tools", root, since, "linux", "amd64", time.Now())
+		dir, err := latest(t.Context(), base, "go-tools", root, since, "linux", "amd64", time.Now(), noWait)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -340,6 +342,94 @@ func TestAReleaseBeforeTheCallersIsNotTheLatestHoweverFresh(t *testing.T) {
 	holds("v20261110.02", "two", 2)
 }
 
+// noWait is the wait of a test that asks GitHub once, or does not care how long it would have waited.
+func noWait(context.Context, time.Duration) {}
+
+// For a minute or two after a release GitHub answers some requests with the one before. To a
+// caller of the new release that is no answer: it is asked again, after a wait each time, and the
+// release run and recorded is the caller's own, never the one GitHub said first.
+func TestAnAnswerBeforeTheCallersReleaseIsAskedAgain(t *testing.T) {
+	one, _ := tarball(t, member{name: "mutate", body: "one", mode: 0o755, kind: tar.TypeReg})
+	two, _ := tarball(t, member{name: "mutate", body: "two", mode: 0o755, kind: tar.TypeReg})
+	tag := "v20261110.01"
+	g := &github{latest: &tag, releases: map[string][]byte{"v20261110.01": one, "v20261110.02": two}}
+	base := g.serve(t)
+	root := t.TempDir()
+	var waited []time.Duration
+	// The old release twice, and the new one to the third question.
+	wait := func(_ context.Context, d time.Duration) {
+		if waited = append(waited, d); len(waited) == 2 {
+			tag = "v20261110.02"
+		}
+	}
+	dir, err := latest(t.Context(), base, "go-tools", root, "v20261110.02", "linux", "amd64", time.Now(), wait)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "mutate")); string(got) != "two" {
+		t.Errorf("mutate is %q, the release before the caller's", got)
+	}
+	if g.asked.Load() != 3 || !slices.Equal(waited, []time.Duration{2 * time.Second, 4 * time.Second}) {
+		t.Errorf("asked %d times, having waited %v", g.asked.Load(), waited)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "go-tools", "latest")); string(got) != "v20261110.02" {
+		t.Errorf("the stamp says %q", got)
+	}
+}
+
+// When GitHub goes on answering the release before the caller's, nothing is run: the command says
+// its own release is not visible yet and to run it again, and records nothing, so the next run asks.
+// A release already recorded makes no difference: it is before the caller's too.
+func TestAnAnswerThatStaysBeforeTheCallersReleaseRunsNothing(t *testing.T) {
+	one, _ := tarball(t, member{name: "mutate", body: "one", mode: 0o755, kind: tar.TypeReg})
+	tag := "v20261110.01"
+	g := &github{latest: &tag, releases: map[string][]byte{"v20261110.01": one}}
+	base := g.serve(t)
+	for _, recorded := range []string{"", "v20261110.01"} {
+		root := t.TempDir()
+		stamp := filepath.Join(root, "go-tools", "latest")
+		if recorded != "" {
+			if _, err := latest(t.Context(), base, "go-tools", root, "", "linux", "amd64", time.Now(), noWait); err != nil {
+				t.Fatal(err)
+			}
+		}
+		g.asked.Store(0)
+		var waited time.Duration
+		dir, err := latest(t.Context(), base, "go-tools", root, "v20261110.02", "linux", "amd64", time.Now(),
+			func(_ context.Context, d time.Duration) { waited += d })
+		if err == nil {
+			t.Fatalf("with %q recorded: ran %s, a release before the caller's", recorded, dir)
+		}
+		for _, says := range []string{"v20261110.02, the release this command is of, is not visible yet", "still answers v20261110.01", "run it again"} {
+			if !strings.Contains(err.Error(), says) {
+				t.Errorf("with %q recorded: %v, which does not say %q", recorded, err, says)
+			}
+		}
+		if g.asked.Load() != 4 || waited != 14*time.Second {
+			t.Errorf("with %q recorded: asked %d times over %s", recorded, g.asked.Load(), waited)
+		}
+		if got, _ := os.ReadFile(stamp); string(got) != recorded {
+			t.Errorf("the stamp says %q, and %q was recorded before", got, recorded)
+		}
+	}
+}
+
+// The wait between two questions is the time asked for, cut short when the command is.
+func TestTheWaitEndsWithTheCommand(t *testing.T) {
+	start := time.Now()
+	sleep(t.Context(), 30*time.Millisecond)
+	if took := time.Since(start); took < 30*time.Millisecond {
+		t.Errorf("waited %s of 30ms", took)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	start = time.Now()
+	sleep(ctx, time.Minute)
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("a cancelled wait took %s", took)
+	}
+}
+
 // A stamp that says nothing is no release, however fresh: the latest is asked for.
 func TestAnEmptyStampIsAskedPast(t *testing.T) {
 	archive, _ := tarball(t, member{name: "mutate", body: "x", mode: 0o755, kind: tar.TypeReg})
@@ -353,7 +443,7 @@ func TestAnEmptyStampIsAskedPast(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go-tools", "latest"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := latest(t.Context(), base, "go-tools", root, "", "linux", "amd64", time.Now()); err != nil || g.asked.Load() != 1 {
+	if _, err := latest(t.Context(), base, "go-tools", root, "", "linux", "amd64", time.Now(), noWait); err != nil || g.asked.Load() != 1 {
 		t.Errorf("err = %v, asked %d times", err, g.asked.Load())
 	}
 }
