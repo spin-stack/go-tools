@@ -16,7 +16,7 @@ lines, and the scripts a task calls to being scripts - a program that *decides* 
 what it reads has an answer a test could hold, and belongs in Go.
 
 ```sh
-go tool taskgate [-allow file] [-task path] [-command cmd]... [-max-lines n] [-max-script-lines n] [dir]
+go tool taskgate [-common] [-allow file] [-task path] [-command cmd]... [-max-lines n] [-max-script-lines n] [dir]
 ```
 
 ## What a step looks like
@@ -123,6 +123,47 @@ program, and each piece answers for itself (the finding names the script that ru
 A script that drives the machine and is under the limit is a script, and `taskgate` says nothing
 about it.
 
+## The common tasks (-common)
+
+`-common` also holds the repository to [the common tasks](../tasks/) as every repository has
+them. It is asked of a repository whose `go.mod` takes `go tool task`, that has a
+`versions.yaml`, or whose Taskfile includes the tasks; of any other it asks nothing and says so.
+It reads the files and runs nothing, Task least of all: a repository with a second task of a
+common name is one Task refuses to load, and the finding is the one that names the file.
+
+| rule | the finding's key |
+|---|---|
+| `go.mod` requires a go-tools from `v0.20261122.4` or later, the first whose `go tool task` sets `GO_TOOLS_TASKS` | `common:go-tools` |
+| the root Taskfile includes `{{.GO_TOOLS_TASKS}}`, with `flatten: true`, so the names are `versions` and not `common:versions` | `common:include` |
+| the include has no `excludes` | `common:excludes` |
+| no Taskfile of the repository's defines a common name: in the root, or in a file an include gives a namespace (`workflows` in a file included as `lint` is `lint:workflows`) | `common:<file>:<task>` |
+| in a repository that takes `go tool task`, no step runs a bare `task` or installs Task with `go-task/setup-task` | `common:<file>/<job>/<step>/task`, `.../setup-task` |
+| `RELEASE` is stated: `{proof, jobs}`, `{elsewhere}` or `{none}` | `common:RELEASE` |
+| `proof` is a workflow the repository has, and each of `jobs` starts the name of one of its jobs | `common:RELEASE/proof`, `common:RELEASE/jobs/<job>` |
+| each file `elsewhere` names is under `.github/workflows` | `common:RELEASE/elsewhere/<file>` |
+| with `none`, no workflow releases: none is named `release.yml`, started by a tag or a published release, uses a release action, or runs - in a step or in a task a step reaches - `gh release create`, `git tag <name>`, a push of tags or `goreleaser release` | `common:RELEASE/none/<file>` |
+| `lint:workflows` is reached from a task a workflow runs, through `task:`, `deps` and Task run from a task's shell | `common:lint:workflows` |
+| every runner label is GitHub's, or `.github/actionlint.yaml` names it | `common:label:<label>` |
+
+The `none` rule reads what the files say. A release made by a program a step runs - a command of
+the repository's own, a script - is not read, so a statement of `none` is checked against the
+evidence there is, not proven. The reach of `lint:workflows` is the same: a task whose name a
+template or a program makes is not followed, and a repository that runs its lint that way exempts
+the finding with why.
+
+```yaml title="Taskfile.yml"
+lint:
+  cmds:
+    - go tool taskgate -common -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
+    - task: lint:workflows
+```
+
+`-common-include` is the taskfile an include names to have the tasks, `{{.GO_TOOLS_TASKS}}` by
+default. go-tools includes its tree's file and passes `-common-include internal/tasks/tasks.yml`.
+
+The name of the task CI runs is not one of the rules. It is `lint`, `check` or `gate`, whichever
+the repository has, and the gate asks only that it reaches `lint:workflows`.
+
 ## Exemptions
 
 `-allow` names what is allowed on purpose, one a line, each with its reason:
@@ -136,7 +177,7 @@ hack/deadcode.sh  # 134 lines; owed to Go, with the allowlist it reads
 A step is `<file>/<job>/<step>`, the step by its `name`, else its `id`, else `#n`, its place in the
 job counting from 1; a composite action's has no job. A task a step names that the Taskfile has
 not is the step's key and the name, `<file>/<job>/<step>/<task>`. A task's block is `<file>:<task>`, the
-file's own `vars:` as `vars`. A script is its path. An exemption that matches nothing fails too,
+file's own `vars:` as `vars`. A script is its path. A finding of `-common` prints its key after it, in parentheses. An exemption that matches nothing fails too,
 so the list only shrinks - and a block or a script listed is work owed with its reason, not a
 decision that it belongs where it is.
 
