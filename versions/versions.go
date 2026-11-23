@@ -61,7 +61,8 @@ type Entry struct {
 	// own, which knows what a bump of this entry needs that the shared one does not - a release
 	// that must hold the pinned commit, data to generate again, a version that moves only with
 	// another repository's release. `versions bump` and `versions refresh` refuse the entry and
-	// name the command; upstream.Bump, which such a command is built on, does not read it.
+	// name the command, unless -by says that command is the one running them; upstream.Bump,
+	// which such a command may be built on instead, does not read it.
 	Bump string `yaml:"bump,omitempty"`
 	Note string `yaml:"note,omitempty"`
 }

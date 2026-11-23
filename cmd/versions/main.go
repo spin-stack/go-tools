@@ -78,12 +78,14 @@ Usage:
   versions bump    <name> [version]   pin an entry at a version, the newest by default, and
                                       every entry tracked with it at the same; never at an
                                       older version or commit than the pin's, unless -back,
-                                      and not an entry whose bump: names another command
+                                      and not an entry whose bump: names another command,
+                                      unless -by says this is that command running it
   versions refresh <name>...          bump each to its newest, a commit each, and say what moved
                                       and what is a new major, left for a person;
                                       -propose pushes them as refresh/<label>-<sum> and opens
                                       the pull request (GH_TOKEN or GITHUB_TOKEN), once per set,
-                                      closing the open one it supersedes (-label, -base)
+                                      closing the open one it supersedes (-label, -base);
+                                      -by as for bump
 
 Every command takes -file, versions.yaml by default. Nothing is built by a bump: each entry's
 note says what it is checked with afterwards.
@@ -107,6 +109,7 @@ func run(ctx context.Context, argv []string) error {
 	base := fs.String("base", "main", "refresh: the branch the pull request is into")
 	byTask := fs.Bool("task", false, "check: name the common task that moves an entry, as a repository runs it")
 	back := fs.Bool("back", false, "bump: move the pin to an older version or commit too")
+	by := fs.String("by", "", "bump, refresh: the `command` that runs this one, as the entries it moves name it in bump:")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Print(usage)
@@ -146,9 +149,9 @@ func run(ctx context.Context, argv []string) error {
 		}
 		return check(os.Stdout, upstream.Check(ctx, v), *byTask)
 	case "bump":
-		return bump(ctx, v, *file, names, *back)
+		return bump(ctx, v, *file, names, *back, *by)
 	case "refresh":
-		r := refresher{file: *file, git: runGit, label: *label, base: *base, out: os.Stdout, now: time.Now()}
+		r := refresher{file: *file, by: *by, git: runGit, label: *label, base: *base, out: os.Stdout, now: time.Now()}
 		return refresh(ctx, r, *propose, names)
 	default:
 		fmt.Fprint(os.Stderr, usage)
@@ -218,8 +221,9 @@ func newer(w io.Writer, v *versions.Versions, names []string) error {
 }
 
 // bump pins an entry at a version, the newest by default, and writes the file. back is a person
-// saying the version is older than the pin and meant: without it that is refused.
-func bump(ctx context.Context, v *versions.Versions, file string, names []string, back bool) error {
+// saying the version is older than the pin and meant: without it that is refused. by is the
+// command that runs this one, when one does (anothers).
+func bump(ctx context.Context, v *versions.Versions, file string, names []string, back bool, by string) error {
 	if len(names) < 1 || len(names) > 2 {
 		return errors.New("bump: <name> [version]")
 	}
@@ -231,7 +235,7 @@ func bump(ctx context.Context, v *versions.Versions, file string, names []string
 	if err != nil {
 		return err
 	}
-	if err := anothers(was); err != nil {
+	if err := anothers(was, by); err != nil {
 		return err
 	}
 	to := upstream.Bump
@@ -260,12 +264,23 @@ func bump(ctx context.Context, v *versions.Versions, file string, names []string
 
 // anothers refuses an entry whose file says another command moves it, and names the command:
 // what that command checks, waits for or writes besides the pin is not something this one does.
-func anothers(e versions.Entry) error {
-	if e.Bump == "" {
+//
+// by is who runs this command, as -by says it. The command an entry names is often built on this
+// one - spin-machine's `spin-machine-dev bump` runs `go tool versions bump`, and its scheduled
+// refresh `versions refresh` - and would be refused by the field that names it. So it says who it
+// is, in the words the entry uses, and an entry that names those words is moved. A person or the
+// common task says nothing and is refused; one that types another command's name has read the
+// refusal and overruled it, which the field is not there to stop.
+func anothers(e versions.Entry, by string) error {
+	if e.Bump == "" || e.Bump == by {
 		return nil
 	}
-	return fmt.Errorf("versions: %s is moved by `%s`, as its entry says (bump:), and not by this command: "+
-		"that one knows what a bump of %s needs", e.Name, e.Bump, e.Name)
+	as := ""
+	if by != "" {
+		as = fmt.Sprintf(", which -by says is `%s`", by)
+	}
+	return fmt.Errorf("versions: %s is moved by `%s`, as its entry says (bump:), and not by this command%s: "+
+		"that one knows what a bump of %s needs", e.Name, e.Bump, as, e.Name)
 }
 
 // pins is each KEY=value the entries named are handed over as, after prefix, sorted: the same
@@ -289,12 +304,13 @@ func pins(v *versions.Versions, names []string, prefix string) ([]string, error)
 // two are counted apart and fail apart: a row not read - a private upstream asked without a token
 // answers 404 - may be behind, so a count of what is behind says "of those read" beside it.
 // The last line names the command that moves an entry as the person who ran this would type it:
-// the task every repository has when byTask says that is what ran it, and this command otherwise.
+// the task every repository has when byTask says that is what ran it, and this command otherwise -
+// and neither when every row behind names a command of its own, which is the only one that moves it.
 func check(w io.Writer, rows []upstream.Status, byTask bool) error {
 	// mutate-exempt: of the three zeros, a minimum width of one is under every cell's, a tab's width is unused where the padding is spaces, and the flag that edit sets reads HTML entities, which no row has
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tPINNED\tNEWEST\t")
-	behind, unreadRows, anothers := 0, 0, false
+	behind, unreadRows, named := 0, 0, 0
 	for _, st := range rows {
 		mark := ""
 		switch {
@@ -302,7 +318,9 @@ func check(w io.Writer, rows []upstream.Status, byTask bool) error {
 			mark, unreadRows = "not read:", unreadRows+1
 		case st.Behind:
 			mark, behind = "behind", behind+1
-			anothers = anothers || st.Entry.Bump != ""
+			if st.Entry.Bump != "" {
+				named++
+			}
 		}
 		note := st.Note
 		if st.Entry.Bump != "" {
@@ -318,15 +336,17 @@ func check(w io.Writer, rows []upstream.Status, byTask bool) error {
 		return unread{fmt.Errorf("%d not read, and %d behind of the %d that were: a row not read may be behind, and says why "+
 			"(GITHUB_TOKEN or GH_TOKEN reads a private repository, and more than sixty requests an hour)", unreadRows, behind, len(rows)-unreadRows)}
 	case behind > 0:
-		also := ""
-		if anothers {
-			also = ", and the command a row names moves that one"
-		}
 		bump := "versions bump <name>"
 		if byTask {
 			bump = "go tool task bump NAME=<name>"
 		}
-		return fmt.Errorf("%d behind; %s moves one%s", behind, bump, also)
+		switch named {
+		case 0:
+			return fmt.Errorf("%d behind; %s moves one", behind, bump)
+		case behind:
+			return fmt.Errorf("%d behind; the command its row names moves each, and %s moves none of them", behind, bump)
+		}
+		return fmt.Errorf("%d behind; %s moves one, and the command a row names moves that one", behind, bump)
 	}
 	return nil
 }

@@ -29,6 +29,8 @@ import (
 // wrote for itself, once.
 type refresher struct {
 	file string
+	// by is the command that runs this refresh, as -by says it: an entry that names it is moved.
+	by string
 	// git runs git in the repository and answers its output, trimmed.
 	git func(args ...string) (string, error)
 	// gh is GitHub's API, for propose; nil otherwise.
@@ -106,7 +108,7 @@ func (r refresher) move(ctx context.Context, name string) (m []moved, major bool
 	}
 	if named, err := v.Get(name); err != nil {
 		return nil, false, err
-	} else if err := anothers(named); err != nil {
+	} else if err := anothers(named, r.by); err != nil {
 		return nil, false, err
 	}
 	e, out, err := upstream.Bump(ctx, v, name, "")

@@ -121,10 +121,24 @@ as a person types it. Then:
   this command``. `-back` does not change that.
 - `versions check` says it in the entry's row, `` moved by `go tool task sources:bump` ``, behind
   or not.
-- The repository's command is not refused: it is built on `versions/upstream`'s `Bump`, which
-  does not read the field. A command that shells out to `versions bump` for such an entry would
-  be, and calls the library instead.
+- When every row behind names a command of its own, `check`'s last line says so, and names no
+  `bump`: ``1 behind; the command its row names moves each, and go tool task bump NAME=<name> moves
+  none of them``.
+- The repository's command is not refused. A command built on `versions/upstream`'s `Bump`
+  (website's, spin-ami's) is not asked: the library does not read the field. A command that shells
+  out to `versions bump` or `versions refresh` (spin-machine's `spin-machine-dev bump`, spin's
+  `machine:propose`) says who it is with `-by`, in the entry's words, and the entry moves:
+
+```sh
+go tool versions bump -by "spin-machine-dev bump" qemu
+go tool versions refresh -by "spin-machine-dev refresh" -propose kernel
+```
+
+`-by` is for the command the entry names. A person, or the common `bump`, does not pass it, and
+is refused; a `-by` that names another command is refused too, and the refusal says both names.
 
 A `versions` from before the field refuses a file that has it (`field bump not found`), and
 `go tool task` reads `versions.yaml` with the go-tools `go.mod` requires. So the field is added in
-the commit that moves `go.mod` to a release that knows it, or after.
+the commit that moves `go.mod` to a release that knows it, or after. `-by` is newer than the field: a
+command that shells out marks its entries in the commit that moves `go.mod` to a release that has
+`-by`, the same commit that adds `-by` to the command.
