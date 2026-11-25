@@ -212,7 +212,7 @@ func TestAPinnedDownloadIsOnlyThePinnedBytes(t *testing.T) {
 func TestKernelStaysInItsSeries(t *testing.T) {
 	releases := []kernelRelease{{"7.4-rc1", "mainline"}, {"7.3.1", "stable"}, {"7.2.15", "stable"}, {"6.18.60", "longterm"}, {"next-20261029", "linux-next"}}
 	for version, want := range map[string]string{
-		"7.3": "7.3.1", "7.3.1": "7.3.1", "7.2.8": "7.2.15", "6.18": "6.18.60",
+		"7.3": "7.3.1", "7.3.1": "7.3.1", "7.2.8": "7.2.15", "6.18": "6.18.60", "7.4-rc1": "7.4-rc1",
 	} {
 		if got, err := kernelSeries(version, releases); err != nil || got != want {
 			t.Errorf("%s: newest %q, %v; want %q", version, got, err, want)
@@ -787,4 +787,27 @@ func TestABumpDoesNotMoveACommitBackwards(t *testing.T) {
 	e, _, err = Bump(t.Context(), local, "g", "topic")
 	require.NoError(t, err)
 	assert.Equal(t, r.second, e.Pin)
+}
+
+// A pin on a release candidate follows its series: the next candidate, then the release and its
+// stable updates. A candidate of a series kernel.org no longer lists is over.
+func TestAKernelCandidateFollowsItsSeries(t *testing.T) {
+	for _, tc := range []struct {
+		releases []kernelRelease
+		want     string
+	}{
+		{[]kernelRelease{{"7.4-rc5", "mainline"}, {"7.3.9", "stable"}}, "7.4-rc5"},
+		{[]kernelRelease{{"7.5-rc1", "mainline"}, {"7.4", "stable"}, {"7.3.9", "stable"}}, "7.4"},
+		{[]kernelRelease{{"7.5-rc2", "mainline"}, {"7.4.2", "stable"}}, "7.4.2"},
+	} {
+		if got, err := kernelSeries("7.4-rc4", tc.releases); err != nil || got != tc.want {
+			t.Errorf("7.4-rc4 against %v: %q, %v; want %q", tc.releases, got, err, tc.want)
+		}
+	}
+	if got, err := kernelSeries("7.3.9", []kernelRelease{{"7.4-rc5", "mainline"}, {"7.3.9", "stable"}}); err != nil || got != "7.3.9" {
+		t.Errorf("a stable pin: %q, %v", got, err)
+	}
+	if _, err := kernelSeries("7.4-rc4", []kernelRelease{{"7.6-rc1", "mainline"}, {"7.5.3", "stable"}}); !errors.Is(err, errSeriesOver) {
+		t.Errorf("a candidate of a series no longer listed: %v", err)
+	}
 }
