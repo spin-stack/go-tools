@@ -722,10 +722,13 @@ func kernelReleases(ctx context.Context) ([]kernelRelease, error) {
 }
 
 // kernelSeries is the newest release of version's series: 7.3.1 for 7.3, and the series itself
-// while its first tarball is all there is. An -rc of it has no tarball.
+// while its first tarball is all there is. A pin on a release candidate, 7.4-rc4, follows its
+// series' candidates until the release, and the release's stable updates after it; a stable pin
+// never moves to a candidate.
 func kernelSeries(version string, releases []kernelRelease) (string, error) {
 	major, rest, _ := strings.Cut(version, ".")
 	minor, _, _ := strings.Cut(rest, ".")
+	minor, _, rc := strings.Cut(minor, "-rc")
 	if minor == "" {
 		return "", fmt.Errorf("versions: %q is not a kernel release", version)
 	}
@@ -733,6 +736,13 @@ func kernelSeries(version string, releases []kernelRelease) (string, error) {
 	for _, r := range releases {
 		if r.Version == series || strings.HasPrefix(r.Version, series+".") {
 			return r.Version, nil
+		}
+	}
+	if rc {
+		for _, r := range releases {
+			if strings.HasPrefix(r.Version, series+"-rc") {
+				return r.Version, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("versions: kernel.org lists no %s.x: %w", series, errSeriesOver)
