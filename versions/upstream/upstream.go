@@ -6,6 +6,7 @@ package upstream
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -684,41 +685,125 @@ func newestOnPage(ctx context.Context, page, source string) (string, error) {
 	return string(m[1]), nil
 }
 
-// launchpadSource is the version of an Ubuntu source package, `<source> <series> <pocket>`, as that
-// pocket of that series publishes it, without its epoch, which the archive's file names never
-// carry. Launchpad's page of a source lists every pocket, -proposed first: a page track proposed
+// launchpadSource is the newest version of an Ubuntu source package, `<source> <series>
+// <pockets>`, that any of the comma-separated pockets of that series publishes, without its epoch,
+// which the archive's file names never carry. A stock image's apt reads Release, Updates and
+// Security, so a fix is fetchable from whichever of them has it first; Proposed is read only when
+// named. Launchpad's page of a source lists every pocket, -proposed first: a page track proposed
 // systemd 262.2 from tenacious-proposed, and a build that reads the release pocket could not fetch
 // it (spin-stack/machine#815).
 func launchpadSource(ctx context.Context, arg string) (string, error) {
 	f := strings.Fields(arg)
 	if len(f) != 3 {
-		return "", fmt.Errorf("versions: a launchpad track is `launchpad <source> <series> <pocket>`, not %q", arg)
+		return "", fmt.Errorf("versions: a launchpad track is `launchpad <source> <series> <pocket>[,<pocket>...]`, not %q", arg)
 	}
-	source, series, pocket := f[0], f[1], f[2]
-	q := url.Values{
-		"ws.op":         {"getPublishedSources"},
-		"source_name":   {source},
-		"exact_match":   {"true"},
-		"distro_series": {"https://api.launchpad.net/1.0/ubuntu/" + series},
-		"pocket":        {pocket},
-		"status":        {"Published"},
+	source, series, pockets := f[0], f[1], f[2]
+	newest := ""
+	for pocket := range strings.SplitSeq(pockets, ",") {
+		q := url.Values{
+			"ws.op":         {"getPublishedSources"},
+			"source_name":   {source},
+			"exact_match":   {"true"},
+			"distro_series": {"https://api.launchpad.net/1.0/ubuntu/" + series},
+			"pocket":        {pocket},
+			"status":        {"Published"},
+		}
+		var published struct {
+			Entries []struct {
+				Version string `json:"source_package_version"`
+			} `json:"entries"`
+		}
+		if err := getJSON(ctx, "https://api.launchpad.net/1.0/ubuntu/+archive/primary?"+q.Encode(), &published); err != nil {
+			return "", err
+		}
+		for _, e := range published.Entries {
+			if newest == "" || debianCompare(e.Version, newest) > 0 {
+				newest = e.Version
+			}
+		}
 	}
-	var published struct {
-		Entries []struct {
-			Version string `json:"source_package_version"`
-		} `json:"entries"`
+	if newest == "" {
+		return "", fmt.Errorf("versions: Ubuntu %s publishes no %s in %s", series, source, pockets)
 	}
-	if err := getJSON(ctx, "https://api.launchpad.net/1.0/ubuntu/+archive/primary?"+q.Encode(), &published); err != nil {
-		return "", err
+	if _, noEpoch, ok := strings.Cut(newest, ":"); ok {
+		newest = noEpoch
 	}
-	if len(published.Entries) == 0 {
-		return "", fmt.Errorf("versions: Ubuntu %s's %s pocket publishes no %s", series, pocket, source)
+	return newest, nil
+}
+
+// debianCompare orders two Debian versions as dpkg does, below zero when a is older: by epoch,
+// then upstream version, then revision. As strings, 3.10 would sort before 3.8.
+func debianCompare(a, b string) int {
+	ea, ua, ra := debianParts(a)
+	eb, ub, rb := debianParts(b)
+	if c := cmp.Compare(ea, eb); c != 0 {
+		return c
 	}
-	v := published.Entries[0].Version
-	if _, noEpoch, ok := strings.Cut(v, ":"); ok {
-		v = noEpoch
+	if c := debianPartCompare(ua, ub); c != 0 {
+		return c
 	}
-	return v, nil
+	return debianPartCompare(ra, rb)
+}
+
+// debianParts splits [epoch:]upstream[-revision]; the revision is after the last hyphen, since
+// an upstream version may hold hyphens of its own.
+func debianParts(v string) (epoch int, upstream, revision string) {
+	if e, rest, ok := strings.Cut(v, ":"); ok {
+		epoch, _ = strconv.Atoi(e)
+		v = rest
+	}
+	if i := strings.LastIndex(v, "-"); i >= 0 { // mutate-exempt: an upstream version starts with a digit, never a hyphen
+		return epoch, v[:i], v[i+1:] // mutate-exempt: a revision is compared only after equal upstreams, so a prefix of theirs changes no order
+	}
+	return epoch, v, ""
+}
+
+// debianPartCompare is dpkg's verrevcmp: runs of non-digits compared by debianOrder, then runs of
+// digits compared as numbers, in turn, to the end of both.
+func debianPartCompare(a, b string) int {
+	for a != "" || b != "" {
+		for (a != "" && !isDigit(a[0])) || (b != "" && !isDigit(b[0])) {
+			if c := cmp.Compare(debianOrder(a), debianOrder(b)); c != 0 {
+				return c
+			}
+			a, b = a[1:], b[1:]
+		}
+		da, db := digitRun(a), digitRun(b)
+		na, nb := strings.TrimLeft(a[:da], "0"), strings.TrimLeft(b[:db], "0")
+		if c := cmp.Compare(len(na), len(nb)); c != 0 {
+			return c
+		}
+		if c := strings.Compare(na, nb); c != 0 {
+			return c
+		}
+		a, b = a[da:], b[db:]
+	}
+	return 0
+}
+
+// debianOrder is the weight of s's first character: ~ before the end of the string, so 1.0~rc1
+// is older than 1.0, and letters before every other symbol, so 1.0a is older than 1.0+b.
+func debianOrder(s string) int {
+	switch {
+	case s == "" || isDigit(s[0]):
+		return 0 // mutate-exempt: only its place between ~ and the letters orders anything
+	case s[0] == '~':
+		return -1 // mutate-exempt: only its place below the end orders anything
+	case 'a' <= s[0] && s[0] <= 'z' || 'A' <= s[0] && s[0] <= 'Z':
+		return int(s[0])
+	}
+	return int(s[0]) + 256 // mutate-exempt: any offset past the letters orders the same
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
+// digitRun is the length of the digits s starts with.
+func digitRun(s string) int {
+	i := 0
+	for i < len(s) && isDigit(s[i]) {
+		i++
+	}
+	return i
 }
 
 var goTag = regexp.MustCompile(`^(\d+\.\d+(?:\.\d+)?)(.*)$`)
