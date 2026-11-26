@@ -69,6 +69,39 @@ func TestTheNewestIsWhatThePageLinksTo(t *testing.T) {
 	}
 }
 
+// A Launchpad source is the version its series publishes in the pocket the track names, never the
+// -proposed upload the source's page lists first, and without its epoch.
+func TestALaunchpadSourceIsWhatItsPocketPublishes(t *testing.T) {
+	published := func(source, series, pocket string) string {
+		return "https://api.launchpad.net/1.0/ubuntu/+archive/primary?distro_series=https%3A%2F%2Fapi.launchpad.net%2F1.0%2Fubuntu%2F" +
+			series + "&exact_match=true&pocket=" + pocket + "&source_name=" + source + "&status=Published&ws.op=getPublishedSources"
+	}
+	serve(t, map[string]string{
+		published("systemd", "tenacious", "Release"):  `{"total_size": 1, "entries": [{"source_package_version": "262.1-1ubuntu1"}]}`,
+		published("systemd", "tenacious", "Proposed"): `{"total_size": 1, "entries": [{"source_package_version": "262.2-1ubuntu1"}]}`,
+		published("openssh", "resolute", "Updates"):   `{"total_size": 1, "entries": [{"source_package_version": "1:10.2p1-2ubuntu3.8"}]}`,
+		published("openssh", "resolute", "Proposed"):  `{"total_size": 0, "entries": []}`,
+	})
+	for track, want := range map[string]string{
+		"launchpad systemd tenacious Release": "262.1-1ubuntu1",
+		"launchpad openssh resolute Updates":  "10.2p1-2ubuntu3.8",
+	} {
+		if got, err := newest(t.Context(), &versions.Versions{}, versions.Entry{Track: track}); err != nil || got != want {
+			t.Errorf("%s: newest %q, %v; want %q", track, got, err, want)
+		}
+	}
+	for _, track := range []string{
+		"launchpad openssh resolute Proposed",
+		"launchpad systemd tenacious Security",
+		"launchpad systemd tenacious",
+		"launchpad systemd tenacious Release extra",
+	} {
+		if got, err := newest(t.Context(), &versions.Versions{}, versions.Entry{Track: track}); err == nil {
+			t.Errorf("%s: newest %q, want refused", track, got)
+		}
+	}
+}
+
 // An entry whose archive only a build can compute is not bumped, since the new commit with the
 // old archive's sum is a build that fails on the checksum.
 func TestAnEntryWithAnArchiveIsNotBumped(t *testing.T) {
