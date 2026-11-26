@@ -86,6 +86,8 @@ func newest(ctx context.Context, v *versions.Versions, e versions.Entry) (string
 		return p.Info.Version, nil
 	case "page":
 		return newestOnPage(ctx, arg, e.Source)
+	case "launchpad":
+		return launchpadSource(ctx, arg)
 	case "today":
 		return time.Now().UTC().Format("20060102") + "T000000Z", nil
 	case "follows":
@@ -680,6 +682,43 @@ func newestOnPage(ctx context.Context, page, source string) (string, error) {
 		return "", fmt.Errorf("versions: %s links to no %s", page, path.Base(source))
 	}
 	return string(m[1]), nil
+}
+
+// launchpadSource is the version of an Ubuntu source package, `<source> <series> <pocket>`, as that
+// pocket of that series publishes it, without its epoch, which the archive's file names never
+// carry. Launchpad's page of a source lists every pocket, -proposed first: a page track proposed
+// systemd 262.2 from tenacious-proposed, and a build that reads the release pocket could not fetch
+// it (spin-stack/machine#815).
+func launchpadSource(ctx context.Context, arg string) (string, error) {
+	f := strings.Fields(arg)
+	if len(f) != 3 {
+		return "", fmt.Errorf("versions: a launchpad track is `launchpad <source> <series> <pocket>`, not %q", arg)
+	}
+	source, series, pocket := f[0], f[1], f[2]
+	q := url.Values{
+		"ws.op":         {"getPublishedSources"},
+		"source_name":   {source},
+		"exact_match":   {"true"},
+		"distro_series": {"https://api.launchpad.net/1.0/ubuntu/" + series},
+		"pocket":        {pocket},
+		"status":        {"Published"},
+	}
+	var published struct {
+		Entries []struct {
+			Version string `json:"source_package_version"`
+		} `json:"entries"`
+	}
+	if err := getJSON(ctx, "https://api.launchpad.net/1.0/ubuntu/+archive/primary?"+q.Encode(), &published); err != nil {
+		return "", err
+	}
+	if len(published.Entries) == 0 {
+		return "", fmt.Errorf("versions: Ubuntu %s's %s pocket publishes no %s", series, pocket, source)
+	}
+	v := published.Entries[0].Version
+	if _, noEpoch, ok := strings.Cut(v, ":"); ok {
+		v = noEpoch
+	}
+	return v, nil
 }
 
 var goTag = regexp.MustCompile(`^(\d+\.\d+(?:\.\d+)?)(.*)$`)
