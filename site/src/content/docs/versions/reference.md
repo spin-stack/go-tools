@@ -43,7 +43,7 @@ description: Every kind of entry versions.yaml takes, the build arguments each b
 | `branch` | the same branch: behind when it is at another commit |
 | `pypi` | the package's newest on PyPI |
 | `page <url>` | the first file the page links to named as `source`'s, with `{version}` the version |
-| `launchpad <source> <series> <pocket>` | the version of an Ubuntu source package that one pocket of one series publishes (`launchpad systemd tenacious Release`), without its epoch, read from Launchpad's API. A source's page on Launchpad lists every pocket, `-proposed` first, so a `page` track of it can propose a version the build's pocket does not have |
+| `launchpad <source> <series> <pockets>` | the newest version of an Ubuntu source package that any of the comma-separated pockets of one series publishes (`launchpad openssh resolute Release,Updates,Security`), by Debian version ordering and without its epoch, read from Launchpad's API. A stock image's apt fetches from Release, Updates and Security, so naming all three shows a security fix or an update as soon as either pocket has it. A pocket that publishes nothing is passed over. A source's page on Launchpad lists every pocket, `-proposed` first, so a `page` track of it can propose a version the build cannot fetch |
 | `today` | today's date |
 | `with <name>` | `<name>`'s version, spelled with a `v` only when this entry's is: two files of one release, such as VictoriaMetrics and its vmutils. A bump of `<name>` moves this entry in the same file, and the gate fails while they differ |
 | `with <name> pin` | `<name>`'s pin: a file named by another's commit, such as the VS Code server of a VS Code release |

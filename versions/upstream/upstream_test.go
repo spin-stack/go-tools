@@ -102,6 +102,81 @@ func TestALaunchpadSourceIsWhatItsPocketPublishes(t *testing.T) {
 	}
 }
 
+// A launchpad track that names several pockets is the newest version any of them publishes, by
+// Debian ordering: a security fix the moment Security has it, an update the moment Updates has
+// it, and never the -proposed upload no stock apt can fetch.
+func TestALaunchpadSourceIsTheNewestOfItsPockets(t *testing.T) {
+	published := func(source, series, pocket string) string {
+		return "https://api.launchpad.net/1.0/ubuntu/+archive/primary?distro_series=https%3A%2F%2Fapi.launchpad.net%2F1.0%2Fubuntu%2F" +
+			series + "&exact_match=true&pocket=" + pocket + "&source_name=" + source + "&status=Published&ws.op=getPublishedSources"
+	}
+	one := func(v string) string {
+		return `{"total_size": 1, "entries": [{"source_package_version": "` + v + `"}]}`
+	}
+	none := `{"total_size": 0, "entries": []}`
+	serve(t, map[string]string{
+		published("openssh", "resolute", "Release"):   one("1:10.2p1-2ubuntu3"),
+		published("openssh", "resolute", "Updates"):   one("1:10.2p1-2ubuntu3.8"),
+		published("openssh", "resolute", "Security"):  one("1:10.2p1-2ubuntu3.10"),
+		published("openssh", "resolute", "Proposed"):  one("1:10.2p1-2ubuntu3.11"),
+		published("openssh", "questing", "Release"):   one("1:10.0p1-5ubuntu5"),
+		published("openssh", "questing", "Updates"):   one("1:10.0p1-5ubuntu5.2"),
+		published("openssh", "questing", "Security"):  one("1:10.0p1-5ubuntu5.1"),
+		published("openssh", "questing", "Proposed"):  one("1:10.0p1-5ubuntu5.3"),
+		published("systemd", "tenacious", "Release"):  one("262.1-1ubuntu1"),
+		published("systemd", "tenacious", "Updates"):  none,
+		published("systemd", "tenacious", "Security"): none,
+		published("systemd", "tenacious", "Proposed"): one("262.2-1ubuntu1"),
+		published("systemd", "noble", "Release"):      none,
+		published("systemd", "noble", "Updates"):      none,
+	})
+	for track, want := range map[string]string{
+		"launchpad openssh resolute Release,Updates,Security":  "10.2p1-2ubuntu3.10",
+		"launchpad openssh questing Release,Updates,Security":  "10.0p1-5ubuntu5.2",
+		"launchpad systemd tenacious Release,Updates,Security": "262.1-1ubuntu1",
+	} {
+		if got, err := newest(t.Context(), &versions.Versions{}, versions.Entry{Track: track}); err != nil || got != want {
+			t.Errorf("%s: newest %q, %v; want %q", track, got, err, want)
+		}
+	}
+	for _, track := range []string{
+		"launchpad systemd noble Release,Updates",
+		"launchpad systemd noble Release,Security",
+	} {
+		if got, err := newest(t.Context(), &versions.Versions{}, versions.Entry{Track: track}); err == nil {
+			t.Errorf("%s: newest %q, want refused", track, got)
+		}
+	}
+}
+
+// Debian versions order as dpkg orders them, not as strings.
+func TestDebianVersionsOrderAsDpkgOrdersThem(t *testing.T) {
+	for _, older := range [][2]string{
+		{"3.8", "3.10"},
+		{"10.2p1-2ubuntu3.8", "10.2p1-2ubuntu3.10"},
+		{"1.0-2", "1.0-10"},
+		{"2.0", "1:1.0"},
+		{"1.0~rc1", "1.0"},
+		{"1.0", "1.0a"},
+		{"1.0a", "1.0+b"},
+		{"262.1-1ubuntu1", "262.1-1ubuntu1.1"},
+		{"1.2-3-1", "1.2-4-1"},
+		{"1.0", "1.0-1"},
+		{"1.0A", "1.0+"},
+		{"1.0Z", "1.0a"},
+	} {
+		if c := debianCompare(older[0], older[1]); c >= 0 {
+			t.Errorf("debianCompare(%q, %q) = %d, want below zero", older[0], older[1], c)
+		}
+		if c := debianCompare(older[1], older[0]); c <= 0 {
+			t.Errorf("debianCompare(%q, %q) = %d, want above zero", older[1], older[0], c)
+		}
+	}
+	if c := debianCompare("1.01-1", "1.1-1"); c != 0 {
+		t.Errorf("debianCompare(1.01-1, 1.1-1) = %d, want 0", c)
+	}
+}
+
 // An entry whose archive only a build can compute is not bumped, since the new commit with the
 // old archive's sum is a build that fails on the checksum.
 func TestAnEntryWithAnArchiveIsNotBumped(t *testing.T) {
