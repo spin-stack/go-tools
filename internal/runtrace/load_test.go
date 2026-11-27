@@ -130,7 +130,9 @@ func TestPerfettoCountersAreTheJobsMachine(t *testing.T) {
 	for _, e := range doc.Events {
 		switch {
 		case e.Ph == "M" && e.Name == "process_name":
-			var a struct{ Name string }
+			var a struct {
+				Name string `json:"name"`
+			}
 			require.NoError(t, json.Unmarshal(e.Args, &a))
 			pids[a.Name] = e.PID
 		case e.Ph == "C":

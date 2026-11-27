@@ -3,7 +3,7 @@
 //	go tool ghatrace run                  the run as a Job Summary, trace.html and trace.json
 //	go tool ghatrace span -name N -- cmd  run cmd and record it as a span of the step it runs in
 //	go tool ghatrace gotest -- go test    the same, and a span for each package and long test
-//	go tool ghatrace sample               sample the job's machine every second, in the background
+//	go tool ghatrace sample               read the job's machine every second, in the background
 //
 // run is the last job of a workflow, or a step at the end of its last job. It reads its own run
 // ($GITHUB_RUN_ID, or -run) from the API with $GH_TOKEN or $GITHUB_TOKEN, and the spans the run's
@@ -63,7 +63,7 @@ const usage = `usage: ghatrace run|span|gotest|sample [flags]
   span    -name NAME -- cmd args...: run cmd, and record it as a span of the step it runs in
   gotest  -- go test args...: run it with -json, write what it would have written, and record
           a span for each package and each test of -min or more
-  sample  sample the machine - CPU, pressure, disks - every second until the job ends, in the
+  sample  read the machine - CPU, pressure, disks - every second until the job ends, in the
           background: a step near the job's start
 
 -h after a command says the rest.
