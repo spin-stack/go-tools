@@ -1,6 +1,7 @@
 package mutate
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 	"time"
@@ -67,6 +68,10 @@ func TestATestIsStoppedPastItsOwnAllowance(t *testing.T) {
 		{"a subtest's start, which is its test's time", []string{"=== RUN   TestSlow\n=== RUN   TestSlow/sub\n"}, "TestSlow"},
 		{"after an empty line, in pieces", []string{"\n=== RU", "N   TestSlow\r\n"}, "TestSlow"},
 		{"after what a test printed with no newline", []string{"waiting=== RUN   TestSlow\n"}, "TestSlow"},
+		{"a start a test's output echoes, indented", []string{"=== RUN   TestOuter\n        === RUN   TestSlow\n"}, ""},
+		{"a start a test logs, after its file and line", []string{"=== RUN   TestOuter\n    outer_test.go:12: === RUN   TestSlow\n"}, ""},
+		{"an end a test's output echoes", []string{"=== RUN   TestSlow\n        --- PASS: TestSlow (0.00s)\n"}, "TestSlow"},
+		{"a start a test's output echoes, while it runs", []string{"=== RUN   TestSlow\n        === RUN   TestInner\n"}, "TestSlow"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -85,5 +90,34 @@ func TestATestIsStoppedPastItsOwnAllowance(t *testing.T) {
 				t.Errorf("stopped %q at %s, want %q", test, allowed, c.want)
 			}
 		})
+	}
+}
+
+// A test that prints progress with no newline, a few dots a write for as long as it runs, costs
+// the pacer what each write holds, not all it printed before: the test's writes wait on it. A
+// start after the dots is still read.
+func TestOutputWithNoNewlineIsReadOnce(t *testing.T) {
+	t.Parallel()
+	stopped := make(chan struct{})
+	p := &pacer{each: map[string]time.Duration{"TestSlow": 50 * time.Millisecond}, stop: func() { close(stopped) }}
+	dots := bytes.Repeat([]byte("."), 50)
+	started := time.Now()
+	for range 200_000 {
+		if _, err := p.Write(dots); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if took := time.Since(started); took > 2*time.Second {
+		t.Errorf("10 MB of dots with no newline took %s to read", took)
+	}
+	if _, err := p.Write([]byte("=== RUN   TestSlow\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(500 * time.Millisecond):
+	}
+	if test, _ := p.stopped(); test != "TestSlow" {
+		t.Errorf("the start after the dots stopped %q, not TestSlow", test)
 	}
 }
