@@ -39,7 +39,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	base := fs.String("base", "origin/main", "what the diff is against")
 	maxRuns := fs.Int("max", 12, "how many mutations to run, at most: each is a build and a package's tests")
-	timeout := fs.String("timeout", "5m", "how long one package's tests may take")
+	timeout := fs.String("timeout", "5m", "how long one package's tests may take at most: a test or a run is stopped at four times what it took unbroken, plus 10s, where sooner")
 	// Half the machine: each is a build and a test binary, and a database package's tests hold
 	// connections of their own.
 	jobs := fs.Int("j", max(runtime.NumCPU()/2, 1), "how many mutations run at once") // mutate-exempt: how many run at once, not what they say

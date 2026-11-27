@@ -131,6 +131,26 @@ whole module once per edit. `mutate` avoids most of that:
 
 </Steps>
 
+### An edit that makes a test wait
+
+Some edits make a test wait for something that never comes: a wait loop's exit inverted, a lock
+never let go, a channel never closed. The test then sleeps until something stops it. So each test
+an edit is asked of may take four times what it took with nothing broken, plus ten seconds, and the
+run of them four times what they all took, plus ten seconds. Past either, the test binary is
+stopped with every process it started. `mutate` measures those times itself, as it measures
+coverage: each of a package's tests alone, and each importer's tests together. The edit is refused,
+and the line names what ran past what:
+
+```
+  refused   internal/app/wait.go:74 (pollUntil): != becomes == (TestResume ran past 14s, and was stopped)
+```
+
+A test's own allowance holds while the tests run one at a time. Once a package's parallel tests
+are let go together, each is slowed by the others, and only the run's allowance applies.
+`-timeout` is what no run may pass, and the bound of a run whose tests were not measured. A test of
+seconds that an edit hangs is stopped in seconds, even when the edit's line is one no coverage
+block holds, such as a `case` of a switch, and every test of the package is asked.
+
 `-cache <dir>` keeps the edits already refused, so a second run over the same code tries only the
 rest. It is off by default: a run from scratch is the one to trust when a test reads files from
 outside its package.
@@ -152,7 +172,7 @@ cache that keeps a pull request's refused edits for its next run.
 | `-base` | `origin/main` | what the diff is taken against; Go files nothing has committed yet count as changed too |
 | `-max` | `12` | how many edits to run at most |
 | `-j` | half the CPUs | how many edits run at once |
-| `-timeout` | `5m` | how long one package's tests may take |
+| `-timeout` | `5m` | how long one package's tests may take at most; a test or a run is stopped sooner, at four times what it took unbroken plus 10s |
 | `-mem` | its share of free memory | GiB one test process may hold; negative for no limit (Linux) |
 | `-cache` | none | a directory to keep refused edits in between runs |
 | `-stale-exempts` | | report and fail on `mutate-exempt` reasons over nothing |

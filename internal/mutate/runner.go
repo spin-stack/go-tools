@@ -30,9 +30,9 @@ type Tally struct {
 
 // result is what the tests did about one mutation.
 type result struct {
-	m       Mutation
-	outcome Outcome
-	err     error // the run could not ask the tests at all
+	m      Mutation
+	answer Answer
+	err    error // the run could not ask the tests at all
 }
 
 // RunAll puts every mutation to the tests, jobs at a time, and says each outcome as it comes.
@@ -41,6 +41,10 @@ type result struct {
 // package's coverage is measured once, for both. Once ctx is cancelled no edit is asked, and the
 // run fails with what cancelled it.
 func RunAll(ctx context.Context, chosen []Mutation, importers map[string][]string, timeout string, jobs int, w io.Writer) (Tally, error) {
+	ceiling, err := time.ParseDuration(timeout)
+	if err != nil {
+		return Tally{}, fmt.Errorf("mutate: the timeout %q: %w", timeout, err)
+	}
 	work, err := os.MkdirTemp("", "mutate-")
 	if err != nil {
 		return Tally{}, err
@@ -55,17 +59,18 @@ func RunAll(ctx context.Context, chosen []Mutation, importers map[string][]strin
 	// Builds are what cost: go parallelises one across the machine already, so they go one at a
 	// time, beside the test processes.
 	b := &builds{sem: make(chan struct{}, 1), work: work, bins: map[string]*importerBinary{}}
-	covers := &coverages{by: map[string]*coverage{}, timeout: timeout, slots: slots}
+	unbroken := NewUnbroken()
+	covers := &coverages{by: map[string]*coverage{}, timeout: timeout, slots: slots, unbroken: unbroken}
 	byDir, dirs := byPackage(chosen)
-	if broken, err := brokenImporters(ctx, dirs, importers, timeout, slots); err != nil {
+	if broken, err := brokenImporters(ctx, dirs, importers, ceiling, slots, unbroken); err != nil {
 		return Tally{Broken: broken}, err
 	}
 	results := make(chan result)
 	var wg sync.WaitGroup
 	for i, dir := range dirs {
 		wg.Go(func() {
-			p := pkgRun{dir: dir, work: filepath.Join(work, strconv.Itoa(i)), timeout: timeout, slots: slots,
-				builds: b, importers: importers[filepath.ToSlash(dir)], results: results, out: w}
+			p := pkgRun{dir: dir, work: filepath.Join(work, strconv.Itoa(i)), timeout: timeout, ceiling: ceiling,
+				unbroken: unbroken, slots: slots, builds: b, importers: importers[filepath.ToSlash(dir)], results: results, out: w}
 			p.run(ctx, byDir[dir], covers)
 		})
 	}
@@ -79,16 +84,11 @@ func RunAll(ctx context.Context, chosen []Mutation, importers map[string][]strin
 			firstErr = cmp.Or(firstErr, r.err)
 			continue
 		}
-		switch r.outcome {
-		case Killed:
+		switch r.answer.Outcome {
+		case Killed, Exceeded, TimedOut:
 			t.Killed++
 			t.Refused = append(t.Refused, m)
-			_, _ = fmt.Fprintf(w, "  refused   %s\n", m)
-		case Exceeded:
-			// Named with its bound: the edit is refused, and the loop it made is worth knowing of.
-			t.Killed++
-			t.Refused = append(t.Refused, m)
-			_, _ = fmt.Fprintf(w, "  refused   %s (its tests held over %s, and were stopped)\n", m, bound())
+			_, _ = fmt.Fprintf(w, "  refused   %s%s\n", m, stoppedBy(r.answer))
 		case Unbuildable:
 			t.Unbuildable++
 			_, _ = fmt.Fprintf(w, "  no edit   %s (does not build)\n", m)
@@ -136,6 +136,20 @@ func RunAll(ctx context.Context, chosen []Mutation, importers map[string][]strin
 	return t, firstErr
 }
 
+// stoppedBy is what stopped the tests that refused an edit, where it was a bound and not a test
+// that failed: named with it, since the loop or the wait the edit made is worth knowing of.
+func stoppedBy(a Answer) string {
+	switch {
+	case a.Outcome == Exceeded:
+		return fmt.Sprintf(" (its tests held over %s, and were stopped)", bound())
+	case a.Outcome != TimedOut:
+		return ""
+	case a.RanPast != "":
+		return fmt.Sprintf(" (%s ran past %s, and was stopped)", a.RanPast, a.Allowed.Round(time.Second))
+	}
+	return fmt.Sprintf(" (its tests ran past %s, and were stopped)", a.Allowed.Round(time.Second))
+}
+
 // byPackage is chosen by the directory of its package, and those directories in the order chosen
 // first names them.
 func byPackage(chosen []Mutation) (map[string][]Mutation, []string) {
@@ -152,11 +166,12 @@ func byPackage(chosen []Mutation) (map[string][]Mutation, []string) {
 }
 
 // brokenImporters runs the tests of every importer of dirs once, on the code as it is, each in one
-// of slots' trees, and fails naming each test that fails as "<importer>: <test>", sorted. A package's own tests
+// of slots' trees, and fails naming each test that fails as "<importer>: <test>", sorted. How long
+// each took is what an edit's run of them is allowed a multiple of (Unbroken). A package's own tests
 // are measured that way (Cover), and one that fails is asked about no edit; an importer's are
 // asked whole, so one that fails regardless refuses every edit asked of it, and the run reports
 // none survived. One that does not build asks nothing either way, and is not named.
-func brokenImporters(ctx context.Context, dirs []string, importers map[string][]string, timeout string, slots chan *Tree) ([]string, error) {
+func brokenImporters(ctx context.Context, dirs []string, importers map[string][]string, ceiling time.Duration, slots chan *Tree, unbroken *Unbroken) ([]string, error) {
 	seen := map[string]bool{}
 	for _, dir := range dirs {
 		for _, importer := range importers[filepath.ToSlash(dir)] {
@@ -181,15 +196,20 @@ func brokenImporters(ctx context.Context, dirs []string, importers map[string][]
 			tree := <-slots
 			defer func() { slots <- tree }()
 			var said strings.Builder
-			outcome, err := runPackage(ctx, tree, importer, filepath.Join(root, importer), root, "an importer's tests, unbroken",
-				nil, timeout, "", &said)
+			answer, err := runPackage(ctx, tree, importer, filepath.Join(root, importer), root, "an importer's tests, unbroken",
+				nil, Allowance{Run: ceiling}, "", &said)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				firstErr = cmp.Or(firstErr, err)
 				return
 			}
-			if outcome != Killed && outcome != Exceeded {
+			switch answer.Outcome {
+			case Survived:
+				unbroken.recordWhole(filepath.Join(root, importer), answer.Took)
+				unbroken.recordTests(filepath.Join(root, importer), testTimes(answer.Said))
+				return
+			case Unbuildable:
 				return
 			}
 			// mutate-exempt: how much of the failure is shown, not whether it is.
@@ -234,11 +254,15 @@ func failedTests(out string) []string {
 // pkgRun is one package's mutations put to the tests.
 type pkgRun struct {
 	dir, work, timeout string
-	slots              chan *Tree
-	builds             *builds
-	importers          []string
-	results            chan<- result
-	out                io.Writer
+	// ceiling is timeout, which no run of tests passes; unbroken is what each is allowed a
+	// multiple of.
+	ceiling   time.Duration
+	unbroken  *Unbroken
+	slots     chan *Tree
+	builds    *builds
+	importers []string
+	results   chan<- result
+	out       io.Writer
 }
 
 // run builds the package's schema and puts each mutation in it to the binary, and each it could
@@ -266,8 +290,8 @@ func (p pkgRun) run(ctx context.Context, ms []Mutation, covers *coverages) {
 	var wg sync.WaitGroup
 	for _, m := range s.Built {
 		wg.Go(func() {
-			outcome, err := p.built(ctx, m, s, c)
-			p.results <- stopped(ctx, result{m: m, outcome: outcome, err: err})
+			answer, err := p.built(ctx, m, s, c)
+			p.results <- stopped(ctx, result{m: m, answer: answer, err: err})
 		})
 	}
 	for i, m := range s.Alone {
@@ -277,8 +301,9 @@ func (p pkgRun) run(ctx context.Context, ms []Mutation, covers *coverages) {
 			reaching := covers.of(ctx, p.dir)
 			tree := <-p.slots
 			defer func() { p.slots <- tree }()
-			outcome, err := runAlone(ctx, m, filepath.Join(p.work, "alone-"+strconv.Itoa(i)), p.timeout, reaching, p.importers, tree, p.out)
-			p.results <- stopped(ctx, result{m: m, outcome: outcome, err: err})
+			answer, err := runAlone(ctx, m, filepath.Join(p.work, "alone-"+strconv.Itoa(i)),
+				Asked{Timeout: p.timeout, Unbroken: p.unbroken, Importers: p.importers, Tree: tree}, reaching, p.out)
+			p.results <- stopped(ctx, result{m: m, answer: answer, err: err})
 		})
 	}
 	wg.Wait()
@@ -301,15 +326,14 @@ func stoppedEarly(ctx context.Context) error {
 
 // built puts m, which is in s's binary, to the package's tests that reach its line, then to each
 // importer's tests, built once with the same schema: a survivor pays for the second.
-func (p pkgRun) built(ctx context.Context, m Mutation, s *Schema, c *Coverage) (Outcome, error) {
+func (p pkgRun) built(ctx context.Context, m Mutation, s *Schema, c *Coverage) (Answer, error) {
 	if s.Binary == "" && len(p.importers) == 0 {
-		return Untested, nil
+		return Answer{Outcome: Untested}, nil
 	}
-	ask := func(bin, dir string, only []string) (Outcome, error) {
+	ask := func(bin, dir string, only []string) (Answer, error) {
 		tree := <-p.slots
 		defer func() { p.slots <- tree }()
-		outcome, _, err := Ask(ctx, tree, bin, dir, m.ID, p.timeout, only)
-		return outcome, err
+		return Ask(ctx, tree, bin, dir, m.ID, p.unbroken.allowance(dir, only, p.ceiling), only)
 	}
 	if s.Binary != "" {
 		var reaching []string
@@ -317,8 +341,8 @@ func (p pkgRun) built(ctx context.Context, m Mutation, s *Schema, c *Coverage) (
 			reaching = c.Reaching(m.File, m.Line)
 		}
 		if reaching == nil || len(reaching) > 0 {
-			if outcome, err := ask(s.Binary, p.dir, reaching); err != nil || outcome != Survived {
-				return outcome, err
+			if answer, err := ask(s.Binary, p.dir, reaching); err != nil || answer.Outcome != Survived {
+				return answer, err
 			}
 		}
 	}
@@ -327,11 +351,11 @@ func (p pkgRun) built(ctx context.Context, m Mutation, s *Schema, c *Coverage) (
 		if bin == "" {
 			continue
 		}
-		if outcome, err := ask(bin, dir, nil); err != nil || outcome != Survived {
-			return outcome, err
+		if answer, err := ask(bin, dir, nil); err != nil || answer.Outcome != Survived {
+			return answer, err
 		}
 	}
-	return Survived, nil
+	return Answer{Outcome: Survived}, nil
 }
 
 // builds is the run's one build at a time, and the importers' binaries it made, each once.
@@ -371,37 +395,39 @@ func (b *builds) importer(ctx context.Context, dir, importer, overlay string) (s
 	return ib.bin, ib.dir
 }
 
-// runAlone builds the mutation in through an overlay under dir, and runs the package's tests that
-// reach its line and then its importers', in tree. The file itself is never written.
-func runAlone(ctx context.Context, m Mutation, dir, timeout string, c *Coverage, importers []string, tree *Tree, out io.Writer) (Outcome, error) {
+// runAlone builds the mutation in through an overlay under dir, and asks it as asked says, of the
+// package's tests that reach its line by c and then its importers'. The file itself is never
+// written.
+func runAlone(ctx context.Context, m Mutation, dir string, asked Asked, c *Coverage, out io.Writer) (Answer, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return 0, err
+		return Answer{}, err
 	}
 	overlay, err := Overlay(m, dir)
 	if err != nil {
-		return 0, err
+		return Answer{}, err
 	}
-	asked := Asked{Overlay: overlay, Timeout: timeout, Importers: importers, Tree: tree}
+	asked.Overlay = overlay
 	if c != nil {
 		asked.Reaching = c.Reaching(m.File, m.Line)
 	}
 	started := time.Now()
-	outcome, _, err := Run(ctx, m, asked)
+	answer, err := Run(ctx, m, asked)
 	if err != nil {
-		return 0, err
+		return Answer{}, err
 	}
 	if took := time.Since(started); took > time.Minute {
-		_, _ = fmt.Fprintf(out, "  (%s took %s)\n", filepath.Dir(m.File), took.Round(time.Second))
+		_, _ = fmt.Fprintf(out, "  (%s took %s)\n", m, took.Round(time.Second))
 	}
-	return outcome, nil
+	return answer, nil
 }
 
 // coverages is each package's Coverage, measured once and shared by its mutations.
 type coverages struct {
-	mu      sync.Mutex
-	by      map[string]*coverage
-	timeout string
-	slots   chan *Tree
+	mu       sync.Mutex
+	by       map[string]*coverage
+	timeout  string
+	slots    chan *Tree
+	unbroken *Unbroken
 }
 
 type coverage struct {
@@ -424,6 +450,9 @@ func (cs *coverages) of(ctx context.Context, dir string) *Coverage {
 			fmt.Fprintf(os.Stderr, "  (%s: no coverage, every test is asked: %v)\n", dir, err)
 		}
 		c.c = measured
+		if measured != nil {
+			cs.unbroken.recordTests(dir, measured.took)
+		}
 	})
 	return c.c
 }

@@ -162,6 +162,28 @@ func packageOf(dirOrPath string) string {
 	return filepath.ToSlash(rel)
 }
 
+// testTimes is how long each top-level test out, a -test.v output, says it ran.
+func testTimes(out string) map[string]time.Duration {
+	took := map[string]time.Duration{}
+	for line := range strings.Lines(out) {
+		if test, d, ok := testEndOf(strings.TrimRight(line, "\r\n")); ok {
+			took[test] = d
+		}
+	}
+	return took
+}
+
+// testEndOf is the test whose end line is, and how long it says the test ran.
+func testEndOf(line string) (test string, took time.Duration, ok bool) {
+	m := testEnd.FindStringSubmatch(line)
+	if m == nil {
+		return test, took, false
+	}
+	// mutate-exempt: a bit size other than 32 is 64.
+	seconds, _ := strconv.ParseFloat(m[2], 64) // the pattern's digits and point
+	return m[1], time.Duration(seconds * float64(time.Second)), true
+}
+
 // countTests adds the tests out says ran to their package's: pkg's, or where pkg is "" - a go test
 // over several packages - the one go test's line after them names.
 func countTests(pkg string, out []byte) {
@@ -184,10 +206,8 @@ func countTests(pkg string, out []byte) {
 	}
 	for line := range strings.Lines(string(out)) {
 		line = strings.TrimRight(line, "\r\n")
-		if m := testEnd.FindStringSubmatch(line); m != nil {
-			// mutate-exempt: a bit size other than 32 is 64.
-			seconds, _ := strconv.ParseFloat(m[2], 64) // the pattern's digits and point
-			ran = append(ran, TestCost{Test: m[1], Took: time.Duration(seconds * float64(time.Second))})
+		if test, took, ok := testEndOf(line); ok {
+			ran = append(ran, TestCost{Test: test, Took: took})
 			continue
 		}
 		if m := packageEnd.FindStringSubmatch(line); pkg == "" && m != nil {

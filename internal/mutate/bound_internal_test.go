@@ -133,7 +133,7 @@ func TestACancelledTestStopsWhatItStarted(t *testing.T) {
 	cmd.WaitDelay = time.Second
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := bounded("a test", cmd)
+		_, _, err := bounded("a test", cmd, nil)
 		done <- err
 	}()
 	var child int
@@ -158,5 +158,21 @@ func TestACancelledTestStopsWhatItStarted(t *testing.T) {
 			}
 			t.Fatal("the test process's child outlived it")
 		}
+	}
+}
+
+// What a process says on either stream is what bounded answers, and what its tap reads as it is
+// said: the build's errors that name an edit's line, and the -test.v lines a test is timed by.
+func TestWhatAProcessSaysIsAnsweredAndTapped(t *testing.T) {
+	var tapped strings.Builder
+	out, _, err := bounded("a test", exec.CommandContext(t.Context(), "sh", "-c", "echo out; echo err >&2"), &tapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "out\nerr\n" || tapped.String() != "out\nerr\n" {
+		t.Errorf("answered %q and tapped %q, not both streams", out, tapped.String())
+	}
+	if out, _, _ := bounded("a test", exec.CommandContext(t.Context(), "sh", "-c", "echo out; echo err >&2"), nil); string(out) != "out\nerr\n" {
+		t.Errorf("with no tap, answered %q", out)
 	}
 }

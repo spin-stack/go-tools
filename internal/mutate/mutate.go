@@ -31,9 +31,11 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Mutation is one edit to one file: the bytes to put in place of the bytes that are there.
@@ -698,23 +700,72 @@ const (
 	// Exceeded: the tests held more memory than a test process may, and were stopped. Refused, as
 	// a test that runs out its time is: an edit that makes a loop allocate for ever.
 	Exceeded
+	// TimedOut: a test, or the run, went past its allowance (Unbroken), and was stopped. Refused:
+	// an edit that makes a test wait for what never comes.
+	TimedOut
 )
 
-// targetedTimeout is how long the tests that reach a mutated line may take.
-const targetedTimeout = "1m"
+// Answer is what the tests asked about one mutation did, and said.
+type Answer struct {
+	Outcome Outcome
+	Said    string
+	// RanPast is, of a TimedOut, the test stopped, empty where it was the run; Allowed is what it
+	// ran past.
+	RanPast string
+	Allowed time.Duration
+	// Took is how long the tests ran.
+	Took time.Duration
+}
 
-// testArgs are a test binary's flags: every test under timeout, or only those named, under
-// targetedTimeout. The few tests that reach the line ran in a fraction of timeout unmutated: an
-// edit that makes one loop for ever is refused as soon as targetedTimeout runs out, not after the
-// package's whole allowance.
-func testArgs(timeout string, only []string) []string {
-	// mutate-exempt: which allowance a run gets; only a test an edit hangs tells them apart, and
-	// only after a minute of it.
-	if len(only) == 0 {
-		return []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout", timeout}
+// testArgs are a test binary's flags: every test, or only those named. No timeout of the binary's
+// own: the run's allowance stops it, with every process it started (askBinary).
+func testArgs(only []string) []string {
+	args := []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout=0"}
+	if only == nil {
+		return args
 	}
-	return []string{"-test.count=1", "-test.failfast", "-test.v", "-test.timeout", targetedTimeout,
-		"-test.run", "^(" + strings.Join(only, "|") + ")$"}
+	return append(args, "-test.run", "^("+strings.Join(only, "|")+")$")
+}
+
+// askBinary runs the test binary bin in the tree's copy of pkgDir, with env, and stops it and
+// every process it started once it, or a test in it, runs past what it is allowed.
+func askBinary(ctx context.Context, tree *Tree, what, bin, pkgDir string, env, only []string, a Allowance) (Answer, error) {
+	limited, cancel := context.WithTimeout(ctx, a.Run)
+	defer cancel()
+	pace := &pacer{each: a.Each, stop: cancel}
+	cmd := exec.CommandContext(limited, bin, testArgs(only)...) //nolint:gosec // a test binary this run built
+	var (
+		out      []byte
+		exceeded bool
+		runErr   error
+		took     time.Duration
+	)
+	if err := tree.in(ctx, pkgDir, func(at, tmp string) {
+		cmd.Dir, cmd.Env = at, slices.Concat(env, []string{"TMPDIR=" + tmp})
+		started := time.Now()
+		out, exceeded, runErr = bounded(what, cmd, pace)
+		took = time.Since(started)
+	}); err != nil {
+		return Answer{}, err
+	}
+	answer := Answer{Said: string(out), Took: took}
+	// A test binary the cancellation killed failed, and would read as the edit refused.
+	if err := ctx.Err(); err != nil {
+		return answer, err
+	}
+	test, ranPast := pace.stopped()
+	switch {
+	case exceeded:
+		answer.Outcome = Exceeded
+	case runErr == nil:
+		answer.Outcome = Survived
+	case test != "":
+		answer.Outcome, answer.RanPast, answer.Allowed = TimedOut, test, ranPast
+	case limited.Err() != nil:
+		answer.Outcome, answer.Allowed = TimedOut, a.Run
+	}
+	// Otherwise Killed, the zero Outcome: a test that fails is the edit refused, not this run failing.
+	return answer, nil
 }
 
 // Asked is how one mutation is put to the tests.
@@ -722,7 +773,11 @@ type Asked struct {
 	// Overlay is the file Overlay made, which has the mutation built in the file's place; empty
 	// asks about the file as it is.
 	Overlay string
+	// Timeout is what no run of tests may pass, as -timeout says it.
 	Timeout string
+	// Unbroken is how long the tests took with nothing broken, of which each run is allowed a
+	// multiple; nil is not known, and each is allowed Timeout.
+	Unbroken *Unbroken
 	// Reaching are the package's own tests that execute the mutated line (Coverage.Reaching),
 	// and only those are run: a test that never reaches the line cannot refuse the edit. Nil is
 	// not known, and every test is run; empty is none, and the package's tests are not run.
@@ -744,17 +799,21 @@ type Asked struct {
 //
 // The binaries are built with go test -c and run here rather than by go test, which runs each in
 // its package's directory, where every edit asked at once would read what the others wrote.
-func Run(ctx context.Context, m Mutation, a Asked) (Outcome, string, error) {
+func Run(ctx context.Context, m Mutation, a Asked) (Answer, error) {
+	ceiling, err := time.ParseDuration(a.Timeout)
+	if err != nil {
+		return Answer{}, fmt.Errorf("mutate: the timeout %q: %w", a.Timeout, err)
+	}
 	dir := filepath.Dir(m.File)
 	tests := hasTests(ctx, dir)
 	if !tests && len(a.Importers) == 0 {
-		return Untested, "", nil
+		return Answer{Outcome: Untested}, nil
 	}
 	tree := a.Tree
 	if tree == nil {
 		work, err := os.MkdirTemp("", "mutate-tree-")
 		if err != nil {
-			return 0, "", err
+			return Answer{}, err
 		}
 		defer func() { _ = os.RemoveAll(work) }()
 		tree = NewTree(work)
@@ -780,25 +839,27 @@ func Run(ctx context.Context, m Mutation, a Asked) (Outcome, string, error) {
 		list.Dir = set.dir
 		listed, err := output("listing", list)
 		if err != nil {
-			return 0, said.String(), fmt.Errorf("mutate: listing %s: %w", strings.Join(set.pkgs, " "), err)
+			return Answer{Said: said.String()}, fmt.Errorf("mutate: listing %s: %w", strings.Join(set.pkgs, " "), err)
 		}
 		for line := range strings.SplitSeq(strings.TrimSpace(string(listed)), "\n") {
 			path, pkgDir, _ := strings.Cut(line, " ")
-			outcome, err := runPackage(ctx, tree, path, pkgDir, set.dir, set.what, set.only, a.Timeout, a.Overlay, &said)
-			if err != nil || outcome != Survived {
-				return outcome, said.String(), err
+			answer, err := runPackage(ctx, tree, path, pkgDir, set.dir, set.what, set.only, a.Unbroken.allowance(pkgDir, set.only, ceiling), a.Overlay, &said)
+			if err != nil || answer.Outcome != Survived {
+				answer.Said = said.String()
+				return answer, err
 			}
 		}
 	}
-	return Survived, said.String(), nil
+	return Answer{Outcome: Survived, Said: said.String()}, nil
 }
 
 // runPackage builds the tests of the package at path, from dir, and runs them in the tree's copy
-// of pkgDir, writing what they said to said. Survived where it has no test this build would run.
-func runPackage(ctx context.Context, tree *Tree, path, pkgDir, dir, what string, only []string, timeout, overlay string, said *strings.Builder) (Outcome, error) {
+// of pkgDir for no longer than allowed, writing what they said to said. Survived where it has no
+// test this build would run.
+func runPackage(ctx context.Context, tree *Tree, path, pkgDir, dir, what string, only []string, allowed Allowance, overlay string, said *strings.Builder) (Answer, error) {
 	bin, err := tree.bin()
 	if err != nil {
-		return 0, err
+		return Answer{}, err
 	}
 	args := []string{"test", "-c", "-vet=off", "-o", bin}
 	if overlay != "" {
@@ -807,49 +868,34 @@ func runPackage(ctx context.Context, tree *Tree, path, pkgDir, dir, what string,
 	build := exec.CommandContext(ctx, "go", append(args, path)...) //nolint:gosec // go test over this repository's packages
 	build.Dir = dir
 	workIn(build, filepath.Dir(bin))
-	out, exceeded, err := bounded("alone: build "+what, build)
+	out, exceeded, err := bounded("alone: build "+what, build, nil)
 	said.Write(out)
-	// A build or a test binary the cancellation killed failed, and would read as the edit not
-	// building or refused.
+	// A build the cancellation killed failed, and would read as the edit not building.
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return Answer{}, err
 	}
 	if exceeded {
-		return Exceeded, nil
+		return Answer{Outcome: Exceeded}, nil
 	}
 	if err != nil {
-		return Unbuildable, nil //nolint:nilerr // a build that fails is the edit's answer: it asks nothing
+		return Answer{Outcome: Unbuildable}, nil //nolint:nilerr // a build that fails is the edit's answer: it asks nothing
 	}
 	if _, err := os.Stat(bin); err != nil {
-		return Survived, nil //nolint:nilerr // no test binary: the package has no tests
+		return Answer{Outcome: Survived}, nil //nolint:nilerr // no test binary: the package has no tests
 	}
-	run := exec.CommandContext(ctx, bin, testArgs(timeout, only)...) //nolint:gosec // a test binary this run built
-	run.Env = testEnv()
-	var runErr error
-	if err := tree.in(ctx, pkgDir, func(at, tmp string) {
-		run.Dir, run.Env = at, append(run.Env, "TMPDIR="+tmp)
-		out, exceeded, runErr = bounded("alone: run "+what, run)
-	}); err != nil {
-		return 0, err
+	answer, err := askBinary(ctx, tree, "alone: run "+what, bin, pkgDir, testEnv(), only, allowed)
+	if err != nil {
+		return answer, err
 	}
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	countTests(path, out)
-	said.Write(out)
+	countTests(path, []byte(answer.Said))
+	said.WriteString(answer.Said)
 	// go test's own line for the package, so what is said names who answered.
 	verdict := "ok  "
-	if runErr != nil {
+	if answer.Outcome != Survived {
 		verdict = "FAIL"
 	}
 	fmt.Fprintf(said, "%s\t%s\n", verdict, path)
-	switch {
-	case exceeded:
-		return Exceeded, nil
-	case runErr != nil:
-		return Killed, nil //nolint:nilerr // a test that fails is the edit refused, not this run failing
-	}
-	return Survived, nil
+	return answer, nil
 }
 
 // hasTests is whether the package in dir has a test go would build: one whose tests are all of

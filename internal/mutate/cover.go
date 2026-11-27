@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Coverage is which of a package's own tests execute which lines of its files. A mutation is put
@@ -26,6 +27,8 @@ type Coverage struct {
 	blocks map[string][]span
 	// failing are the tests that fail with nothing broken: their failing refuses no edit.
 	failing map[string]bool
+	// took is how long each test's process ran, alone and with nothing broken.
+	took map[string]time.Duration
 }
 
 type span struct{ from, to int }
@@ -101,7 +104,8 @@ func Cover(ctx context.Context, dir, timeout string, slots chan *Tree) (*Coverag
 		}
 	}
 
-	c := &Coverage{reached: map[string]map[string][]span{}, blocks: map[string][]span{}, failing: map[string]bool{}}
+	c := &Coverage{reached: map[string]map[string][]span{}, blocks: map[string][]span{}, failing: map[string]bool{},
+		took: map[string]time.Duration{}}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	var treeErr error
@@ -122,10 +126,13 @@ func Cover(ctx context.Context, dir, timeout string, slots chan *Tree) (*Coverag
 				said     []byte
 				exceeded bool
 				runErr   error
+				took     time.Duration
 			)
 			if err := tree.in(ctx, dir, func(at, tmp string) {
 				run.Dir, run.Env = at, append(run.Env, "TMPDIR="+tmp)
-				said, exceeded, runErr = bounded("cover: run one test", run)
+				started := time.Now()
+				said, exceeded, runErr = bounded("cover: run one test", run, nil)
+				took = time.Since(started)
 			}); err != nil {
 				mu.Lock()
 				treeErr = cmp.Or(treeErr, err)
@@ -146,6 +153,10 @@ func Cover(ctx context.Context, dir, timeout string, slots chan *Tree) (*Coverag
 				fmt.Fprintf(os.Stderr, "  (%s: %s fails with nothing broken, and is asked about no edit: %v)\n%s\n",
 					dir, test, runErr, shown)
 			}
+			// Whether or not its profile can be read: a run of every test runs this one too.
+			mu.Lock()
+			c.took[test] = took
+			mu.Unlock()
 			spans, blocks, err := readProfile(profile, strings.TrimSpace(string(importPath))+"/")
 			if err != nil {
 				return

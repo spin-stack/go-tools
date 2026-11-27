@@ -15,7 +15,4 @@ var pidsMax = 0
 
 func delegated(context.Context) (string, error) { return "", nil }
 
-func confined(what string, cmd *exec.Cmd) ([]byte, bool, error) {
-	out, err := combined(what, cmd)
-	return out, false, err
-}
+func confined(string, *exec.Cmd) (bool, error) { return false, nil }

@@ -28,7 +28,7 @@ func TestATestProcessIsHeldByItsCgroup(t *testing.T) {
 	memLimit, pidsMax = 64<<20, 32
 	run := func(script string) (string, bool, time.Duration, error) {
 		started := time.Now()
-		out, exceeded, err := bounded("test", exec.CommandContext(t.Context(), "sh", "-c", script))
+		out, exceeded, err := bounded("test", exec.CommandContext(t.Context(), "sh", "-c", script), nil)
 		return string(out), exceeded, time.Since(started), err
 	}
 

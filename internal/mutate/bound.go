@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -69,10 +70,18 @@ func gib(n int64) string {
 
 // bounded is combined, with cmd and every process it starts stopped once they hold more than
 // memLimit between them; exceeded says they were. A go test is the go command, its compiler and
-// the test binary, and the binary is the one that grows.
-func bounded(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error) {
+// the test binary, and the binary is the one that grows. What cmd says is written to tap as well,
+// as it says it, where tap is not nil.
+func bounded(what string, cmd *exec.Cmd, tap io.Writer) (out []byte, exceeded bool, err error) {
+	var buf bytes.Buffer
+	said := io.Writer(&buf)
+	if tap != nil {
+		said = io.MultiWriter(&buf, tap)
+	}
+	cmd.Stdout, cmd.Stderr = said, said
 	if testCgroup != "" {
-		return confined(what, cmd)
+		exceeded, err := confined(what, cmd)
+		return buf.Bytes(), exceeded, err
 	}
 	// Cancelled, cmd is stopped with every process under it, as one that holds too much is: a test
 	// binary's own go build, left running when only the binary is killed, writes into the
@@ -81,13 +90,6 @@ func bounded(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error) 
 		stopOver(cmd.Process, -1) // mutate-exempt: any limit below zero is under what every tree holds
 		return nil
 	}
-	limit := memLimit
-	if limit == 0 {
-		out, err := combined(what, cmd)
-		return out, false, err
-	}
-	var buf bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &buf, &buf
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		account(what, cmd, time.Since(started))
@@ -95,8 +97,12 @@ func bounded(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error) 
 	}
 	// Its own scan of /proc each tick, a couple of milliseconds: at -j 10 a fifth of one core,
 	// beside the ten test processes it measures.
-	done, stopped := make(chan struct{}), make(chan bool)
-	go func() { stopped <- watch(cmd.Process, limit, done) }()
+	done, stopped := make(chan struct{}), make(chan bool, 1)
+	if memLimit > 0 { // mutate-exempt: a bound of one byte is one nobody sets; 0 is none
+		go func() { stopped <- watch(cmd.Process, memLimit, done) }()
+	} else {
+		stopped <- false
+	}
 	err = cmd.Wait()
 	close(done)
 	exceeded = <-stopped

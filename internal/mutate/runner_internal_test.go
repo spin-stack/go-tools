@@ -35,9 +35,9 @@ func TestAnEditWithNoCoverageIsAskedOfEveryTest(t *testing.T) {
 	if err != nil || s.Binary == "" || len(s.Built) == 0 {
 		t.Fatalf("schema: %+v, %v", s, err)
 	}
-	p := pkgRun{dir: dir, timeout: "2m", slots: Slots(t.TempDir(), 1)}
+	p := pkgRun{dir: dir, timeout: "2m", ceiling: 2 * time.Minute, slots: Slots(t.TempDir(), 1)}
 	for _, m := range s.Built {
-		if got, err := p.built(t.Context(), m, s, nil); err != nil || got != Killed {
+		if got, err := p.built(t.Context(), m, s, nil); err != nil || got.Outcome != Killed {
 			t.Errorf("%s: %v (%v) with no coverage, want refused by the test nobody measured", m, got, err)
 		}
 	}
