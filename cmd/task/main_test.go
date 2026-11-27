@@ -247,12 +247,18 @@ func TestAReleaseFromBeforeThisCommandIsNotRunForBeingFresh(t *testing.T) {
 }
 
 // The Task is go-tools' where nothing names another: no versions.yaml above, or one without a
-// task. A repository's task, where it has one, is the one run.
+// task. A repository's task, where it has one, is the one run, from anywhere under it.
 func TestTaskIsGoToolsUnlessTheRepositoryPinsOne(t *testing.T) {
 	repo, base, own := repository(t)
 	pinOf := func(path string) string { return filepath.Base(filepath.Dir(path)) }
-	if got, err := ran(t, repo, base, own); err != nil || pinOf(got) == own.Pins[runtime.GOOS+"/"+runtime.GOARCH] {
-		t.Errorf("a repository that pins task ran %s (%v), go-tools' Task", got, err)
+	sub := filepath.Join(repo, "internal", "x")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{repo, sub} {
+		if got, err := ran(t, dir, base, own); err != nil || pinOf(got) == own.Pins[runtime.GOOS+"/"+runtime.GOARCH] {
+			t.Errorf("from %s, in a repository that pins task, ran %s (%v): go-tools' Task", dir, got, err)
+		}
 	}
 	for name, file := range map[string]string{
 		"no versions.yaml": "",
