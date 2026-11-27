@@ -94,7 +94,10 @@ func TestRunWritesTheSummaryAndBothFiles(t *testing.T) {
 	// Spans from a directory too: a .jsonl file anywhere under it, and nothing else.
 	local := filepath.Join(dir, "spans")
 	require.NoError(t, os.MkdirAll(filepath.Join(local, "lane"), 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(local, "lane", "s.jsonl"), []byte(`{"name": "teardown", "runner": "r2", "start": "2026-11-09T14:04:00Z", "end": "2026-11-09T14:04:40Z"}`+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(local, "lane", "s.jsonl"), []byte(`{"name": "teardown", "runner": "r2", "start": "2026-11-09T14:04:00Z", "end": "2026-11-09T14:04:40Z"}`+"\n"+
+		// The lane's machine, sampled twice during teardown: one of its two CPUs busy.
+		`{"sample": {"runner": "r2", "at": "2026-11-09T14:04:10Z", "cpu": {"cpus": 2, "idle": 500}}}`+"\n"+
+		`{"sample": {"runner": "r2", "at": "2026-11-09T14:04:20Z", "cpu": {"cpus": 2, "user": 1000, "idle": 1500}}}`+"\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(local, "notes.txt"), []byte("not spans"), 0o600))
 
 	// Twice: a rerun's files are its own, and the summary keeps what each step added.
@@ -112,7 +115,7 @@ func TestRunWritesTheSummaryAndBothFiles(t *testing.T) {
 	assert.Contains(t, string(got), "**Critical path**: plan (58s, waited 2s) → lane (3m55s, waited 5s)")
 	assert.Contains(t, string(got), "| e2e:up (span) | lane | 1m50s |", "from the zipped artifact")
 	assert.Contains(t, string(got), "| decide (span) | plan | 30s |", "from the unarchived one")
-	assert.Contains(t, string(got), "| teardown (span) | lane | 40s |", "from -spans")
+	assert.Contains(t, string(got), "| teardown (span) | lane | 40s | 1.0 of 2 | - | - |", "from -spans, with its machine's samples")
 	assert.Contains(t, string(got), "| pick | plan | 10s |", "from the plan's log")
 	var logs []string
 	for _, p := range asked {

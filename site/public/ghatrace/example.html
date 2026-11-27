@@ -8,13 +8,13 @@
 :root {
   --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --line: #d8dee4; --row: #f6f8fa;
   --job: #4c8bf5; --crit: #d9480f; --step: #8fa3bf; --span: #1f9e89; --fail: #cf222e;
-  --queue: #c9d1d9; --link: #0969da;
+  --queue: #c9d1d9; --link: #0969da; --io: #bf8700;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --row: #161b22;
     --job: #4c8bf5; --crit: #f0883e; --step: #6e7f99; --span: #2bb69e; --fail: #f85149;
-    --queue: #3d444d; --link: #4493f8;
+    --queue: #3d444d; --link: #4493f8; --io: #d29922;
   }
 }
 * { box-sizing: border-box; }
@@ -48,6 +48,11 @@ button { font: inherit; color: var(--fg); background: var(--row); border: 1px so
 .b.span { background: var(--span); }
 .b.queue { background: repeating-linear-gradient(45deg, var(--queue) 0 3px, transparent 3px 6px); }
 .b.fail { outline: 2px solid var(--fail); outline-offset: -1px; }
+.row.loaded .track { height: 36px; }
+.load { position: absolute; left: 0; top: 20px; width: 100%; height: 14px; overflow: visible; }
+.load polyline { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+.load .cpu { stroke: var(--job); }
+.load .io { stroke: var(--io); }
 .axis { position: sticky; top: 0; z-index: 1; background: var(--bg); }
 .axis .track { height: 20px; }
 .tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line);
@@ -74,6 +79,8 @@ button { font: inherit; color: var(--fg); background: var(--row); border: 1px so
     <span><i style="background:var(--step)"></i>step</span>
     <span><i style="background:var(--span)"></i>span</span>
     <span><i style="background:repeating-linear-gradient(45deg,var(--queue) 0 3px,transparent 3px 6px)"></i>waiting for a runner</span>
+    <span><i style="height:2px;background:var(--job)"></i>under a job: its machine's CPUs busy</span>
+    <span><i style="height:2px;background:var(--io)"></i>time waiting on IO</span>
   </span>
 </div>
 <div class="wf" id="wf"></div>
@@ -104,13 +111,33 @@ function bar(track, s, kind, extra) {
   const b = el('div', 'b ' + kind + (s.f ? ' fail' : '') + (extra || ''));
   b.style.left = pct(s.s);
   b.style.width = pct(s.e - s.s);
-  b.title = s.n + ' · ' + fmt(s.e - s.s) + ' · from ' + fmt(s.s) + ' to ' + fmt(s.e);
+  b.title = s.n + ' · ' + fmt(s.e - s.s) + ' · from ' + fmt(s.s) + ' to ' + fmt(s.e) + (s.t ? '\n' + s.t : '');
   track.appendChild(b);
 }
 
 
+
+const svgNS = 'http://www.w3.org/2000/svg';
+function load(track, lane) {
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('class', 'load');
+  svg.setAttribute('viewBox', '0 0 ' + wall + ' 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  const title = document.createElementNS(svgNS, 'title');
+  title.textContent = lane.job.t || '';
+  svg.appendChild(title);
+  for (const [cls, y] of [['cpu', p => 100 - 100 * p[2]], ['io', p => 100 - p[3]]]) {
+    const line = document.createElementNS(svgNS, 'polyline');
+    line.setAttribute('class', cls);
+    line.setAttribute('points', lane.load.map(p => p[0] + ',' + y(p) + ' ' + p[1] + ',' + y(p)).join(' '));
+    svg.appendChild(line);
+  }
+  track.appendChild(svg);
+}
+
+
 function row(node, depth, lane) {
-  const r = el('div', 'row' + (lane ? ' lane' : ''));
+  const r = el('div', 'row' + (lane ? ' lane' : '') + (lane && lane.load ? ' loaded' : ''));
   const name = el('div', 'name');
   name.style.paddingLeft = (depth * 14) + 'px';
   const tog = el('span', 'tog', node.c && node.c.length ? '▸' : '');
@@ -124,12 +151,13 @@ function row(node, depth, lane) {
   }
   if (lane && lane.critical) name.appendChild(el('span', 'crit-mark', ' ●'));
   if (node.f) name.appendChild(el('span', 'fail-mark', ' ✗'));
-  name.title = node.n + (lane ? ' · ' + lane.runner + ' · ' + (lane.labels || []).join(', ') : '');
+  name.title = node.n + (lane ? ' · ' + lane.runner + ' · ' + (lane.labels || []).join(', ') : '') + (node.t ? '\n' + node.t : '');
   r.appendChild(name);
   r.appendChild(el('div', 'dur', fmt(node.e - node.s)));
   const track = el('div', 'track');
   if (lane && lane.queue.e > lane.queue.s) bar(track, lane.queue, 'queue');
   bar(track, node, node.k, lane && lane.critical ? ' crit' : '');
+  if (lane && lane.load) load(track, lane);
   r.appendChild(track);
   wf.appendChild(r);
   const kids = [];

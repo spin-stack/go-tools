@@ -3,11 +3,13 @@
 //	go tool ghatrace run                  the run as a Job Summary, trace.html and trace.json
 //	go tool ghatrace span -name N -- cmd  run cmd and record it as a span of the step it runs in
 //	go tool ghatrace gotest -- go test    the same, and a span for each package and long test
+//	go tool ghatrace sample               sample the job's machine every second, in the background
 //
 // run is the last job of a workflow, or a step at the end of its last job. It reads its own run
 // ($GITHUB_RUN_ID, or -run) from the API with $GH_TOKEN or $GITHUB_TOKEN, and the spans the run's
 // jobs uploaded as artifacts named ghatrace-*. span records to $GHATRACE_SPANS, or
-// $RUNNER_TEMP/ghatrace-spans.jsonl on a runner, and outside one only runs the command.
+// $RUNNER_TEMP/ghatrace-spans.jsonl on a runner, and outside one only runs the command; sample
+// writes to the same file.
 package main
 
 import (
@@ -53,7 +55,7 @@ type exitError int
 
 func (e exitError) Error() string { return "exit status " + strconv.Itoa(int(e)) }
 
-const usage = `usage: ghatrace run|span|gotest [flags]
+const usage = `usage: ghatrace run|span|gotest|sample [flags]
 
   run     read a workflow run and write where its time went: the Job Summary ($GITHUB_STEP_SUMMARY,
           or stdout), trace.html (open it in a browser) and trace.json (open it at ui.perfetto.dev)
@@ -61,6 +63,8 @@ const usage = `usage: ghatrace run|span|gotest [flags]
   span    -name NAME -- cmd args...: run cmd, and record it as a span of the step it runs in
   gotest  -- go test args...: run it with -json, write what it would have written, and record
           a span for each package and each test of -min or more
+  sample  sample the machine - CPU, pressure, disks - every second until the job ends, in the
+          background: a step near the job's start
 
 -h after a command says the rest.
 `
@@ -80,8 +84,10 @@ func run(ctx context.Context, argv []string) error {
 		return span(ctx, argv[1:])
 	case "gotest":
 		return goTest(ctx, argv[1:])
+	case "sample":
+		return sample(ctx, argv[1:])
 	}
-	return fmt.Errorf("no command %q; one of run, span, gotest", argv[0])
+	return fmt.Errorf("no command %q; one of run, span, gotest, sample", argv[0])
 }
 
 func report(ctx context.Context, args []string) error {
@@ -108,7 +114,7 @@ func report(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	spans, err := spansOf(ctx, gh, runID, *artifacts, *local)
+	rec, err := recordedOf(ctx, gh, runID, *artifacts, *local)
 	if err != nil {
 		return err
 	}
@@ -134,7 +140,7 @@ func report(ctx context.Context, args []string) error {
 		}
 		r.Logs[j.ID] = log
 	}
-	t := runtrace.Build(r, spans)
+	t := runtrace.Build(r, rec.spans, rec.samples)
 	if err := os.MkdirAll(*out, 0o755); err != nil { //nolint:gosec // the output is the run's to read
 		return err
 	}
@@ -171,13 +177,26 @@ func runOf(id, repo string) (int64, string, error) {
 	return n, repo, nil
 }
 
-// spansOf is every span the run's jobs uploaded, and every span in the files under dir.
-func spansOf(ctx context.Context, gh proven.GitHub, runID int64, prefix, dir string) ([]ghatrace.Span, error) {
-	var spans []ghatrace.Span
+// recorded is what the run's jobs recorded: their spans and their machines' samples.
+type recorded struct {
+	spans   []ghatrace.Span
+	samples []ghatrace.Sample
+}
+
+func (rec *recorded) read(r io.Reader) error {
+	spans, samples, err := ghatrace.ReadAll(r)
+	rec.spans = append(rec.spans, spans...)
+	rec.samples = append(rec.samples, samples...)
+	return err
+}
+
+// recordedOf is everything the run's jobs uploaded, and everything in the files under dir.
+func recordedOf(ctx context.Context, gh proven.GitHub, runID int64, prefix, dir string) (recorded, error) {
+	var rec recorded
 	if prefix != "" {
 		arts, err := gh.Artifacts(ctx, runID)
 		if err != nil {
-			return nil, err
+			return rec, err
 		}
 		for _, a := range arts {
 			if a.Expired || !strings.HasPrefix(a.Name, prefix) {
@@ -185,17 +204,15 @@ func spansOf(ctx context.Context, gh proven.GitHub, runID int64, prefix, dir str
 			}
 			archive, err := gh.Archive(ctx, a.URL)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", a.Name, err)
+				return rec, fmt.Errorf("%s: %w", a.Name, err)
 			}
-			got, err := unzip(archive)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", a.Name, err)
+			if err := rec.unzip(archive); err != nil {
+				return rec, fmt.Errorf("%s: %w", a.Name, err)
 			}
-			spans = append(spans, got...)
 		}
 	}
 	if dir == "" {
-		return spans, nil
+		return rec, nil
 	}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Ext(path) != ".jsonl" {
@@ -205,41 +222,38 @@ func spansOf(ctx context.Context, gh proven.GitHub, runID int64, prefix, dir str
 		if err != nil {
 			return err
 		}
-		got, err := ghatrace.Read(f)
+		err = rec.read(f)
 		_ = f.Close() // read-only
 		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
-		spans = append(spans, got...)
 		return nil
 	})
-	return spans, err
+	return rec, err
 }
 
-// unzip is the spans in every file of an artifact's archive, or in the artifact itself when it was
-// uploaded as one file, unarchived.
-func unzip(archive []byte) ([]ghatrace.Span, error) {
+// unzip reads every file of an artifact's archive, or the artifact itself when it was uploaded as
+// one file, unarchived.
+func (rec *recorded) unzip(archive []byte) error {
 	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if errors.Is(err, zip.ErrFormat) {
-		return ghatrace.Read(bytes.NewReader(archive))
+		return rec.read(bytes.NewReader(archive))
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var spans []ghatrace.Span
 	for _, f := range zr.File {
 		rc, err := f.Open()
 		if err != nil {
-			return nil, err
+			return err
 		}
-		got, err := ghatrace.Read(rc)
+		err = rec.read(rc)
 		_ = rc.Close() // read-only
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", f.Name, err)
+			return fmt.Errorf("%s: %w", f.Name, err)
 		}
-		spans = append(spans, got...)
 	}
-	return spans, nil
+	return nil
 }
 
 // write writes a file afresh, or adds to it when it is the run's summary, which every step adds to.
@@ -344,8 +358,8 @@ func verbose(args []string) bool {
 	return false
 }
 
-// timed runs cmd and records it as a span named name, with read taking its output while it
-// runs. A cancelled run interrupts the step: the command gets the signal, and the span is written
+// timed runs cmd and records it as a span named name, with what it used, with read taking its
+// output while it runs. A cancelled run interrupts the step: the command gets the signal, and the span is written
 // once it has stopped, so a cancelled lane still shows where it was. It exits as cmd did.
 func timed(cmd *exec.Cmd, name string, read func() error) error {
 	sigs := make(chan os.Signal, 1)
@@ -372,7 +386,7 @@ func timed(cmd *exec.Cmd, name string, read func() error) error {
 	}
 	err := cmd.Wait()
 	close(done)
-	s := ghatrace.Span{Name: name, Start: start, End: time.Now()}
+	s := ghatrace.Span{Name: name, Start: start, End: time.Now(), Usage: ghatrace.UsageOf(cmd.ProcessState)}
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit):

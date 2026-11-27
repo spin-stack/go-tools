@@ -52,6 +52,11 @@ jobs:
           version: ${{ env.TASK_VERSION }}
           checksum: ${{ env.TASK_SHA256_LINUX_AMD64 }}
 
+      # The machine under every step after this one, for task trace to say of each slow one
+      # whether it worked or waited: a sampler that the runner ends with the job.
+      - name: Watch the machine
+        run: task trace:sample
+
       # golangci-lint's analysis of each package, keyed by content inside, so any older copy is safe
       # to start from: saved under the commit, restored from the newest - main's for a pull request.
       # Without it every run analysed every package from nothing.
@@ -110,6 +115,17 @@ jobs:
         with:
           path: _output/ghatrace/trace.json
           archive: false
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # The spans and samples the trace was drawn from: `ghatrace run -run <this run>` draws it
+      # again anywhere, as the site's example is drawn.
+      - name: Keep the spans
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ghatrace-gate
+          path: ${{ runner.temp }}/ghatrace-spans.jsonl
           retention-days: 7
           if-no-files-found: ignore
 

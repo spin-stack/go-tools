@@ -1,10 +1,11 @@
 ---
 title: ghatrace
-description: Where a GitHub Actions run's time went - the critical path, each job's wait for a runner, its steps and the segments inside them - as the run's summary, a page that opens in a browser, and a trace for Perfetto, with nothing hosted.
+description: Where a GitHub Actions run's time went - the critical path, each job's wait for a runner, its steps and the segments inside them, and whether each worked or waited - as the run's summary, a page that opens in a browser, and a trace for Perfetto, with nothing hosted.
 ---
 
 A run's page says how long each job took. It does not say which jobs the wall time is made of,
-how long each one waited for a runner, or which part of a twelve-minute step is the slow one.
+how long each one waited for a runner, which part of a twelve-minute step is the slow one, or
+whether that part was working, waiting on a disk, short of a CPU, or asleep.
 All of that is in GitHub's API or in the job itself. A hosted backend - an OpenTelemetry
 collector, Honeycomb, Datadog - would draw it, and ghatrace draws it from the run alone:
 
@@ -12,6 +13,7 @@ collector, Honeycomb, Datadog - would draw it, and ghatrace draws it from the ru
 go get -tool github.com/spin-stack/go-tools/cmd/ghatrace
 go tool ghatrace run                          # in the run's last job
 go tool ghatrace span -name e2e:up -- task e2e:up   # inside any step, to time a part of it
+go tool ghatrace sample                       # a step near a job's start: its machine, every second
 ```
 
 ## What it looks like
@@ -33,13 +35,22 @@ from that run, so it is always what the code draws ([open it on its own](example
 - **The run's summary** (`$GITHUB_STEP_SUMMARY`, or stdout off a runner): the wall time, the
   time on runners and as job-minutes rounded up the way GitHub bills its own runners, the time
   spent waiting for runners and the longest wait, the critical path, and the ten slowest steps and
-  spans that hold no other - what holds others says again what they say.
+  spans that hold no other - what holds others says again what they say. Beside each, the CPU time
+  its command used, when it was a span's command, and its machine meanwhile, when the job was
+  sampled: how many CPUs were busy, how long tasks stalled for a CPU, for IO and for memory, and
+  the disks. A step that took 35 minutes beside `0.3 of 64` CPUs busy and nothing stalled was
+  waiting on something that is not this machine.
 - **`trace.html`** in `-out` (`_output/ghatrace`): one page with nothing to fetch. Every job is a
   row with its wait and its run on one time axis, the critical path in its own colour; a job
-  opens to its steps, and a step to its spans.
+  opens to its steps, and a step to its spans. Under a sampled job, a line for the share of its
+  machine's CPUs busy and one for the time waiting on IO; a bar's tooltip says what its command
+  used and what the machine did while it ran.
 - **`trace.json`** in `-out`: the same run as Chrome trace events, for
   [ui.perfetto.dev](https://ui.perfetto.dev). A job is a process with its steps on one track and
-  its spans on as many as it takes, which is where to zoom into a step or compare shards.
+  its spans on as many as it takes, which is where to zoom into a step or compare shards. A sampled
+  job's machine is counters under it - `CPUs busy`, `CPU time %` (iowait, steal), `stalled %`
+  (each pressure), `disk MB/s` (read, written), `disk busy %` - and a slice's args say what its
+  command used and what the machine did meanwhile.
 
 **The critical path** is the chain of jobs the wall time is made of. The API does not say what a
 job needs, but a job is queued the moment the last job it needs finishes, so the chain is read
@@ -92,6 +103,51 @@ A job uploads that file as an artifact whose name starts with `ghatrace-`, and `
 such artifact of the run. A span goes under the step that ran it, in the job whose runner
 recorded it, and inside any span that contains it.
 
+**What a span's command used.** `span` and `gotest` wait for their command, and the kernel hands
+the waiting process what the command used, which they record with the command's span (`usage`;
+gotest's packages and tests have none, as go test runs them in processes of its own): its CPU
+time, user and system, and on Linux the resident set of its largest process and the bytes it read
+from a disk and wrote to one. Wall time far above the CPU time is a command that waited. What is
+counted is the command and every process under it that something under it waited for. A process
+it started and left running is not, and neither is a container's: `docker run` asks the
+container runtime, whose children the container's processes are, so a span of `docker run` shows
+almost no CPU whatever the container did - its machine's samples show it. Bytes read are what came
+from the disk, not what the page cache already held; bytes written are counted as they reach the
+page cache, whether or not the disk has them yet; a file on tmpfs is neither.
+
+## The machine under a job
+
+The time says a step was slow, not why. `ghatrace sample` reads the job's machine every second
+(`-every`) into the same file as its spans, from what Linux counts from boot - so what the machine
+did between two samples is their difference, exact whatever happened between them:
+
+- **CPUs busy**: `/proc/stat`'s ticks of all CPUs, less idle, iowait and steal, as a number of
+  CPUs: `0.3 of 64` is a machine with one process working a third of the time, not a busy one.
+  **iowait** and **steal** are shares of the CPUs' time: idle with IO outstanding, and taken by
+  the hypervisor.
+- **Stalled on CPU, IO, memory**: `/proc/pressure`'s `total` - the microseconds in which at least
+  one task waited for a CPU, for IO, or for memory (`some`), and, for IO and memory, in which every
+  task that could run waited (`full`) - as a share of the time. A step stalled on IO most of the
+  time is waiting on a disk; one stalled on CPU is short of CPUs.
+- **Disk**: `/proc/diskstats`, for each physical disk - one with a device under `/sys/block`, which
+  a partition, a loop device or a device-mapper one is not, as they would count the same bytes
+  again: megabytes (10⁶ bytes) read and written a second, summed over the disks, and the share of
+  the time the busiest one had a request in flight.
+
+A step of a job's own starts it, near the start, and it returns at once: each step is a process
+the runner waits for, and a process a step leaves running lives on through the steps after it.
+The sampler is one such, in a session of its own with nothing to say to the step, and the runner
+ends it when the job ends, as it ends every process the job started (they carry the job's
+`RUNNER_TRACKING_ID`). Each sample is written as it is taken, so nothing waits on that end. A job
+that starts it twice has one sampler; it stops on its own after six hours (`-for`), should nothing
+end it.
+
+What a machine does not have is not sampled, and `sample` says so: a kernel without PSI has no
+pressure, a container no disk of its own. Off Linux there is nothing to read, and off a runner
+(no `$RUNNER_TEMP` or `$GHATRACE_SPANS`) nowhere to write: `sample` says which and the step goes on.
+A sample never fails a job. A sample's line is `{"sample": {...}}`, which a ghatrace from before
+samples reads as a span of no job and draws nothing of.
+
 ## In a workflow
 
 The last job needs every other one and runs whether they passed or not:
@@ -101,6 +157,8 @@ jobs:
   lane:
     # ...
     steps:
+      # ... the checkout and setup that go tool needs, then:
+      - run: go tool ghatrace sample
       # ... steps that run `go tool ghatrace span -name ... -- ...` somewhere inside
       - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

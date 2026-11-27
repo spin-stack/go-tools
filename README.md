@@ -29,7 +29,7 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`release`](https://spin-stack.github.io/go-tools/release/) | not a check: the name of a repository's next release, `v<YYYYMMDD>.<NN>`, and a refusal for a commit already released |
 | [`consumers`](https://spin-stack.github.io/go-tools/consumers/) | not a check: which commit of a repository each place that copies from it is on, whether its copies are that commit's, and whether its npm packages are the ones pinned there |
 | [`gencache`](https://spin-stack.github.io/go-tools/gencache/) | not a check: `go generate` with each mockgen directive answered from a cache when nothing its mock is made from has changed |
-| [`ghatrace`](https://spin-stack.github.io/go-tools/ghatrace/) | not a check: where a GitHub Actions run's time went - the critical path, each job's wait for a runner, its steps and the spans inside them - as the run's summary, an HTML page and a Perfetto trace, with nothing hosted |
+| [`ghatrace`](https://spin-stack.github.io/go-tools/ghatrace/) | not a check: where a GitHub Actions run's time went - the critical path, each job's wait for a runner, its steps and the spans inside them, and whether each worked or waited - as the run's summary, an HTML page and a Perfetto trace, with nothing hosted |
 | [`provenance`, `sbom`, `attestgate`, `trustroot`, `sigcheck`, `catalog`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM; a signature by any workflow but the one named; a Spin OS image catalog its release did not sign |
 
 ```sh

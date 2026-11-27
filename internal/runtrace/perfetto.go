@@ -22,7 +22,9 @@ type event struct {
 
 // WritePerfetto writes t as Chrome trace events: a process per job, in the order they were queued,
 // with a track for the wait and the job's steps and as many tracks for its spans as it takes for
-// each to hold only spans that nest or follow one another - Perfetto draws nothing else right.
+// each to hold only spans that nest or follow one another - Perfetto draws nothing else right -
+// and a counter for each of its machine's series, when it was sampled. A slice's args say what its
+// command used and what the machine did meanwhile.
 func WritePerfetto(w io.Writer, t Trace) error {
 	us := func(at time.Time) int64 { return at.Sub(t.Start).Microseconds() }
 	var events []event
@@ -38,6 +40,15 @@ func WritePerfetto(w io.Writer, t Trace) error {
 			event{Ph: "M", PID: pid, TID: 1, Name: "thread_name", Args: map[string]any{"name": "steps"}},
 		)
 		add := func(tid int, s Slice, args map[string]any) {
+			for k, v := range map[string]string{"its command": usageText(s.Usage), "machine": loadText(over(l.Load, s.Start, s.End))} {
+				if v == "" {
+					continue
+				}
+				if args == nil {
+					args = map[string]any{}
+				}
+				args[k] = v
+			}
 			events = append(events, event{Ph: "X", PID: pid, TID: tid, Name: label(s), TS: us(s.Start), Dur: s.End.Sub(s.Start).Microseconds(), Args: args})
 		}
 		if l.Queue.End.After(l.Queue.Start) {
@@ -60,8 +71,35 @@ func WritePerfetto(w io.Writer, t Trace) error {
 				add(tid, s, nil)
 			}
 		}
+		events = append(events, counterEvents(pid, l.Load, us)...)
 	}
 	return json.NewEncoder(w).Encode(map[string]any{"traceEvents": events, "displayTimeUnit": "ms"})
+}
+
+// counterEvents is a job's load as Perfetto's counters: an event for each counter at the start of
+// each load, holding until the next, and one at the end of the last.
+func counterEvents(pid int, ls []Load, us func(time.Time) int64) []event {
+	var events []event
+	for _, c := range counters() {
+		at := func(ts time.Time, of map[string]float64) {
+			args := map[string]any{}
+			for _, m := range c {
+				if v, ok := of[m.name]; ok {
+					args[m.name] = v
+				}
+			}
+			if len(args) > 0 {
+				events = append(events, event{Ph: "C", PID: pid, Name: c[0].counter, TS: us(ts), Args: args})
+			}
+		}
+		for _, l := range ls {
+			at(l.Start, l.Of)
+		}
+		if len(ls) > 0 {
+			at(ls[len(ls)-1].End, ls[len(ls)-1].Of)
+		}
+	}
+	return events
 }
 
 // label is a bar's name with its length, and a cross when what it stands for did not succeed.
