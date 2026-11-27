@@ -390,3 +390,46 @@ func TestReleaseIsStatedAndTrue(t *testing.T) {
 		})
 	}
 }
+
+// A var a Taskfile of the repository states is what an included task reads under that name, over
+// the include's: open-remote-ssh's root RELEASE, its publish directory, was the release task's
+// RELEASE while the include stated `elsewhere`, and the task said no RELEASE was stated. Every
+// name the common tasks read is one, and the rename after what it holds passes.
+func TestARepositorysVarDoesNotHideOneTheCommonTasksRead(t *testing.T) {
+	const include = "  common:\n    taskfile: \"{{.GO_TOOLS_TASKS}}\"\n    flatten: true\n    vars:\n      RELEASE:\n        map: {elsewhere: publish.yml}\n"
+	openRemoteSSH := func(name string) map[string]string {
+		return with(map[string]string{
+			".github/workflows/publish.yml": "on:\n  push:\n    tags: ['v*']\n",
+			"Taskfile.yml":                  "version: '3'\nvars: {" + name + ": build/release}\nincludes:\n" + include + "tasks:\n" + lint,
+		})
+	}
+	got, said := common(t, openRemoteSSH("RELEASE"))
+	assert.Equal(t, []string{"common:Taskfile.yml:vars:RELEASE"}, slices.Sorted(maps.Keys(got)))
+	assert.Equal(t, "Taskfile.yml:2: var RELEASE is one the common tasks read, and a Taskfile's own var of that name is what they read instead of the include's or the command line's: "+
+		"rename it after what it holds", got["common:Taskfile.yml:vars:RELEASE"])
+	assert.Contains(t, said, "RELEASE says elsewhere: publish.yml", "the include's map is still what the rest of the gate reads")
+
+	got, _ = common(t, openRemoteSSH("RELEASE_DIR"))
+	assert.Empty(t, got)
+
+	// Each name the common tasks read, in the root and in a file an include gives a namespace;
+	// the release task's own vars, Task's, and a name they do not read are not.
+	read := []string{"BACK", "CONSUMERS", "FILE", "GO_TOOLS", "NAME", "RELEASE", "RELEASE_DRY", "SHA", "TO", "VERSIONS_FILES", "WORKFLOWS_ALSO"}
+	var vars strings.Builder
+	for _, n := range append(slices.Clone(read), "RELEASE_STATED", "RELEASE_FILES", "CLI_ARGS", "TASK_EXE", "VERSION") {
+		vars.WriteString("  " + n + ": x\n")
+	}
+	got, _ = common(t, with(map[string]string{
+		"Taskfile.yml":     "version: '3'\nvars:\n" + vars.String() + "includes:\n" + includeNone + "  ci: {taskfile: taskfiles/ci.yml}\ntasks:\n" + lint,
+		"taskfiles/ci.yml": "version: '3'\nvars:\n  SHA: '{{.GITHUB_SHA}}'\ntasks: {}\n",
+	}))
+	var want []string
+	for _, n := range read {
+		want = append(want, "common:Taskfile.yml:vars:"+n)
+	}
+	want = append(want, "common:taskfiles/ci.yml:vars:SHA")
+	slices.Sort(want)
+	assert.Equal(t, want, slices.Sorted(maps.Keys(got)))
+	assert.Contains(t, got["common:taskfiles/ci.yml:vars:SHA"], "taskfiles/ci.yml:3: var SHA")
+}
+
