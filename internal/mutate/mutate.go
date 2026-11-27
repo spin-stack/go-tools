@@ -741,9 +741,15 @@ func askBinary(ctx context.Context, tree *Tree, what, bin, pkgDir string, env, o
 	// The allowance is the binary's from its start, not the copying of the module into a tree
 	// used for the first time.
 	if err := tree.in(ctx, pkgDir, func(at, tmp string) {
-		limited, cancel := ctx, context.CancelFunc(func() {})
+		// Cancellable with no bound too: the pacer stops a test past its own allowance through it.
+		var (
+			limited context.Context
+			cancel  context.CancelFunc
+		)
 		if a.Run > 0 { // mutate-exempt: a run of a nanosecond is one nobody allows; 0 is no bound
 			limited, cancel = context.WithTimeout(ctx, a.Run)
+		} else {
+			limited, cancel = context.WithCancel(ctx)
 		}
 		defer cancel()
 		pace = &pacer{each: a.Each, stop: cancel}
