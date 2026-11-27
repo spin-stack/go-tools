@@ -13,11 +13,11 @@ import (
 func place(lanes []Lane, spans []ghatrace.Span) {
 	slices.SortStableFunc(spans, func(a, b ghatrace.Span) int { return outerFirst(a.Start, a.End, b.Start, b.End) })
 	for _, s := range spans {
-		l := laneOf(lanes, s)
+		l := laneOf(lanes, s.Runner, s.Start)
 		if l == nil {
 			continue
 		}
-		slice := Slice{Name: s.Name, Kind: "span", Start: s.Start, End: s.End, Failed: s.Exit != 0}
+		slice := Slice{Name: s.Name, Kind: "span", Start: s.Start, End: s.End, Failed: s.Exit != 0, Usage: s.Usage}
 		parent := &l.Job
 		if step := stepAt(&l.Job, s.Start); step != nil {
 			parent = step
@@ -47,10 +47,11 @@ func find(root *Slice, s Slice, name string) *Slice {
 	return found
 }
 
-func laneOf(lanes []Lane, s ghatrace.Span) *Lane {
+// laneOf is the lane whose job ran on runner at the time at.
+func laneOf(lanes []Lane, runner string, at time.Time) *Lane {
 	for i := range lanes {
 		l := &lanes[i]
-		if l.Runner == s.Runner && !s.Start.Before(l.Job.Start.Add(-slack)) && !s.Start.After(l.Job.End.Add(slack)) {
+		if l.Runner == runner && !at.Before(l.Job.Start.Add(-slack)) && !at.After(l.Job.End.Add(slack)) {
 			return l
 		}
 	}

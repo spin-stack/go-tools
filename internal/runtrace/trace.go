@@ -33,6 +33,8 @@ type Slice struct {
 	End      time.Time `json:"end"`
 	Failed   bool      `json:"failed,omitempty"`
 	Children []Slice   `json:"children,omitempty"`
+	// Usage is what a span's command used, when the span ran one.
+	Usage *ghatrace.Usage `json:"usage,omitempty"`
 }
 
 // Duration is the bar's length.
@@ -49,6 +51,8 @@ type Lane struct {
 	Queue      Slice    `json:"queue"`
 	Job        Slice    `json:"job"`
 	Critical   bool     `json:"critical"`
+	// Load is the job's machine between each two of its samples, when it was sampled.
+	Load []Load `json:"load,omitempty"`
 }
 
 // Trace is a run as lanes, in the order their jobs were queued.
@@ -66,9 +70,10 @@ type Trace struct {
 // Wall is the run from the first job queued to the last job finished.
 func (t Trace) Wall() time.Duration { return t.End.Sub(t.Start) }
 
-// Build is the trace of run, with spans placed under the step of the job that recorded them.
-// A span no job ran is dropped: it was recorded by a runner the run does not name.
-func Build(run Run, spans []ghatrace.Span) Trace {
+// Build is the trace of run, with spans placed under the step of the job that recorded them, and
+// samples as the load of the machine of the job that took them. A span or a sample no job ran is
+// dropped: it was recorded by a runner the run does not name.
+func Build(run Run, spans []ghatrace.Span, samples []ghatrace.Sample) Trace {
 	t := Trace{Run: run.ID, Title: run.Workflow, URL: run.URL}
 	for _, j := range run.Jobs {
 		if j.StartedAt.IsZero() || j.Conclusion == "skipped" {
@@ -93,6 +98,15 @@ func Build(run Run, spans []ghatrace.Span) Trace {
 		t.Lanes = append(t.Lanes, lane)
 	}
 	place(t.Lanes, spans)
+	byLane := map[*Lane][]ghatrace.Sample{}
+	for _, s := range samples {
+		if l := laneOf(t.Lanes, s.Runner, s.At); l != nil {
+			byLane[l] = append(byLane[l], s)
+		}
+	}
+	for l, s := range byLane {
+		l.Load = loads(s)
+	}
 	slices.SortStableFunc(t.Lanes, func(a, b Lane) int {
 		return cmp.Or(a.Queue.Start.Compare(b.Queue.Start), a.Job.Start.Compare(b.Job.Start))
 	})

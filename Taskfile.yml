@@ -7,6 +7,7 @@
 #   task mutate       break what the change against BASE (origin/main) touched, and ask the tests
 #   task coverage     coverage.out's numbers, to the terminal or the workflow run's summary
 #   task trace        where a workflow run's time went (ghatrace), to its summary and _output/ghatrace
+#   task trace:sample this job's machine, sampled every second until the job ends (ghatrace)
 #   task versions     which pins in versions.yaml are behind; task bump NAME=... moves one
 #   task release      what release.yml runs once the binaries are built: the next v<YYYYMMDD>.<NN>
 #
@@ -131,6 +132,11 @@ tasks:
     desc: Where the run's time went (ghatrace), to its summary and _output/ghatrace; its own job's spans are in $RUNNER_TEMP.
     cmds:
       - go run ./cmd/ghatrace run -spans "${RUNNER_TEMP:-}"
+
+  trace:sample:
+    desc: Sample this job's machine - its CPUs, what waited for CPU, IO and memory, its disks - every second into its spans, in the background until the job ends (ghatrace sample); off a runner it samples nothing.
+    cmds:
+      - go run ./cmd/ghatrace sample
 
   release:build:
     desc: Every command and the tasks every repository includes, for each platform a repository runs them on, as _output/release/go-tools_<os>_<arch>.tar.gz.

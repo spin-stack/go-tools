@@ -1,0 +1,15 @@
+//go:build !linux
+
+package main
+
+import "errors"
+
+// background is Linux's alone: no other system has the /proc a sample reads.
+func background(string, ...string) error {
+	return errors.New("ghatrace samples Linux alone")
+}
+
+// lock holds nothing off Linux, where nothing is sampled.
+func lock(string) (func(), error) { return func() {}, nil }
+
+var errSampled = errors.New("this job's machine is sampled already")

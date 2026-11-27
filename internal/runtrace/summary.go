@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/spin-stack/go-tools/ghatrace"
 )
 
 // stats is what a run cost and where it waited.
@@ -62,10 +64,7 @@ func WriteSummary(w io.Writer, t Trace, files string) error {
 		fmt.Fprintf(&b, "**Critical path**: %s\n\n", strings.Join(path, " → "))
 	}
 	if rows := slowestOf(t, slowest); len(rows) > 0 {
-		b.WriteString("| slowest | job | took |\n|---|---|---|\n")
-		for _, r := range rows {
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", cell(r.Name), cell(r.Lane), short(r.Took))
-		}
+		writeSlowest(&b, rows)
 	}
 	if len(t.Skipped) > 0 {
 		fmt.Fprintf(&b, "\nDid not run: %s.\n", strings.Join(t.Skipped, ", "))
@@ -84,11 +83,44 @@ func worst(st stats) string {
 	return short(st.Worst) + " (" + st.WorstLane + ")"
 }
 
-// row is a step or a span in the slowest list.
+// row is a step or a span in the slowest list: what its command used, when it ran one, and what
+// its machine did meanwhile, when it was sampled.
 type row struct {
-	Name string
-	Lane string
-	Took time.Duration
+	Name    string
+	Lane    string
+	Took    time.Duration
+	Usage   *ghatrace.Usage
+	Machine map[string]float64
+}
+
+// writeSlowest writes rows as a table, with a column for what a command used when one of them
+// says, and three for the machine when one of them was sampled.
+func writeSlowest(b *strings.Builder, rows []row) {
+	usage := slices.ContainsFunc(rows, func(r row) bool { return r.Usage != nil })
+	machine := slices.ContainsFunc(rows, func(r row) bool { return r.Machine != nil })
+	head := []string{"slowest", "job", "took"}
+	if usage {
+		head = append(head, "CPU")
+	}
+	if machine {
+		head = append(head, "CPUs busy", "stalled on CPU, IO, memory", "disk")
+	}
+	fmt.Fprintf(b, "| %s |\n|%s\n", strings.Join(head, " | "), strings.Repeat("---|", len(head)))
+	for _, r := range rows {
+		cells := []string{cell(r.Name), cell(r.Lane), short(r.Took)}
+		if usage {
+			cpu := "-"
+			if r.Usage != nil {
+				cpu = short(r.Usage.CPU())
+			}
+			cells = append(cells, cpu)
+		}
+		if machine {
+			m := loadCells(r.Machine)
+			cells = append(cells, m[:]...)
+		}
+		fmt.Fprintf(b, "| %s |\n", strings.Join(cells, " | "))
+	}
 }
 
 // slowestOf is the n longest steps and spans of t that hold no other, the longest first: what
@@ -105,7 +137,7 @@ func slowestOf(t Trace, n int) []row {
 			if s.Kind == "span" {
 				name += " (span)"
 			}
-			rows = append(rows, row{Name: name, Lane: l.Name, Took: s.Duration()})
+			rows = append(rows, row{Name: name, Lane: l.Name, Took: s.Duration(), Usage: s.Usage, Machine: over(l.Load, s.Start, s.End)})
 		}
 	}
 	slices.SortStableFunc(rows, func(a, b row) int { return cmp.Compare(b.Took, a.Took) })

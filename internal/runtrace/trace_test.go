@@ -61,7 +61,7 @@ func names(t runtrace.Trace, critical bool) []string {
 }
 
 func TestBuildOrdersLanesAndFindsTheCriticalPath(t *testing.T) {
-	tr := runtrace.Build(runOf(), nil)
+	tr := runtrace.Build(runOf(), nil, nil)
 	assert.Equal(t, []string{"plan", "lane mid", "lane fast", "lane slow", "gate"}, names(tr, false), "by queued, then started")
 	assert.Equal(t, []string{"plan", "lane slow", "gate"}, names(tr, true))
 	assert.Equal(t, []string{"build", "deploy"}, tr.Skipped)
@@ -78,7 +78,7 @@ func TestCriticalPathStopsAtAWaitNoJobExplains(t *testing.T) {
 		170: {"deploy"},
 	} {
 		r := runtrace.Run{Jobs: []proven.Job{job("build", "r1", 0, 1, 50), job("deploy", "r2", queued, queued+1, queued+30)}}
-		assert.Equal(t, want, names(runtrace.Build(r, nil), true), "deploy queued at %d", queued)
+		assert.Equal(t, want, names(runtrace.Build(r, nil, nil), true), "deploy queued at %d", queued)
 	}
 }
 
@@ -86,7 +86,7 @@ func TestAJobThatDidNotSucceedIsFailed(t *testing.T) {
 	for conclusion, failed := range map[string]bool{"success": false, "failure": true, "cancelled": true, "timed_out": true} {
 		j := job("lane", "r1", 0, 1, 2)
 		j.Conclusion = conclusion
-		tr := runtrace.Build(runtrace.Run{Jobs: []proven.Job{j}}, nil)
+		tr := runtrace.Build(runtrace.Run{Jobs: []proven.Job{j}}, nil, nil)
 		assert.Equal(t, failed, tr.Lanes[0].Job.Failed, conclusion)
 	}
 }
@@ -96,7 +96,7 @@ func TestAJobStillRunningEndsNow(t *testing.T) {
 	j.CompletedAt, j.Status, j.Conclusion = time.Time{}, "in_progress", ""
 	j.Steps[0].CompletedAt = time.Time{}
 	j.Steps = append(j.Steps, proven.Step{Name: "pending"})
-	tr := runtrace.Build(runtrace.Run{Now: at(9), Jobs: []proven.Job{j}}, nil)
+	tr := runtrace.Build(runtrace.Run{Now: at(9), Jobs: []proven.Job{j}}, nil, nil)
 	require.Len(t, tr.Lanes, 1)
 	assert.Equal(t, at(9), tr.Lanes[0].Job.End)
 	require.Len(t, tr.Lanes[0].Job.Children, 1, "a step that has not started is not drawn")
@@ -122,7 +122,7 @@ func TestSpansGoUnderTheStepTheyRanInAndNest(t *testing.T) {
 		// Ends past A's floored end of 120, as a span that ran to A's real end does.
 		span("tail", "r3", 119.5, 120.6, 0),
 	}
-	tr := runtrace.Build(runOf(), spans)
+	tr := runtrace.Build(runOf(), spans, nil)
 	slow := tr.Lanes[3]
 	require.Equal(t, "lane slow", slow.Name)
 	assert.Len(t, slow.Job.Children, 2, "every span is under a step, none beside them")
@@ -162,7 +162,7 @@ func TestASpanGoesUnderTheParentItNames(t *testing.T) {
 		// Named, but no span of that name holds it: time decides, and only test holds it.
 		part("stray", "nothing", 271, 275),
 	}
-	tr := runtrace.Build(runOf(), spans)
+	tr := runtrace.Build(runOf(), spans, nil)
 	stepB := tr.Lanes[3].Job.Children[1]
 	tree := map[string][]string{}
 	var walk func(s runtrace.Slice)
@@ -241,7 +241,7 @@ func TestPerfettoTracksHoldOnlyNestedOrDisjointSlices(t *testing.T) {
 	}
 	r := runOf()
 	r.Jobs[1].CreatedAt = r.Jobs[1].StartedAt // plan did not wait
-	p := perfettoOf(t, runtrace.Build(r, spans))
+	p := perfettoOf(t, runtrace.Build(r, spans, nil))
 	processes, spanNames, waits, tracks, trackNames := p.processes, p.spanNames, p.waits, p.tracks, p.trackNames
 	assert.Equal(t, []string{"plan (critical path)", "lane mid", "lane fast", "lane slow (critical path)", "gate (critical path)"}, processes)
 	assert.ElementsMatch(t, []string{"up 50s", "build 29s", "push 20s", "✗ test B 2m50s", "test A 2m50s", "test C 10s"}, spanNames)
@@ -273,7 +273,7 @@ func TestSummary(t *testing.T) {
 	r := runOf()
 	r.Jobs[2].Name = "lane: fast #1; x|y"
 	var buf bytes.Buffer
-	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(r, nil), "see the artifacts"))
+	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(r, nil, nil), "see the artifacts"))
 	out := buf.String()
 	assert.Contains(t, out, "| **5m10s** | 9m07s (11 job-minutes rounded up) | 32s | 20s (lane slow) |")
 	assert.Contains(t, out, "**Critical path**: plan (38s, waited 2s) → lane slow (4m00s, waited 20s) → gate (5s, waited 4s)")
@@ -287,14 +287,14 @@ func TestSummaryOfOneJobAndOfNone(t *testing.T) {
 	// Queued as it started, and done in the same second.
 	one := runtrace.Run{Workflow: "Lint", Jobs: []proven.Job{job("lint", "r1", 5, 5, 5), {Name: "fix", Conclusion: "skipped"}}}
 	var buf bytes.Buffer
-	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(one, nil), ""))
+	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(one, nil, nil), ""))
 	out := buf.String()
 	assert.Contains(t, out, "**Critical path**: lint (0s, waited 0s)\n\n| slowest | job | took |\n")
 	assert.Contains(t, out, "| stepA | lint | 0s |")
 	assert.Contains(t, out, "Did not run: fix.")
 
 	buf.Reset()
-	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(runtrace.Run{Workflow: "Empty"}, nil), ""))
+	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(runtrace.Run{Workflow: "Empty"}, nil, nil), ""))
 	assert.Equal(t, "## Empty: where the time went\n\n| wall | on runners | waiting for runners | longest wait |\n|---|---|---|---|\n| **0s** | 0s (0 job-minutes rounded up) | 0s | - |\n\n", buf.String())
 }
 
@@ -302,7 +302,7 @@ func TestHTMLPageEscapesWhatAJobIsCalled(t *testing.T) {
 	r := runOf()
 	r.Jobs[1].Name = "</script><script>alert(1)</script>"
 	var buf bytes.Buffer
-	require.NoError(t, runtrace.WriteHTML(&buf, runtrace.Build(r, nil)))
+	require.NoError(t, runtrace.WriteHTML(&buf, runtrace.Build(r, nil, nil)))
 	page := buf.String()
 	assert.Equal(t, 1, strings.Count(page, "<script>"), "only the page's own script")
 	assert.Contains(t, page, `"wall":310000`)
@@ -339,7 +339,7 @@ func TestACompositeActionsStepsComeFromTheLog(t *testing.T) {
 		stamp(100) + " ##[start-action display=Never ends;id=__self.__never]",
 		stamp(101) + " ##[end-action id=__self.__unknown;outcome=success;conclusion=success;duration_ms=1]",
 	}, "\n")
-	tr := runtrace.Build(runtrace.Run{Jobs: []proven.Job{j}, Logs: map[int64]string{7: log}}, nil)
+	tr := runtrace.Build(runtrace.Run{Jobs: []proven.Job{j}, Logs: map[int64]string{7: log}}, nil, nil)
 	setup, lane := tr.Lanes[0].Job.Children[0], tr.Lanes[0].Job.Children[1]
 	tree := map[string][]string{}
 	var walk func(s runtrace.Slice)
