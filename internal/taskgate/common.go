@@ -522,13 +522,50 @@ func releasing(f flow, t *taskfiles) string {
 // of a release - and a release said to be made by a file that is not there.
 func release(inc *include, at string, listed map[string]bool, flows []flow, t *taskfiles) ([]Uncommon, string) {
 	state := map[string]string{}
+	var unknown []Uncommon
 	if m := inc.Release; m != nil && m.Kind == yaml.MappingNode {
 		if m = field(m, "map"); m != nil && m.Kind == yaml.MappingNode {
 			for i := 0; i+1 < len(m.Content); i += 2 {
-				state[m.Content[i].Value] = strings.TrimSpace(m.Content[i+1].Value)
+				k, v := m.Content[i], m.Content[i+1]
+				state[k.Value] = strings.TrimSpace(v.Value)
+				if u, ok := releaseKey(inc.File, k, v); !ok {
+					unknown = append(unknown, u)
+				}
 			}
 		}
 	}
+	found, said := stated(inc, at, state, listed, flows, t)
+	return append(unknown, found...), said
+}
+
+// releaseKeys are the keys of RELEASE the release task reads.
+var releaseKeys = []string{"proof", "jobs", "files", "elsewhere", "none"}
+
+// releaseKey is a key of RELEASE's map that the release task reads and that has a value, or what
+// is wrong with it. Either is a statement that says less than its author meant, which neither the
+// task nor the rest of the gate notices: a misspelt key is read by nothing, and in a flow map an
+// unquoted comma ends the value, the rest of the sentence becoming a key with no value.
+func releaseKey(file string, k, v *yaml.Node) (Uncommon, bool) {
+	known := slices.Contains(releaseKeys, k.Value)
+	empty := v.Kind == yaml.ScalarNode && strings.TrimSpace(v.Value) == ""
+	if known && !empty {
+		return Uncommon{}, true
+	}
+	var what string
+	switch {
+	case !known && empty:
+		what = "is not one of " + strings.Join(releaseKeys, ", ") + " and has no value"
+	case !known:
+		what = "is not one of " + strings.Join(releaseKeys, ", ")
+	default:
+		what = "has no value"
+	}
+	return Uncommon{"RELEASE/key/" + k.Value, file + ":" + strconv.Itoa(k.Line), "RELEASE's key " + strconv.Quote(k.Value) + " " + what +
+		", so it says nothing the release task reads. A value that holds a comma is quoted (`{none: \"a, b\"}`): unquoted, the comma ends it and the rest is a key of its own"}, false
+}
+
+// stated is release's reading of the map's known keys.
+func stated(inc *include, at string, state map[string]string, listed map[string]bool, flows []flow, t *taskfiles) ([]Uncommon, string) {
 	const forms = "`RELEASE: {map: {proof: <workflow>, jobs: <jobs>}}` where `go tool task release` cuts the releases, " +
 		"`{map: {elsewhere: <workflow>}}` where a workflow of the repository's own does, `{map: {none: <why>}}` where it does not release"
 	switch {
