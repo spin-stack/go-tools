@@ -106,13 +106,16 @@ func TestASlowTestIsAllowedItsOwnTime(t *testing.T) {
 // A run is allowed four times what its tests took with nothing broken, and ten seconds: the tests
 // it asks, or every one where it asks them all, as an importer's run took them together where that
 // was measured; each test four times its own. -timeout where one of them was not measured, and
-// never more. A package is the same by its directory however it is named.
+// never more, and no bound at all where -timeout is 0. A package is the same by its directory
+// however it is named.
 func TestARunIsAllowedAMultipleOfWhatItsTestsTook(t *testing.T) {
 	unbroken := NewUnbroken()
 	unbroken.recordTests("testdata", map[string]time.Duration{"TestA": time.Second, "TestB": 2 * time.Second})
 	importer := t.TempDir()
 	unbroken.recordTests(importer, map[string]time.Duration{"TestA": time.Second})
 	unbroken.recordWhole(importer, 30*time.Second)
+	examples := t.TempDir()
+	unbroken.recordTests(examples, map[string]time.Duration{})
 	measured, err := filepath.Abs("testdata")
 	if err != nil {
 		t.Fatal(err)
@@ -131,6 +134,9 @@ func TestARunIsAllowedAMultipleOfWhatItsTestsTook(t *testing.T) {
 		{"an importer's tests it asks", importer, []string{"TestA"}, 5 * time.Minute, 14 * time.Second},
 		{"a package not measured", t.TempDir(), nil, 5 * time.Minute, 5 * time.Minute},
 		{"past -timeout", "testdata", nil, 15 * time.Second, 15 * time.Second},
+		{"no -timeout", "testdata", nil, 0, 22 * time.Second},
+		{"not measured, and no -timeout", t.TempDir(), nil, 0, 0},
+		{"a package of examples alone, which no test measures", examples, nil, 5 * time.Minute, 5 * time.Minute},
 	} {
 		if got := unbroken.allowance(c.dir, c.only, c.ceiling); got.Run != c.want {
 			t.Errorf("%s: allowed %s, want %s", c.name, got.Run, c.want)

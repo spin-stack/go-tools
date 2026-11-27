@@ -215,7 +215,10 @@ func brokenImporters(ctx context.Context, dirs []string, importers map[string][]
 			// mutate-exempt: how much of the failure is shown, not whether it is.
 			fmt.Fprintf(os.Stderr, "  (%s fails with nothing broken:)\n%s\n", importer, tail([]byte(said.String()), 20))
 			failed := failedTests(said.String())
-			if len(failed) == 0 {
+			switch {
+			case answer.Outcome == TimedOut:
+				failed = append(failed, fmt.Sprintf("its tests, which ran past %s", answer.Allowed))
+			case len(failed) == 0:
 				failed = []string{"its test binary, which named no test"}
 			}
 			for _, test := range failed {

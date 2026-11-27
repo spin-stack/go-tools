@@ -3,6 +3,7 @@ package mutate
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -90,6 +91,9 @@ func bounded(what string, cmd *exec.Cmd, tap io.Writer) (out []byte, exceeded bo
 		stopOver(cmd.Process, -1) // mutate-exempt: any limit below zero is under what every tree holds
 		return nil
 	}
+	// A process that left its parent's tree before the scan still holds the output open, and Wait
+	// would wait for it for ever.
+	cmd.WaitDelay = time.Second
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		account(what, cmd, time.Since(started))
@@ -107,6 +111,9 @@ func bounded(what string, cmd *exec.Cmd, tap io.Writer) (out []byte, exceeded bo
 	close(done)
 	exceeded = <-stopped
 	account(what, cmd, time.Since(started))
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil // cmd itself succeeded; what it left holding the output is not its answer
+	}
 	return buf.Bytes(), exceeded, err
 }
 
