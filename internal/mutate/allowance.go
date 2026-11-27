@@ -20,9 +20,9 @@ import (
 // of what it took with nothing broken, as this run measured it, and a margin: the rule mutation
 // tools keep (PIT's factor × normal + constant). -timeout stays what no run may pass.
 //
-// Each test as well as the run: an edit asks every test of its package where no coverage block
-// holds its line - since Go 1.27, every case of a switch - and a package's tests together take
-// minutes, which a multiple of is no stop at all for the one test that hangs.
+// Each test as well as the run: an edit asks every test of an importer, and of its own package
+// where coverage cannot say which reach it, and a package's tests together take minutes, which a
+// multiple of is no stop at all for the one test that hangs.
 // slack is how many times its unbroken time a test, or a run, may take with an edit in.
 const slack = 4
 

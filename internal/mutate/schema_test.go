@@ -175,7 +175,7 @@ func TestAnEditInTheSchemaIsAnsweredAsItIsAlone(t *testing.T) {
 	killed := 0
 	for _, m := range s.Built {
 		inSchema, said := askTests(t, s.Binary, dir, m.ID, "2m", nil)
-		reaching, _ := askTests(t, s.Binary, dir, m.ID, "2m", covered.Reaching(m.File, m.Line))
+		reaching, _ := askTests(t, s.Binary, dir, m.ID, "2m", covered.Reaching(m))
 		assert.Equal(t, inSchema, reaching, "%s: the tests that reach its line in the file answer otherwise in the schema", m)
 		nobody, _ := askTests(t, s.Binary, dir, m.ID, "2m", []string{"TestNothingIsCalledThis"})
 		assert.Equal(t, mutate.Survived, nobody, "%s: tests that were not named ran", m)

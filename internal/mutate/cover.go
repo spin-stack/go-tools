@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,10 +17,10 @@ import (
 	"time"
 )
 
-// Coverage is which of a package's own tests execute which lines of its files. A mutation is put
-// to the tests that reach its line and no others: running the whole package for every edit was
-// most of what this gate cost - a package of database tests is seconds a run, and a change is
-// hundreds of edits - and a test that never executes the line cannot refuse it.
+// Coverage is which of a package's own tests execute which code of its files. A mutation is put
+// to the tests that run it and no others: running the whole package for every edit was most of
+// what this gate cost - a package of database tests is seconds a run, and a change is hundreds of
+// edits - and a test that never executes the edit cannot refuse it.
 type Coverage struct {
 	// reached is, by file base name, each test's executed spans in that file.
 	reached map[string]map[string][]span
@@ -31,19 +32,32 @@ type Coverage struct {
 	took map[string]time.Duration
 }
 
-type span struct{ from, to int }
+// place is a line and a column of a file, both from 1 and the column in bytes, as a coverage
+// profile names where a block starts and ends.
+type place struct{ line, col int }
 
-// Reaching is the tests that execute line of file, which is in the package this was made for.
-// Empty is none: nothing in the package's own tests goes there. Nil is not known - a line no
-// block of the profile holds, which a switch's case expressions are - and Run then asks every
-// test.
-func (c *Coverage) Reaching(file string, line int) []string {
-	if !inAny(c.blocks[filepath.Base(file)], line) {
+func (p place) before(q place) bool { return p.line < q.line || p.line == q.line && p.col < q.col }
+
+// span is one block of a profile: from where it starts up to where it ends, which is not in it.
+type span struct{ from, to place }
+
+// Reaching is the tests that run m, an edit planned in the package this was made for: those
+// that execute a block holding the first of m's places one holds (Mutation.reach). Coverage
+// counts no case of a switch or a select in a block, nor what follows a func literal in its
+// statement; for those, that is the statement around the edit, since a test that evaluates a case
+// has reached its switch. Not the case's own block, which counts the tests that chose the case
+// and leaves out one that an edit makes choose it. Empty is none: nothing in the package's own
+// tests goes there. Nil is not known - no block holds any of the places, or m was not planned -
+// and Run then asks every test.
+func (c *Coverage) Reaching(m Mutation) []string {
+	file := filepath.Base(m.File)
+	at := slices.IndexFunc(m.reach, func(p place) bool { return inAny(c.blocks[file], p) })
+	if at < 0 {
 		return nil
 	}
 	out := []string{}
-	for test, spans := range c.reached[filepath.Base(file)] {
-		if inAny(spans, line) && !c.failing[test] {
+	for test, spans := range c.reached[file] {
+		if inAny(spans, m.reach[at]) && !c.failing[test] {
 			out = append(out, test)
 		}
 	}
@@ -51,9 +65,9 @@ func (c *Coverage) Reaching(file string, line int) []string {
 	return out
 }
 
-func inAny(spans []span, line int) bool {
+func inAny(spans []span, p place) bool {
 	for _, s := range spans {
-		if s.from <= line && line <= s.to {
+		if !p.before(s.from) && p.before(s.to) {
 			return true
 		}
 	}
@@ -99,7 +113,7 @@ func Cover(ctx context.Context, dir, timeout string, slots chan *Tree) (*Coverag
 	}
 	var tests []string
 	for name := range strings.FieldsSeq(string(listed)) {
-		if strings.HasPrefix(name, "Test") {
+		if runByDefault(name) {
 			tests = append(tests, name)
 		}
 	}
@@ -186,6 +200,13 @@ func Cover(ctx context.Context, dir, timeout string, slots chan *Tree) (*Coverag
 	return c, nil
 }
 
+// runByDefault is whether a run of a test binary with no flag but -test.run runs what -test.list
+// names: a test, a fuzz target's seeds, an example. One left out of Cover is asked about no edit
+// that coverage names tests for. A benchmark runs only under -test.bench.
+func runByDefault(name string) bool {
+	return strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Fuzz") || strings.HasPrefix(name, "Example")
+}
+
 // tail is the last n lines of out.
 func tail(out []byte, n int) string {
 	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
@@ -215,9 +236,9 @@ func readProfile(path, prefix string) (executed, all map[string][]span, err erro
 		if !ok {
 			continue
 		}
-		a, errA := strconv.Atoi(strings.Split(from, ".")[0])
-		b, errB := strconv.Atoi(strings.Split(to, ".")[0])
-		if errA != nil || errB != nil {
+		a, okA := placeIn(from)
+		b, okB := placeIn(to)
+		if !okA || !okB {
 			continue
 		}
 		all[name] = append(all[name], span{a, b})
@@ -226,4 +247,12 @@ func readProfile(path, prefix string) (executed, all map[string][]span, err erro
 		}
 	}
 	return executed, all, lines.Err()
+}
+
+// placeIn is the place a profile writes as line.column.
+func placeIn(s string) (place, bool) {
+	line, col, _ := strings.Cut(s, ".")
+	l, errL := strconv.Atoi(line)
+	c, errC := strconv.Atoi(col)
+	return place{l, c}, errL == nil && errC == nil
 }

@@ -69,7 +69,11 @@ func TestEveryTestProcessIsHeldToItsShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.Reaching(filepath.Join(dir, "code.go"), 4); !slices.Equal(got, []string{"TestHeldToOneCore"}) {
+	plan, err := Plan(filepath.Join(dir, "code.go"), nil)
+	if err != nil || len(plan) != 1 {
+		t.Fatalf("the plan of One: %v, %v", plan, err)
+	}
+	if got := c.Reaching(plan[0]); !slices.Equal(got, []string{"TestHeldToOneCore"}) {
 		t.Errorf("coverage ran its test on every core: the line is reached by %q", got)
 	}
 

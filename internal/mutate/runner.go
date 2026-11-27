@@ -338,7 +338,7 @@ func stoppedEarly(ctx context.Context) error {
 	return fmt.Errorf("mutate: stopped before every edit was asked: %w", ctx.Err())
 }
 
-// built puts m, which is in s's binary, to the package's tests that reach its line, then to each
+// built puts m, which is in s's binary, to the package's tests that reach it, then to each
 // importer's tests, built once with the same schema: a survivor pays for the second.
 func (p pkgRun) built(ctx context.Context, m Mutation, s *Schema, c *Coverage) (Answer, error) {
 	if s.Binary == "" && len(p.importers) == 0 {
@@ -352,7 +352,7 @@ func (p pkgRun) built(ctx context.Context, m Mutation, s *Schema, c *Coverage) (
 	if s.Binary != "" {
 		var reaching []string
 		if c != nil {
-			reaching = c.Reaching(m.File, m.Line)
+			reaching = c.Reaching(m)
 		}
 		if reaching == nil || len(reaching) > 0 {
 			if answer, err := ask(s.Binary, p.dir, reaching); err != nil || answer.Outcome != Survived {
@@ -410,7 +410,7 @@ func (b *builds) importer(ctx context.Context, dir, importer, overlay string) (s
 }
 
 // runAlone builds the mutation in through an overlay under dir, and asks it as asked says, of the
-// package's tests that reach its line by c and then its importers'. The file itself is never
+// package's tests that reach it by c and then its importers'. The file itself is never
 // written.
 func runAlone(ctx context.Context, m Mutation, dir string, asked Asked, c *Coverage, out io.Writer) (Answer, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -422,7 +422,7 @@ func runAlone(ctx context.Context, m Mutation, dir string, asked Asked, c *Cover
 	}
 	asked.Overlay = overlay
 	if c != nil {
-		asked.Reaching = c.Reaching(m.File, m.Line)
+		asked.Reaching = c.Reaching(m)
 	}
 	started := time.Now()
 	answer, err := Run(ctx, m, asked)

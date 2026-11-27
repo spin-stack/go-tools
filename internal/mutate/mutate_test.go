@@ -445,6 +445,20 @@ func refuses(t *testing.T) string {
 	return dir
 }
 
+// editOn is the first edit Plan makes on line of file.
+func editOn(t *testing.T, file string, line int) mutate.Mutation {
+	t.Helper()
+	plan, err := mutate.Plan(file, nil)
+	require.NoError(t, err)
+	for _, m := range plan {
+		if m.Line == line {
+			return m
+		}
+	}
+	t.Fatalf("no edit on line %d: %v", line, whats(plan))
+	return mutate.Mutation{}
+}
+
 // doubling is the edit that breaks Double: its + made a -.
 func doubling(t *testing.T, dir string) mutate.Mutation {
 	t.Helper()
@@ -566,9 +580,10 @@ func TestAnEditIsPutToTheTestsThatReachIt(t *testing.T) {
 	c, err := mutate.Cover(t.Context(), dir, "2m", mutate.Slots(t.TempDir(), 2))
 	require.NoError(t, err)
 	require.NotNil(t, c)
-	assert.Equal(t, []string{"TestDouble"}, c.Reaching(filepath.Join(dir, "code.go"), 4))
-	assert.Equal(t, []string{"TestHalf"}, c.Reaching(filepath.Join(dir, "code.go"), 8))
-	assert.Equal(t, []string{}, c.Reaching(filepath.Join(dir, "code.go"), 16), "a line nothing executes was reached")
+	file := filepath.Join(dir, "code.go")
+	assert.Equal(t, []string{"TestDouble"}, c.Reaching(editOn(t, file, 4)))
+	assert.Equal(t, []string{"TestHalf"}, c.Reaching(editOn(t, file, 8)))
+	assert.Equal(t, []string{}, c.Reaching(editOn(t, file, 16)), "a line nothing executes was reached")
 
 	m := doubling(t, dir)
 	overlay, err := mutate.Overlay(m, t.TempDir())
@@ -590,6 +605,276 @@ func TestAnEditIsPutToTheTestsThatReachIt(t *testing.T) {
 	outcome, out = runTests(t, m, mutate.Asked{Overlay: overlay, Timeout: "2m", Reaching: []string{}})
 	assert.Equal(t, mutate.Survived, outcome)
 	assert.Empty(t, out, "the package's tests ran for a line none of them reaches")
+}
+
+// switches is a module of switches whose cases are edited - an expression switch's, a type
+// switch's, a select's, an empty case's, one in a func literal or a goroutine, one a goto reaches -
+// and a condition after a func literal. Every edit is refused by a test: the 0 of Sign's first
+// case, and each edit of Small, Pair, Offer, Odd and Run, only by a test that runs no body the
+// edit is over; Digit's only by a fuzz target's seed or an example.
+func switches(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod": "module example.com/switches\n\ngo 1.24\n",
+		"code.go": `package switches
+
+func Sign(n int) string {
+	switch {
+	case n < 0:
+		return "negative"
+	case n > 0:
+		return "positive"
+	}
+	return "zero"
+}
+
+func Small(n int) bool {
+	switch n {
+	case 10, 20:
+	default:
+		return false
+	}
+	return true
+}
+
+func Pair(v any) bool {
+	switch v.(type) {
+	case [2]int:
+		return true
+	}
+	return false
+}
+
+var offered []int
+
+func tried(n int) int {
+	offered = append(offered, n)
+	return n
+}
+
+func Offer(ch chan int, n int) bool {
+	select {
+	case ch <- tried(n + 1):
+		return true
+	default:
+		return false
+	}
+}
+
+func Odd(ns []int) []bool {
+	var out []bool
+	each := func(n int) {
+		switch {
+		case n%2 == 0:
+			out = append(out, false)
+		default:
+			out = append(out, true)
+		}
+	}
+	for _, n := range ns {
+		each(n)
+	}
+	return out
+}
+
+func Later(n int) string {
+	done := make(chan string, 1)
+	go func() {
+		switch {
+		case n > 5:
+			done <- "big"
+		default:
+			done <- "small"
+		}
+	}()
+	return <-done
+}
+
+func Run(each func(func()) error, f func()) bool {
+	if err := each(func() {
+		f()
+	}); err != nil {
+		return false
+	}
+	return true
+}
+
+func Digit(b byte) bool {
+	switch {
+	case b >= '0' && b <= '9':
+		return true
+	}
+	return false
+}
+
+func Jump(n int) string {
+	if n > 5 {
+		goto chosen
+	}
+	return "small"
+chosen:
+	switch {
+	case n > 7:
+		return "big"
+	}
+	return "middle"
+}
+`,
+		"code_test.go": `package switches
+
+import (
+	"errors"
+	"fmt"
+	"slices"
+	"testing"
+)
+
+func TestSignOfMinusOne(t *testing.T) {
+	if Sign(-1) != "negative" {
+		t.Fatal(Sign(-1))
+	}
+}
+
+func TestSignOfOne(t *testing.T) {
+	if Sign(1) != "positive" {
+		t.Fatal(Sign(1))
+	}
+}
+
+func TestSignOfZero(t *testing.T) {
+	if Sign(0) != "zero" {
+		t.Fatal(Sign(0))
+	}
+}
+
+func TestElevenIsNotSmall(t *testing.T) {
+	if Small(11) {
+		t.Fatal("small")
+	}
+}
+
+func TestTwentyOneIsNotSmall(t *testing.T) {
+	if Small(21) {
+		t.Fatal("small")
+	}
+}
+
+func TestThreeIsNoPair(t *testing.T) {
+	if Pair([3]int{}) {
+		t.Fatal("a pair")
+	}
+}
+
+func TestAFullChannelIsOfferedOneMore(t *testing.T) {
+	offered = nil
+	if Offer(make(chan int), 1) || !slices.Equal(offered, []int{2}) {
+		t.Fatal(offered)
+	}
+}
+
+func TestThreeIsOdd(t *testing.T) {
+	if got := Odd([]int{3}); !slices.Equal(got, []bool{true}) {
+		t.Fatal(got)
+	}
+}
+
+func TestLaterOfZero(t *testing.T) {
+	if Later(0) != "small" {
+		t.Fatal(Later(0))
+	}
+}
+
+func TestLaterOfSix(t *testing.T) {
+	if Later(6) != "big" {
+		t.Fatal(Later(6))
+	}
+}
+
+func TestEachThatCallsRunsF(t *testing.T) {
+	ran := false
+	Run(func(g func()) error { g(); return nil }, func() { ran = true })
+	if !ran {
+		t.Fatal("f did not run")
+	}
+}
+
+func TestEachThatFailsIsNoRun(t *testing.T) {
+	if Run(func(func()) error { return errors.New("no") }, nil) {
+		t.Fatal("a run")
+	}
+}
+
+func FuzzDigit(f *testing.F) {
+	f.Add(byte('5'))
+	f.Fuzz(func(t *testing.T, b byte) {
+		if Digit(b) != ('0' <= b && b <= '9') {
+			t.Fatal(b)
+		}
+	})
+}
+
+func ExampleDigit() {
+	fmt.Println(Digit('a'))
+	// Output: false
+}
+
+func TestJumpOfSix(t *testing.T) {
+	if Jump(6) != "middle" {
+		t.Fatal(Jump(6))
+	}
+}
+
+func TestJumpOfEight(t *testing.T) {
+	if Jump(8) != "big" {
+		t.Fatal(Jump(8))
+	}
+}
+`,
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	return dir
+}
+
+// An edit of what a case compares is asked of the tests that reach its switch, and of no other: a
+// test that evaluates the case has reached the switch, and the edit can make the case chosen where
+// it was not. Not only of the tests that ran the case's body, which leaves out the one that
+// refuses the edit, nor of every test of the package. So too a condition after a func literal,
+// which no block counts either; and in a function with a goto, which can enter a switch past the
+// block coverage counts it in, every test is asked.
+func TestAnEditOfACaseIsAskedOfTheTestsThatReachItsSwitch(t *testing.T) {
+	dir := switches(t)
+	plan, err := mutate.Plan(filepath.Join(dir, "code.go"), nil)
+	require.NoError(t, err)
+	require.Len(t, plan, 22, "the edits planned: %v", whats(plan))
+	for i := range plan {
+		plan[i].ID = i + 1
+	}
+
+	c, err := mutate.Cover(t.Context(), dir, "2m", mutate.Slots(t.TempDir(), 2))
+	require.NoError(t, err)
+	reach := map[string][]string{
+		"Sign":  {"TestSignOfMinusOne", "TestSignOfOne", "TestSignOfZero"},
+		"Small": {"TestElevenIsNotSmall", "TestTwentyOneIsNotSmall"},
+		"Pair":  {"TestThreeIsNoPair"},
+		"Offer": {"TestAFullChannelIsOfferedOneMore"},
+		"Odd":   {"TestThreeIsOdd"},
+		"Later": {"TestLaterOfSix", "TestLaterOfZero"},
+		"Run":   {"TestEachThatCallsRunsF", "TestEachThatFailsIsNoRun"},
+		"Digit": {"ExampleDigit", "FuzzDigit"},
+		// A goto to the switch skips the block coverage counts it in: every test is asked.
+		"Jump": nil,
+	}
+	for _, m := range plan {
+		assert.Equal(t, reach[m.Func], c.Reaching(m), "%s: the tests asked", m)
+	}
+
+	var said strings.Builder
+	tally, err := mutate.RunAll(t.Context(), plan, nil, "2m", 2, &said)
+	require.NoError(t, err)
+	assert.Empty(t, tally.Survived, "an edit a test refuses survived:\n%s", said.String())
+	assert.Equal(t, len(plan), tally.Killed, "%s", said.String())
 }
 
 // Who imports a package is asked of the whole module, from wherever this runs: the tests here run
