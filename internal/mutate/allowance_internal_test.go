@@ -53,7 +53,8 @@ func TestARunIsAllowedAMultipleOfWhatItsTestsTook(t *testing.T) {
 
 // A test is stopped once it runs past its own allowance, from when -test.v says it starts, and
 // only then: not once it has ended or paused to run beside the others, whatever runs after it.
-// What a binary says is read as lines, however it comes.
+// A fuzz target's seeds and an example are timed as a test is. What a binary says is read as
+// lines, however it comes.
 func TestATestIsStoppedPastItsOwnAllowance(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -79,11 +80,16 @@ func TestATestIsStoppedPastItsOwnAllowance(t *testing.T) {
 		{"a pause after what a test printed, ending in a space", []string{"=== RUN   TestSlow\n", "progress ", "=== PAUSE TestSlow\n"}, ""},
 		{"after an indented line", []string{"    said first\n=== RUN   TestSlow\n"}, "TestSlow"},
 		{"its newline in a write of its own", []string{"=== RUN   TestSlow", "\n"}, "TestSlow"},
+		{"a fuzz target's seed past the target's allowance", []string{"=== RUN   FuzzSlow\n=== RUN   FuzzSlow/seed#0\n"}, "FuzzSlow"},
+		{"a fuzz target's seeds ended in time", []string{"=== RUN   FuzzSlow\n=== RUN   FuzzSlow/seed#0\n--- PASS: FuzzSlow (0.00s)\n    --- PASS: FuzzSlow/seed#0 (0.00s)\n"}, ""},
+		{"an example past its allowance", []string{"=== RUN   Example_slow\n"}, "Example_slow"},
+		{"an example failed in time", []string{"=== RUN   Example_slow\n--- FAIL: Example_slow (0.00s)\ngot:\n"}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			stopped := make(chan struct{})
-			p := &pacer{each: map[string]time.Duration{"TestSlow": 50 * time.Millisecond}, stop: func() { close(stopped) }}
+			each := map[string]time.Duration{"TestSlow": 50 * time.Millisecond, "FuzzSlow": 50 * time.Millisecond, "Example_slow": 50 * time.Millisecond}
+			p := &pacer{each: each, stop: func() { close(stopped) }}
 			for _, piece := range c.said {
 				if _, err := p.Write([]byte(piece)); err != nil {
 					t.Fatal(err)

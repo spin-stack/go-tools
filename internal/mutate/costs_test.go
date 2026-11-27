@@ -58,8 +58,9 @@ func TestAProcessIsCountedUnderWhatItWasFor(t *testing.T) {
 }
 
 // A test's runs are added to its package's: the package asked, or, for a go test over several,
-// the one go test names after them. Subtests are their test's, and a line that only looks like
-// an end is not one, nor one that looks like go test's in the output of the package asked.
+// the one go test names after them. A fuzz target and an example are tests. Subtests are their
+// test's, and a line that only looks like an end is not one, nor one that looks like go test's in
+// the output of the package asked.
 func TestEachAskedTestIsCountedToItsPackage(t *testing.T) {
 	find := func(pkg, test string) TestCost {
 		for _, c := range TestCosts() {
@@ -71,6 +72,7 @@ func TestEachAskedTestIsCountedToItsPackage(t *testing.T) {
 	}
 	countTests("p/one", []byte("=== RUN   TestSlow\n    --- PASS: TestSlow/sub (0.50s)\n--- PASS: TestSlow (1.50s)\n--- FAIL: TestFast (0.25s)\nFAIL\n"))
 	countTests("p/one", []byte("--- PASS: TestSlow (2.00s)\r\nsaid: --- PASS: TestSlow (9.00s)\nok  \texample.com/printed\t0.1s\nPASS\n"))
+	countTests("p/one", []byte("--- PASS: FuzzSlow (0.75s)\n    --- PASS: FuzzSlow/seed#0 (0.75s)\n--- FAIL: Example_slow (0.50s)\ngot:\n"))
 	countTests("", []byte("--- PASS: TestA (1.00s)\nok  \texample.com/a\t1.2s\n--- FAIL: TestB (0.10s)\nFAIL\texample.com/b\t0.3s\n"))
 
 	if got := find("p/one", "TestSlow"); got.N != 2 || got.Took != 3500*time.Millisecond {
@@ -78,6 +80,12 @@ func TestEachAskedTestIsCountedToItsPackage(t *testing.T) {
 	}
 	if got := find("p/one", "TestFast"); got.N != 1 || got.Took != 250*time.Millisecond {
 		t.Errorf("TestFast: %+v", got)
+	}
+	if got := find("p/one", "FuzzSlow"); got.N != 1 || got.Took != 750*time.Millisecond {
+		t.Errorf("FuzzSlow: %+v", got)
+	}
+	if got := find("p/one", "Example_slow"); got.N != 1 || got.Took != 500*time.Millisecond {
+		t.Errorf("Example_slow: %+v", got)
 	}
 	if got := find("example.com/printed", "TestSlow"); got.N != 0 {
 		t.Errorf("a package's line a test printed took the test from the package asked: %+v", got)
