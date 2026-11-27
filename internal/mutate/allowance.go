@@ -127,13 +127,21 @@ var (
 )
 
 // framed is the test marker names in line, where the test binary said it: at the line's start, or
-// straight after what a test printed with no newline, which comes first. Never after a space or a
-// tab: a test's own output saying another binary's -test.v - a t.Log of a go test run inside it -
-// is indented, or follows its file and line.
-func framed(marker *regexp.Regexp, line string) string {
+// straight after what a test printed with no newline, which comes first. Never after indentation: a
+// test's own output saying another binary's -test.v - a t.Log of a go test run inside it - is
+// indented, or follows its file and line. A start also never follows text that ends in a space,
+// where a false one times a test that is not running. An end or a pause may, because the binary
+// appends it to a line a test left open with a trailing space, and a false one only stops timing
+// a test, which leaves the run's own bound.
+func framed(marker *regexp.Regexp, line string, afterSpace bool) string {
 	m := marker.FindStringSubmatchIndex(line)
-	if m == nil || m[0] > 0 && (line[m[0]-1] == ' ' || line[m[0]-1] == '\t') {
+	if m == nil {
 		return ""
+	}
+	if before := line[:m[0]]; before != "" {
+		if strings.Trim(before, " \t") == "" || !afterSpace && strings.ContainsRune(" \t", rune(before[len(before)-1])) {
+			return ""
+		}
 	}
 	return line[m[2]:m[3]]
 }
@@ -188,11 +196,11 @@ func (p *pacer) hold(b []byte) {
 }
 
 func (p *pacer) line(line string) {
-	if framed(testPause, line) != "" || framed(testOver, line) != "" {
+	if framed(testPause, line, true) != "" || framed(testOver, line, true) != "" {
 		p.running++
 		return
 	}
-	test := framed(testStart, line)
+	test := framed(testStart, line, false)
 	if test == "" {
 		return
 	}
