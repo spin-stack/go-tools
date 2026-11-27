@@ -176,3 +176,23 @@ func TestWhatAProcessSaysIsAnsweredAndTapped(t *testing.T) {
 		t.Errorf("with no tap, answered %q", out)
 	}
 }
+
+// A process that leaves a child holding its output is answered once it ends, not once the child
+// does: a test's server left running, which a stop of its tree does not find once it has left it.
+func TestAProcessIsAnsweredOnceItEndsWhatItLeftRunning(t *testing.T) {
+	t.Cleanup(func() { testCgroup = "" })
+	testCgroup = ""
+	pidFile := filepath.Join(t.TempDir(), "child")
+	started := time.Now()
+	out, _, err := bounded("a test", exec.CommandContext(t.Context(), "sh", "-c", `(sleep 30 & echo $! > "$0"); echo done`, pidFile), nil)
+	if pid, readErr := os.ReadFile(pidFile); readErr == nil {
+		if n, convErr := strconv.Atoi(strings.TrimSpace(string(pid))); convErr == nil {
+			if p, findErr := os.FindProcess(n); findErr == nil {
+				_ = p.Kill()
+			}
+		}
+	}
+	if took := time.Since(started); err != nil || string(out) != "done\n" || took > 10*time.Second {
+		t.Errorf("answered %q, %v after %s, waiting on what it left", out, err, took)
+	}
+}

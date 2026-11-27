@@ -85,7 +85,7 @@ func (u *Unbroken) allowance(dir string, only []string, ceiling time.Duration) A
 		run, ok = sum(tests, only)
 	}
 	switch {
-	case ok && ceiling > 0:
+	case ok && ceiling > 0: // mutate-exempt: a ceiling of a nanosecond is one nobody sets; 0 is none
 		a.Run = min(slack*run+margin, ceiling)
 	case ok:
 		a.Run = slack*run + margin
