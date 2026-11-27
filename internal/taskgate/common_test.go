@@ -185,7 +185,8 @@ func TestAGoToolsFromBeforeTheTasksIsAFinding(t *testing.T) {
 
 // A task of the repository's own whose name Task knows as a common one is found in the file that
 // writes it: the root's, or one an include names, under the include's namespace. Task's own
-// error for it names neither and stops every task.
+// error for it names neither and stops every task. An include that names no file, which Task
+// refuses, is not followed.
 func TestACommonNameOfTheRepositorysOwnIsFound(t *testing.T) {
 	got, _ := common(t, with(map[string]string{
 		"Taskfile.yml": taskfile(includeNone+
@@ -193,7 +194,8 @@ func TestACommonNameOfTheRepositorysOwnIsFound(t *testing.T) {
 			"  build:\n    taskfile: taskfiles/build\n    flatten: true\n"+
 			"  gone: {taskfile: taskfiles/gone.yml}\n"+
 			"  made: {taskfile: \"{{.DIR}}/x.yml\"}\n"+
-			"  empty: {taskfile: taskfiles/empty.yml}\n",
+			"  empty: {taskfile: taskfiles/empty.yml}\n"+
+			"  bare: {flatten: true}\n",
 			lint+"  versions:\n    cmds: [make versions]\n  release:check:\n    cmds: [make]\n"),
 		"taskfiles/lint.yml":  "version: '3'\nincludes:\n  again: {taskfile: lint.yml}\ntasks:\n  workflows:\n    cmds: [actionlint]\n  versions:\n    cmds: [make]\n",
 		"taskfiles/empty.yml": "# nothing yet\n",
@@ -201,7 +203,7 @@ func TestACommonNameOfTheRepositorysOwnIsFound(t *testing.T) {
 		"taskfiles/build/Taskfile.yml": "version: '3'\nincludes:\n  up: {taskfile: ../../Taskfile.yml}\ntasks:\n  bump:\n    cmds: [make]\n",
 	}))
 	assert.Equal(t, []string{"common:Taskfile.yml:versions", "common:taskfiles/build/Taskfile.yml:bump", "common:taskfiles/lint.yml:workflows"}, slices.Sorted(maps.Keys(got)))
-	assert.Equal(t, "Taskfile.yml:21: task versions is one of go-tools' common tasks, which the include defines: delete it, or rename it after what it does if it does something else "+
+	assert.Equal(t, "Taskfile.yml:22: task versions is one of go-tools' common tasks, which the include defines: delete it, or rename it after what it does if it does something else "+
 		"(with both Task refuses every task: `Found multiple tasks (versions)`)", got["common:Taskfile.yml:versions"])
 	assert.Equal(t, "taskfiles/lint.yml:5: task workflows is lint:workflows through the include `lint`, and lint:workflows is one of go-tools' common tasks: rename it in taskfiles/lint.yml, "+
 		"after what it does (with both Task refuses every task: `Found multiple tasks (lint:workflows) included by \"lint\"\"`)", got["common:taskfiles/lint.yml:workflows"])
