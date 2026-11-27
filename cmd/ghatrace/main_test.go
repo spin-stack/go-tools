@@ -91,10 +91,11 @@ func TestRunWritesTheSummaryAndBothFiles(t *testing.T) {
 	t.Setenv("GITHUB_STEP_SUMMARY", summary)
 	t.Setenv("GITHUB_SERVER_URL", "https://github.example")
 	out := filepath.Join(dir, "out")
-	// Spans from a directory too: a .jsonl file anywhere under it, and nothing else.
+	// Spans from a directory too: a .jsonl file anywhere under it, and nothing else - a directory
+	// named as one is a directory.
 	local := filepath.Join(dir, "spans")
-	require.NoError(t, os.MkdirAll(filepath.Join(local, "lane"), 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(local, "lane", "s.jsonl"), []byte(`{"name": "teardown", "runner": "r2", "start": "2026-11-09T14:04:00Z", "end": "2026-11-09T14:04:40Z"}`+"\n"+
+	require.NoError(t, os.MkdirAll(filepath.Join(local, "lane.jsonl"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(local, "lane.jsonl", "s.jsonl"), []byte(`{"name": "teardown", "runner": "r2", "start": "2026-11-09T14:04:00Z", "end": "2026-11-09T14:04:40Z"}`+"\n"+
 		// The lane's machine, sampled twice during teardown: one of its two CPUs busy.
 		`{"sample": {"runner": "r2", "at": "2026-11-09T14:04:10Z", "cpu": {"cpus": 2, "idle": 500}}}`+"\n"+
 		`{"sample": {"runner": "r2", "at": "2026-11-09T14:04:20Z", "cpu": {"cpus": 2, "user": 1000, "idle": 1500}}}`+"\n"), 0o600))

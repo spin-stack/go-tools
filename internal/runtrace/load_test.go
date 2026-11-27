@@ -96,19 +96,22 @@ func TestASeriesIsWhatBothSamplesHave(t *testing.T) {
 		{At: at(101), CPU: cpu(110, 220, 330, 15, 35, 1100, 540, 130)},
 		// iowait went back by 100: 150 ticks, 50 of them busy.
 		{At: at(102), CPU: cpu(160, 220, 330, 15, 35, 1200, 440, 130)},
-		{At: at(103), CPU: cpu(160, 220, 330, 15, 35, 1200, 440, 130), Pressure: stalled(0)},
-		{At: at(104), Pressure: stalled(1_000_000)},
+		// One tick, idle.
+		{At: at(103), CPU: cpu(160, 220, 330, 15, 35, 1201, 440, 130)},
+		{At: at(104), CPU: cpu(160, 220, 330, 15, 35, 1201, 440, 130), Pressure: stalled(0)},
+		{At: at(105), Pressure: stalled(1_000_000)},
 		// 1.5 s stalled in a second: a moment between the time and the read.
-		{At: at(105), Pressure: stalled(2_500_000)},
+		{At: at(106), Pressure: stalled(2_500_000)},
 	}
 	for i := range samples {
 		samples[i].Runner = "r3"
 	}
 	ls := runtrace.Build(runOf(), nil, samples).Lanes[3].Load
-	require.Len(t, ls, 5)
+	require.Len(t, ls, 6)
 	want := []map[string]float64{
 		{"cpus": 2, "busy": 100 * 80.0 / 300, "iowait": 100 * 40.0 / 300, "steal": 100 * 80.0 / 300},
 		{"cpus": 2, "busy": 100 * 50.0 / 150, "iowait": 0, "steal": 0},
+		{"cpus": 2, "busy": 0, "iowait": 0, "steal": 0},
 		{"cpus": 2},
 		{"memory some": 100, "cpu some": 0, "io some": 0, "io full": 0, "memory full": 0},
 		{"memory some": 100, "cpu some": 0, "io some": 0, "io full": 0, "memory full": 0},
@@ -229,4 +232,14 @@ func countersOf(t *testing.T, tr runtrace.Trace) map[string][]int64 {
 		}
 	}
 	return out
+}
+
+// CPUs busy is a share of all CPUs' time said as a number of them: half of 64 is 32.
+func TestCPUsBusyIsANumberOfCPUs(t *testing.T) {
+	sample := func(s int, user, idle uint64) ghatrace.Sample {
+		return ghatrace.Sample{Runner: "r3", At: at(s), CPU: &ghatrace.CPU{CPUs: 64, User: user, Idle: idle}}
+	}
+	var buf bytes.Buffer
+	require.NoError(t, runtrace.WriteSummary(&buf, runtrace.Build(runOf(), nil, []ghatrace.Sample{sample(60, 0, 0), sample(120, 192_000, 192_000)}), ""))
+	assert.Contains(t, buf.String(), "| stepA | lane slow | 1m00s | 32.0 of 64 | - | - |\n")
 }
