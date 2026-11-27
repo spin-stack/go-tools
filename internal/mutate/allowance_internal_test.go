@@ -53,8 +53,9 @@ func TestARunIsAllowedAMultipleOfWhatItsTestsTook(t *testing.T) {
 
 // A test is stopped once it runs past its own allowance, from when -test.v says it starts, and
 // only then: not once it has ended or paused to run beside the others, whatever runs after it.
-// A fuzz target's seeds and an example are timed as a test is. What a binary says is read as
-// lines, however it comes.
+// A fuzz target's seeds and an example are timed as a test is. An end that cannot be told from an
+// echo is read by what only the binary says next. What a binary says is read as lines, however it
+// comes.
 func TestATestIsStoppedPastItsOwnAllowance(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -72,6 +73,11 @@ func TestATestIsStoppedPastItsOwnAllowance(t *testing.T) {
 		{"a start a test's output echoes, indented", []string{"=== RUN   TestOuter\n        === RUN   TestSlow\n"}, ""},
 		{"a start a test logs, after its file and line", []string{"=== RUN   TestOuter\n    outer_test.go:12: === RUN   TestSlow\n"}, ""},
 		{"an end a test's output echoes", []string{"=== RUN   TestSlow\n        --- PASS: TestSlow (0.00s)\n"}, "TestSlow"},
+		{"an end after only spaces it printed, then the run's verdict", []string{"=== RUN   TestSlow\n", "  ", "--- PASS: TestSlow (0.00s)\n", "PASS\n"}, ""},
+		{"an end after only a tab it printed, then a failed run's verdict", []string{"=== RUN   TestSlow\n\t--- FAIL: TestSlow (0.00s)\nFAIL\n"}, ""},
+		{"an end after only spaces it printed, then a paused test let go", []string{"=== RUN   TestSlow\n  --- PASS: TestSlow (0.00s)\n=== CONT  TestOther\n"}, ""},
+		{"a verdict a test's output echoes", []string{"=== RUN   TestSlow\n        PASS\n"}, "TestSlow"},
+		{"one of its own subtests let go", []string{"=== RUN   TestSlow\n=== CONT  TestSlow/sub\n"}, "TestSlow"},
 		{"a start a test's output echoes, while it runs", []string{"=== RUN   TestSlow\n        === RUN   TestInner\n"}, "TestSlow"},
 		{"a start echoed after one space", []string{"=== RUN   TestOuter\n === RUN   TestSlow\n"}, ""},
 		{"a start echoed after a tab", []string{"=== RUN   TestOuter\n\t=== RUN   TestSlow\n"}, ""},
