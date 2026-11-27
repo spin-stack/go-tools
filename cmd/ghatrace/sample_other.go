@@ -2,10 +2,13 @@
 
 package main
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // background is Linux's alone: no other system has the /proc a sample reads.
-func background(string, ...string) error {
+func background(context.Context, string, ...string) error {
 	return errors.New("ghatrace samples Linux alone")
 }
 

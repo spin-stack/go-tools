@@ -97,6 +97,7 @@ func TestSamplesShareTheFileWithSpans(t *testing.T) {
 		Runner string    `json:"runner"`
 	}
 	sampleLine := strings.Split(string(raw), "\n")[1]
+	assert.True(t, strings.HasPrefix(sampleLine, `{"sample":{"runner":"r7"`), "a sample's line holds the sample alone: %s", sampleLine)
 	require.NoError(t, json.Unmarshal([]byte(sampleLine), &before))
 	assert.Zero(t, before)
 }

@@ -37,7 +37,7 @@ func sample(ctx context.Context, args []string) error {
 		fmt.Fprintf(os.Stderr, "ghatrace: sample: no %s here: nothing sampled\n", strings.Join(hasNot, ", "))
 		return nil
 	}
-	if err := background(path, "sample", "-foreground", "-every", every.String(), "-for", limit.String()); err != nil {
+	if err := background(ctx, path, "sample", "-foreground", "-every", every.String(), "-for", limit.String()); err != nil {
 		fmt.Fprintf(os.Stderr, "ghatrace: sample: not sampling: %v\n", err)
 		return nil
 	}

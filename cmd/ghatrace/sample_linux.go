@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -9,8 +10,9 @@ import (
 
 // background runs this program with args in a session of its own, with nothing to read or write
 // to the step, so the step ends without waiting for it. It keeps the job's environment, and with
-// it RUNNER_TRACKING_ID, by which the runner ends it with the job.
-func background(path string, args ...string) error {
+// it RUNNER_TRACKING_ID, by which the runner ends it with the job; ctx done before it has started
+// stops it.
+func background(ctx context.Context, path string, args ...string) error {
 	unlock, err := lock(path + ".sampling")
 	if err != nil {
 		return err
@@ -20,7 +22,7 @@ func background(path string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, args...) //nolint:gosec // this program, again
+	cmd := exec.CommandContext(ctx, exe, args...) //nolint:gosec // this program, again
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err

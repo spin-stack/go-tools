@@ -89,10 +89,14 @@ func Record(s Span) error {
 func RecordSample(s Sample) error {
 	s.Runner = cmp.Or(s.Runner, os.Getenv("RUNNER_NAME"))
 	s.Job = cmp.Or(s.Job, os.Getenv("GITHUB_JOB"))
-	return add(line{Sample: &s})
+	return add(sampleLine{Sample: &s})
 }
 
-// line is one line of the file: a span, or a sample under its own key.
+type sampleLine struct {
+	Sample *Sample `json:"sample"`
+}
+
+// line is one line of the file as it is read: a span, or a sample under its own key.
 type line struct {
 	Span
 	Sample *Sample `json:"sample,omitempty"`
