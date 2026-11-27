@@ -47,12 +47,12 @@ jobs:
           go-version-file: go.mod
 
       - name: Task's pin
-        run: go run ./cmd/versions env task >> "$GITHUB_ENV"
+        run: go run ./cmd/versions env -file cmd/task/versions.yaml task >> "$GITHUB_ENV"
 
       - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: ${{ env.TASK_VERSION }}
-          checksum: ${{ env.TASK_SHA256 }}
+          checksum: ${{ env.TASK_SHA256_LINUX_AMD64 }}
 
       # The release this commit is: the one already tagged at it when CI was run again, the next
       # name today otherwise.

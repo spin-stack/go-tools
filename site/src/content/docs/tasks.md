@@ -295,6 +295,7 @@ apply there. The ones that do not apply refuse, before running anything:
 
 | it says | what happened | what to do |
 |---|---|---|
+| `versions: task pins no file for <os>/<arch>`, from `go tool task` | the repository's `versions.yaml` has a `task` entry, and its `pins` do not list this platform | delete the entry: go-tools' Task runs, pinned for every platform a release is built for |
 | `include cycle detected between <Taskfile> <--> <Taskfile>` (exit 110), for every task | `GO_TOOLS_TASKS` is empty: Task was run directly, or `go.mod` requires a go-tools from before `v0.20261122.4`, whose `go tool task` does not set it | run `go tool task`; `go get github.com/spin-stack/go-tools@latest` |
 | `Found multiple tasks (versions) included by "common"` (exit 203), for every task | the repository's Taskfile defines a common task itself | delete the repository's own: the name has one meaning |
 | `No Taskfile found at ".../tasks.yml"` (exit 100), for every task, after a line from `go tool task` that starts `the go-tools release this machine has ... has no tasks.yml` | the release in the cache is from before the tasks shipped, and no newer one could be had: GitHub could not be reached, or `go tool task` was built from a commit that is no release's and the cache named the latest less than ten minutes ago | run it again when `https://github.com/spin-stack/go-tools/releases/latest` can be reached, or ten minutes later |

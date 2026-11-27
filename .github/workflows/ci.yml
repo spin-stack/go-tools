@@ -42,14 +42,15 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Task is pinned in versions.yaml like every other input: TASK_VERSION and TASK_SHA256.
+      # The Task go tool task runs in every repository, cmd/task/versions.yaml: TASK_VERSION and
+      # each platform's TASK_SHA256_<OS>_<ARCH>.
       - name: Task's pin
-        run: go run ./cmd/versions env task >> "$GITHUB_ENV"
+        run: go run ./cmd/versions env -file cmd/task/versions.yaml task >> "$GITHUB_ENV"
 
       - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: ${{ env.TASK_VERSION }}
-          checksum: ${{ env.TASK_SHA256 }}
+          checksum: ${{ env.TASK_SHA256_LINUX_AMD64 }}
 
       # golangci-lint's analysis of each package, keyed by content inside, so any older copy is safe
       # to start from: saved under the commit, restored from the newest - main's for a pull request.

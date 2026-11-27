@@ -5,8 +5,8 @@ description: Add go-tools to a repository as Go tools, run the gates from a Task
 
 Every tool here is a command under `cmd/`, released as binaries of main each time its gate passes
 (`v<YYYYMMDD>.<NN>`, named as spin-stack names its releases, and attested as built by
-`release.yml`). A repository runs the latest of them through Task, at the version its
-`versions.yaml` pins. There is nothing to install globally, and nothing to compile.
+`release.yml`). A repository runs the latest of them through Task, at the version go-tools pins.
+There is nothing to install globally, and nothing to compile.
 
 ## Take Task and the tools
 
@@ -16,26 +16,20 @@ One command in `go.mod`:
 go get -tool github.com/spin-stack/go-tools/cmd/task
 ```
 
-and Task in `versions.yaml`, pinned by the sha256 of every platform's archive:
-
-```yaml title="versions.yaml"
-- name: task
-  kind: download
-  source: https://github.com/go-task/task/releases/download/v{version}/task_{os}_{arch}.tar.gz
-  version: 3.54.0
-  pins:
-    linux/amd64: 680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb
-    darwin/arm64: 12a69fcf37bb8d5bc9150c44f9a936775b73e59ff044c2c245232f198c135637
-  track: github-release https://github.com/go-task/task
-```
-
-`go tool task lint` then puts that Task and go-tools' latest release for this machine in the
-user's cache - Task held to its pin, the tools to the sha256 their release's `checksums.txt` gives
-- unpacks each once, and runs Task with every go-tools command on its `PATH`: a Taskfile says
+`go tool task lint` then puts Task and go-tools' latest release for this machine in the user's
+cache - Task held to its pin, the tools to the sha256 their release's `checksums.txt` gives -
+unpacks each once, and runs Task with every go-tools command on its `PATH`: a Taskfile says
 `mutate -base origin/main`. The first run on a machine takes a second or two. Which release is the
 latest is asked at most every ten minutes - and again at once when the cache names one from
 before the release `go.mod` requires - and a machine that cannot ask goes on with the one it
 has. Task's and the tools' own modules - about 450 together - are in no `go.mod` and no CI cache.
+
+The Task is go-tools' own: [`cmd/task/versions.yaml`](https://github.com/spin-stack/go-tools/blob/main/cmd/task/versions.yaml),
+pinned by the sha256 of its archive for every platform a release is built for (Linux and macOS,
+amd64 and arm64), and carried in the command. A repository writes no pin for it, and takes a newer
+Task with the go-tools version its `go.mod` requires. A repository whose `versions.yaml` has a
+`task` entry runs that one instead, on the platforms it lists: another platform is refused, and
+deleting the entry runs go-tools' Task.
 
 No repository bumps the tools: a release of go-tools is in every repository's next run. What a
 repository imports of go-tools as a library - `versions`, `provenance` - is `go.mod`'s. Each

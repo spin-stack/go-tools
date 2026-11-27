@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/spin-stack/go-tools/versions"
 )
 
 // archive is a .tar.gz of an executable for each of names, and its sha256.
@@ -40,9 +43,10 @@ func archive(t *testing.T, names ...string) ([]byte, string) {
 }
 
 // repository is a directory whose versions.yaml pins task at a TLS server the default client
-// trusts for the test, and the base URL of go-tools' releases there - its latest, v20261110.01,
-// listed in its checksums. The user's cache is a directory of the test's.
-func repository(t *testing.T) (repo, base string) {
+// trusts for the test, the base URL of go-tools' releases there - its latest, v20261110.01,
+// listed in its checksums - and the Task go-tools carries, another file there. The user's cache is
+// a directory of the test's.
+func repository(t *testing.T) (repo, base string, own versions.Entry) {
 	t.Helper()
 	latest := before
 	return repositoryAt(t, &latest)
@@ -55,16 +59,19 @@ const (
 )
 
 // repositoryAt is repository with go-tools' latest release the one *latest names when asked.
-func repositoryAt(t *testing.T, latest *string) (repo, base string) {
+func repositoryAt(t *testing.T, latest *string) (repo, base string, own versions.Entry) {
 	t.Helper()
 	platform := runtime.GOOS + "_" + runtime.GOARCH
 	taskArchive, taskPin := archive(t, "task")
+	ownArchive, ownPin := archive(t, "task", "LICENSE")
 	toolsArchive, toolsPin := archive(t, "mutate")
 	withTasks, withTasksPin := archive(t, "mutate", "tasks.yml")
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/task/v3.54.0/task_" + platform + ".tar.gz":
 			_, _ = w.Write(taskArchive)
+		case "/task/v3.99.0/task_" + platform + ".tar.gz":
+			_, _ = w.Write(ownArchive)
 		case "/go-tools/releases/latest":
 			http.Redirect(w, r, "/go-tools/releases/tag/"+*latest, http.StatusFound)
 		case "/go-tools/releases/download/" + before + "/checksums.txt":
@@ -98,7 +105,27 @@ func repositoryAt(t *testing.T, latest *string) (repo, base string) {
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
-	return repo, srv.URL + "/go-tools"
+	carried, err := versions.Parse([]byte(strings.NewReplacer("3.54.0", "3.99.0", taskPin, ownPin).Replace(file)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, err = carried.Get("task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo, srv.URL + "/go-tools", own
+}
+
+// ran is the Task run would exec from dir, and its error.
+func ran(t *testing.T, dir, base string, own versions.Entry) (string, error) {
+	t.Helper()
+	t.Chdir(dir)
+	var c call
+	err := run(t.Context(), nil, base, "", own, io.Discard, c.exec)
+	if err == nil && !c.called {
+		t.Fatal("run returned without exec'ing Task or an error")
+	}
+	return c.path, err
 }
 
 type call struct {
@@ -126,7 +153,7 @@ func pathOf(env []string) []string {
 // was given, with the latest go-tools first on a PATH that is there once.
 func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	latest := after
-	repo, base := repositoryAt(t, &latest)
+	repo, base, own := repositoryAt(t, &latest)
 	sub := filepath.Join(repo, "internal", "x")
 	if err := os.MkdirAll(sub, 0o750); err != nil {
 		t.Fatal(err)
@@ -136,7 +163,7 @@ func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	t.Setenv("GO_TOOLS_TASKS", "/a/release/before")
 	var c call
 	var warned strings.Builder
-	if err := run(t.Context(), []string{"lint", "--", "-v"}, base, "", &warned, c.exec); err != nil {
+	if err := run(t.Context(), []string{"lint", "--", "-v"}, base, "", own, &warned, c.exec); err != nil {
 		t.Fatal(err)
 	}
 	if warned.Len() != 0 {
@@ -179,13 +206,13 @@ func tasksOf(env []string) []string {
 // and runs Task all the same.
 func TestAReleaseFromBeforeThisCommandIsNotRunForBeingFresh(t *testing.T) {
 	latest := before
-	repo, base := repositoryAt(t, &latest)
+	repo, base, own := repositoryAt(t, &latest)
 	t.Chdir(repo)
 	ran := func(version string) (tasks string, warned string) {
 		t.Helper()
 		var c call
 		var w strings.Builder
-		if err := run(t.Context(), nil, base, version, &w, c.exec); err != nil || !c.called {
+		if err := run(t.Context(), nil, base, version, own, &w, c.exec); err != nil || !c.called {
 			t.Fatalf("a command of %q: %v, exec'd %t", version, err, c.called)
 		}
 		named := tasksOf(c.env)
@@ -219,16 +246,67 @@ func TestAReleaseFromBeforeThisCommandIsNotRunForBeingFresh(t *testing.T) {
 	}
 }
 
-// What `go tool task` cannot run is said, and nothing is exec'd: no versions.yaml above, one that
-// pins no Task, one that does not read, no go-tools release to be had.
+// The Task is go-tools' where nothing names another: no versions.yaml above, or one without a
+// task. A repository's task, where it has one, is the one run.
+func TestTaskIsGoToolsUnlessTheRepositoryPinsOne(t *testing.T) {
+	repo, base, own := repository(t)
+	pinOf := func(path string) string { return filepath.Base(filepath.Dir(path)) }
+	if got, err := ran(t, repo, base, own); err != nil || pinOf(got) == own.Pins[runtime.GOOS+"/"+runtime.GOARCH] {
+		t.Errorf("a repository that pins task ran %s (%v), go-tools' Task", got, err)
+	}
+	for name, file := range map[string]string{
+		"no versions.yaml": "",
+		"no task in it":    "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if file != "" {
+				if err := os.WriteFile(filepath.Join(dir, "versions.yaml"), []byte(file), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got, err := ran(t, dir, base, own); err != nil || pinOf(got) != own.Pins[runtime.GOOS+"/"+runtime.GOARCH] {
+				t.Errorf("ran %s (%v), not go-tools' Task", got, err)
+			}
+		})
+	}
+}
+
+// go-tools' Task is pinned for each platform a release is built for: a release on a platform
+// without it would unpack commands no `go tool task` there can run.
+func TestTheTaskCarriedIsForEveryReleasedPlatform(t *testing.T) {
+	taskfile, err := os.ReadFile("../../Taskfile.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var released []string
+	for line := range strings.Lines(string(taskfile)) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "PLATFORMS:"); ok {
+			released = strings.Fields(v)
+		}
+	}
+	if len(released) == 0 {
+		t.Fatal("the Taskfile names no release PLATFORMS")
+	}
+	own := ownTask()
+	if got := slices.Sorted(maps.Keys(own.Pins)); !slices.Equal(got, slices.Sorted(slices.Values(released))) {
+		t.Errorf("cmd/task/versions.yaml pins task for %v; a release is built for %v", got, released)
+	}
+}
+
+// What `go tool task` cannot run is said, and nothing is exec'd: a versions.yaml that does not
+// read, one whose task is not for this platform, no go-tools release to be had.
 func TestWhatCannotRunTaskIsSaid(t *testing.T) {
-	_, base := repository(t)
+	_, base, own := repository(t)
+	other := "windows/amd64"
+	if runtime.GOOS == "windows" {
+		other = "linux/amd64"
+	}
 	for _, tc := range []struct {
 		name, file, base, says string
 	}{
-		{"no versions.yaml", "", base, "no versions.yaml here or above"},
-		{"no task in it", "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n", base, "runs the Task it pins"},
 		{"a file that does not read", "- name: [\n", base, "versions"},
+		{"a task not for this platform", "- name: task\n  kind: download\n  source: https://example.com/v{version}/task_{os}_{arch}.tar.gz\n  version: 3.54.0\n  pins:\n    " + other + ": " + strings.Repeat("a", 64) + "\n  track: github-release https://github.com/go-task/task\n", base, "Without that entry go-tools' runs"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -239,17 +317,17 @@ func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 			}
 			t.Chdir(dir)
 			var c call
-			err := run(t.Context(), nil, tc.base, "", io.Discard, c.exec)
+			err := run(t.Context(), nil, tc.base, "", own, io.Discard, c.exec)
 			if err == nil || !strings.Contains(err.Error(), tc.says) || c.called {
 				t.Errorf("err = %v, exec'd %v; want %q", err, c.called, tc.says)
 			}
 		})
 	}
 	t.Run("no go-tools release", func(t *testing.T) {
-		repo, base := repository(t)
+		repo, base, own := repository(t)
 		t.Chdir(repo)
 		var c call
-		err := run(t.Context(), nil, base+"/none", "", io.Discard, c.exec)
+		err := run(t.Context(), nil, base+"/none", "", own, io.Discard, c.exec)
 		if err == nil || !strings.Contains(err.Error(), "the latest release of") || c.called {
 			t.Errorf("err = %v, exec'd %v", err, c.called)
 		}
