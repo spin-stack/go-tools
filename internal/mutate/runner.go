@@ -19,10 +19,11 @@ import (
 // Tally is what the tests did about every mutation.
 type Tally struct {
 	Survived []Mutation
-	// Refused are the refusals a cache keeps: an edit a test failed, or whose tests held more
-	// memory than they may, which is the code's doing whatever else the machine runs. Not one
-	// stopped for its time: a stall of a loaded machine stops a test as a hang does, and kept, it
-	// would hide a survivor from every run after. Killed counts them all.
+	// Refused are the refusals a cache keeps: an edit a test failed. Not one stopped at a bound:
+	// a stall of a loaded machine stops a test as a hang does, and the memory bound is -mem, by
+	// default a share of what was free when the run started, so a refusal at one bound says
+	// nothing of a run at another. Kept, either would hide a survivor from every run after.
+	// Killed counts them all.
 	Refused                       []Mutation
 	Killed, Unbuildable, Untested int
 	UntestedPackages              map[string]bool
@@ -131,7 +132,7 @@ func (t *Tally) count(m Mutation, a Answer, w io.Writer) {
 	switch a.Outcome {
 	case Killed, Exceeded, TimedOut:
 		t.Killed++
-		if a.Outcome != TimedOut {
+		if a.Outcome == Killed {
 			t.Refused = append(t.Refused, m)
 		}
 		_, _ = fmt.Fprintf(w, "  refused   %s%s\n", m, stoppedBy(a))
