@@ -74,6 +74,9 @@ func TestATestIsStoppedPastItsOwnAllowance(t *testing.T) {
 		{"a start a test's output echoes, while it runs", []string{"=== RUN   TestSlow\n        === RUN   TestInner\n"}, "TestSlow"},
 		{"a start echoed after one space", []string{"=== RUN   TestOuter\n === RUN   TestSlow\n"}, ""},
 		{"a start echoed after a tab", []string{"=== RUN   TestOuter\n\t=== RUN   TestSlow\n"}, ""},
+		{"a start after what a test printed, ending in a space", []string{"=== RUN   TestOuter\n", "progress ", "=== RUN   TestSlow\n"}, ""},
+		{"an end after what a test printed, ending in a space", []string{"=== RUN   TestSlow\n", "progress ", "--- PASS: TestSlow (0.00s)\n"}, ""},
+		{"a pause after what a test printed, ending in a space", []string{"=== RUN   TestSlow\n", "progress ", "=== PAUSE TestSlow\n"}, ""},
 		{"after an indented line", []string{"    said first\n=== RUN   TestSlow\n"}, "TestSlow"},
 		{"its newline in a write of its own", []string{"=== RUN   TestSlow", "\n"}, "TestSlow"},
 	} {
