@@ -49,7 +49,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	staleOnly := fs.Bool("stale-exempts", false, "report every mutate-exempt reason in the tree that covers no edit this tool makes, and fail on one")
 	// Off unless named: a run from scratch is the one that can be trusted with a file a test
 	// reads from outside its package (mutate.Cache says why).
-	cacheDir := fs.String("cache", "", "a directory keeping the edits refused, so a run over the same code asks only about the rest; empty for none")
+	cacheDir := fs.String("cache", "", "a directory keeping the edits refused, except those stopped for their time, so a run over the same code asks only about the rest; empty for none")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

@@ -27,7 +27,7 @@ import (
 // climbing out of its package - is not in it, which is why only a gate re-run uses a cache and a
 // run from scratch (ci.yml's, on main) does not.
 //
-// Only refusals are kept. A survivor fails the run and is the next one's question; an edit that
+// Only refusals are kept, and not one stopped for its time (Tally.Refused). A survivor fails the run and is the next one's question; an edit that
 // did not build costs a failed build, which is what asking the cache would save.
 type Cache struct {
 	dir     string
