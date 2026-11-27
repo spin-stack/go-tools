@@ -150,8 +150,9 @@ no bound for the run, as it is for `go test`, and each measured test still has i
 when every test of the package is asked about the edit.
 
 `-cache <dir>` keeps the edits already refused, so a second run over the same code tries only the
-rest. An edit stopped for its time is not kept: a stall of a loaded machine stops a test as a hang
-does, and the next run asks it again. It is off by default: a run from scratch is the one to trust when a test reads files from
+rest. An edit stopped for its time or its memory is not kept, and the next run asks it again: a
+stall of a loaded machine stops a test as a hang does, and `-mem` is by default a share of what was
+free when the run started, so an edit refused under one bound may pass under another. It is off by default: a run from scratch is the one to trust when a test reads files from
 outside its package.
 
 ## Running it

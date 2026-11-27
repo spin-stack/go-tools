@@ -83,6 +83,8 @@ func TestAnEditThatAllocatesForEverIsStoppedAndRefused(t *testing.T) {
 	memLimit = 256 << 20
 	t.Cleanup(func() { memLimit = 0 })
 
+	store := t.TempDir()
+	cache := lookUp(t, store, plan)
 	var said strings.Builder
 	tally, err := RunAll(t.Context(), plan, nil, "2m", 1, &said)
 	if err != nil {
@@ -91,9 +93,13 @@ func TestAnEditThatAllocatesForEverIsStoppedAndRefused(t *testing.T) {
 	if tally.Killed != 1 || !strings.Contains(said.String(), "refused   "+plan[0].String()+" (its tests held over 0.2 GiB, and were stopped)") {
 		t.Errorf("the edit in the package's binary was not refused at its bound: %s", said.String())
 	}
-	if len(tally.Refused) != 1 {
-		t.Errorf("an edit refused at its bound is not among the refusals a cache keeps: %v", tally.Refused)
+	if err := cache.Keep(tally.Refused); err != nil {
+		t.Fatal(err)
 	}
+	// A run given more memory, with the cache the first one left, asks the edit again.
+	memLimit = 512 << 20
+	lookUp(t, store, plan)
+	memLimit = 256 << 20
 
 	overlay, err := Overlay(plan[0], t.TempDir())
 	if err != nil {
@@ -118,6 +124,20 @@ func TestAnEditThatAllocatesForEverIsStoppedAndRefused(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// lookUp is the cache in store as a run opens it, having asked it about plan, and fails t when it
+// answers any of plan from a run before.
+func lookUp(t *testing.T, store string, plan []Mutation) *Cache {
+	t.Helper()
+	cache, err := OpenCache(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, refused, err := cache.Known(t.Context(), plan, nil); err != nil || len(refused) > 0 {
+		t.Fatalf("an edit refused at one memory bound was taken from the cache at another: %v %v", refused, err)
+	}
+	return cache
 }
 
 // running is every process whose program is called name: not one whose arguments name it.
