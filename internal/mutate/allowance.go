@@ -183,7 +183,7 @@ func (p *pacer) Write(b []byte) (int, error) {
 func (p *pacer) hold(b []byte) {
 	p.partial = append(p.partial, b...)
 	if len(p.partial) > 2*keep {
-		p.partial = append(p.partial[:0], p.partial[len(p.partial)-keep:]...)
+		p.partial = p.partial[len(p.partial)-keep:]
 	}
 }
 
