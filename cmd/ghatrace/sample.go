@@ -62,11 +62,15 @@ func announce(s ghatrace.Sample, every time.Duration, path string) (string, bool
 	}
 	add(s.CPU != nil, cpus)
 	add(s.Pressure != nil, "/proc/pressure")
-	names := make([]string, len(s.Disks))
-	for i, d := range s.Disks {
-		names[i] = d.Name
+	disks := "/proc/diskstats' disks"
+	if len(s.Disks) > 0 {
+		names := make([]string, len(s.Disks))
+		for i, d := range s.Disks {
+			names[i] = d.Name
+		}
+		disks = "/proc/diskstats (" + strings.Join(names, ", ") + ")"
 	}
-	add(len(s.Disks) > 0, "/proc/diskstats ("+strings.Join(names, ", ")+")")
+	add(len(s.Disks) > 0, disks)
 	if len(has) == 0 {
 		return "ghatrace: sample: nothing here to sample: no /proc", false
 	}

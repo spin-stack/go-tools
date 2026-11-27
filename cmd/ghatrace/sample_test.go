@@ -33,6 +33,10 @@ func TestMachineReadsWhatTheMachineHas(t *testing.T) {
 	said, ok := announce(s, time.Second, "/tmp/spans.jsonl")
 	assert.True(t, ok)
 	assert.Equal(t, "ghatrace: sampling /proc/stat (2 CPUs), /proc/pressure, /proc/diskstats (nvme0n1, sda) every 1s into /tmp/spans.jsonl", said)
+
+	s.Pressure, s.Disks = nil, s.Disks[:1]
+	said, _ = announce(s, time.Second, "f")
+	assert.Equal(t, "ghatrace: sampling /proc/stat (2 CPUs), /proc/diskstats (nvme0n1) every 1s into f; no /proc/pressure here", said)
 }
 
 // A kernel without PSI, and a machine with no disk of its own - a container's view - have neither,
@@ -47,7 +51,7 @@ func TestMachineWithoutPressureOrDisks(t *testing.T) {
 	assert.Empty(t, s.Disks)
 	said, ok := announce(s, time.Second, "f")
 	assert.True(t, ok)
-	assert.Equal(t, "ghatrace: sampling /proc/stat (1 CPUs) every 1s into f; no /proc/pressure, /proc/diskstats () here", said)
+	assert.Equal(t, "ghatrace: sampling /proc/stat (1 CPUs) every 1s into f; no /proc/pressure, /proc/diskstats' disks here", said)
 
 	said, ok = announce(machine(t.TempDir(), time.Time{}), time.Second, "f")
 	assert.False(t, ok)
