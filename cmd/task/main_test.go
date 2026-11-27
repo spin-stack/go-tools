@@ -104,8 +104,11 @@ func repositoryAt(t *testing.T, latest *string) (repo, base string, own versions
 	if err := os.WriteFile(filepath.Join(repo, "versions.yaml"), []byte(file), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The user's cache is XDG_CACHE_HOME's on Linux, under HOME on macOS and LocalAppData's on
+	// Windows: each test has one of its own, or a release one installed is the next one's.
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("LocalAppData", t.TempDir())
 	carried, err := versions.Parse([]byte(strings.NewReplacer("3.54.0", "3.99.0", taskPin, ownPin).Replace(file)))
 	if err != nil {
 		t.Fatal(err)
