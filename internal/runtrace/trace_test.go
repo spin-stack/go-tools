@@ -364,7 +364,7 @@ func TestACompositeActionsStepsComeFromTheLog(t *testing.T) {
 }
 
 // The page the site shows is this package's own, drawn from a real run (go-tools' gate, run
-// 42672797946, testdata/example.json, its steps named without their action's commit, which only
+// 45991384862, testdata/example.json, its steps named without their action's commit, which only
 // versions.yaml may write): a test writes it, so it is never older than the code. UPDATE_GOLDEN=1
 // writes it.
 func TestTheExampleTheSiteShows(t *testing.T) {
