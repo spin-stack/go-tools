@@ -552,3 +552,94 @@ func TestOnlyARedirectToAReleaseIsTheLatest(t *testing.T) {
 		t.Errorf("good: %q, %v", tag, err)
 	}
 }
+
+// githubHosts plays github.com redirecting o/r's /releases/latest to redirect, or answering 504
+// when it is "", and GitHub's API naming *latest as o/r's latest release, through
+// http.DefaultClient's transport, so the hosts are GitHub's own. Each request to the API is
+// written down by its Authorization header.
+func githubHosts(t *testing.T, redirect string, latest *string) *[]string {
+	var api []string
+	before := http.DefaultClient.Transport
+	http.DefaultClient.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+		rec := httptest.NewRecorder()
+		switch r.URL.Host + r.URL.Path {
+		case "github.com/o/r/releases/latest":
+			if redirect == "" {
+				http.Error(rec, "", http.StatusGatewayTimeout)
+				break
+			}
+			http.Redirect(rec, r, "/o/r/releases/tag/"+redirect, http.StatusFound)
+		case "api.github.com/repos/o/r/releases/latest":
+			api = append(api, r.Header.Get("Authorization"))
+			_, _ = rec.WriteString(`{"tag_name":"` + *latest + `"}`)
+		default:
+			http.NotFound(rec, r)
+		}
+		resp := rec.Result()
+		resp.Request = r
+		return resp, nil
+	})
+	t.Cleanup(func() { http.DefaultClient.Transport = before })
+	return &api
+}
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// When github.com answers 504 to /releases/latest, the latest release is the one GitHub's API
+// names, asked with GITHUB_TOKEN when there is one, and recorded for its ten minutes.
+func TestTheLatestReleaseIsAskedOfTheAPIWhenTheRedirectFails(t *testing.T) {
+	for _, tok := range []string{"", "tok"} {
+		t.Setenv("GITHUB_TOKEN", tok)
+		t.Setenv("GH_TOKEN", "")
+		tag := "v20261127.13"
+		api := githubHosts(t, "", &tag)
+		stamp := filepath.Join(t.TempDir(), "go-tools", "latest")
+		got, err := latestTag(t.Context(), "https://github.com/o/r", stamp, "", time.Now(), noWait)
+		if err != nil || got != tag {
+			t.Fatalf("with %q: %q, %v", tok, got, err)
+		}
+		want := ""
+		if tok != "" {
+			want = "Bearer " + tok
+		}
+		if !slices.Equal(*api, []string{want}) {
+			t.Errorf("with %q: the API was asked with %q", tok, *api)
+		}
+		if rec, _ := os.ReadFile(stamp); string(rec) != tag {
+			t.Errorf("with %q: the stamp says %q", tok, rec)
+		}
+	}
+}
+
+// While the redirect answers, the API is not asked, whatever it would say: its quota is kept for
+// when the redirect fails.
+func TestTheAPIIsNotAskedWhileTheRedirectAnswers(t *testing.T) {
+	tag := "v20261127.12"
+	api := githubHosts(t, "v20261127.13", &tag)
+	got, err := latestTag(t.Context(), "https://github.com/o/r", filepath.Join(t.TempDir(), "latest"), "", time.Now(), noWait)
+	if err != nil || got != "v20261127.13" || len(*api) != 0 {
+		t.Errorf("%q, %v, the API asked %d times", got, err, len(*api))
+	}
+}
+
+// The API's answer is held to the caller's release as the redirect's is: one before it is asked
+// again, and when it stays nothing is run and nothing recorded.
+func TestAnAPIAnswerBeforeTheCallersReleaseRunsNothing(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	tag := "v20261127.12"
+	api := githubHosts(t, "", &tag)
+	stamp := filepath.Join(t.TempDir(), "go-tools", "latest")
+	_, err := latestTag(t.Context(), "https://github.com/o/r", stamp, "v20261127.13", time.Now(), noWait)
+	if err == nil || !strings.Contains(err.Error(), "v20261127.13, the release this command is of, is not visible yet") {
+		t.Errorf("err = %v", err)
+	}
+	if len(*api) != 4 {
+		t.Errorf("the API was asked %d times", len(*api))
+	}
+	if _, err := os.Stat(stamp); err == nil {
+		t.Error("a release before the caller's was recorded")
+	}
+}

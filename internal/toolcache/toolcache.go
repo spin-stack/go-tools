@@ -11,6 +11,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -171,8 +172,8 @@ func exists(p string) bool {
 var again = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
 // latestTag is the name of base's latest release: the one stamp records when it was written less
-// than fresh ago and is not before since, else asked of GitHub - where /releases/latest redirects to the release, which no
-// API quota counts - and recorded; the one stamp records, however old, when GitHub cannot answer.
+// than fresh ago and is not before since, else asked of GitHub (askLatest) and recorded; the one
+// stamp records, however old, when GitHub cannot answer.
 // An answer before since is not the latest and is not recorded: it is asked again after each of
 // again, and is an error when it is still the answer.
 func latestTag(ctx context.Context, base, stamp, since string, now time.Time, wait func(context.Context, time.Duration)) (string, error) {
@@ -209,8 +210,31 @@ func latestTag(ctx context.Context, base, stamp, since string, now time.Time, wa
 	return tag, nil
 }
 
-// askLatest is the tag base's /releases/latest redirects to.
+// askLatest is the tag base's /releases/latest redirects to or, when it answers anything else, the
+// tag GitHub's API names as base's latest release. The redirect is asked first because no API quota
+// counts it. The API is asked after because GitHub answered that page 504 for hours on 2026-11-27
+// while the API answered, and every go tool task failed; it is asked with GITHUB_TOKEN or GH_TOKEN
+// when there is one, as a download is, so a workflow spends its token's quota, not its address's.
 func askLatest(ctx context.Context, base string) (string, error) {
+	tag, err := redirected(ctx, base)
+	repo, onGitHub := strings.CutPrefix(base, "https://github.com/")
+	if err == nil || !onGitHub {
+		return tag, err
+	}
+	api := "https://api.github.com/repos/" + repo + "/releases/latest"
+	var rel struct {
+		Tag string `json:"tag_name"`
+	}
+	if aerr := fetch.Read(ctx, api, func(body io.Reader) error { return json.NewDecoder(body).Decode(&rel) }); aerr != nil {
+		return "", errors.Join(err, aerr)
+	}
+	if rel.Tag == "" {
+		return "", errors.Join(err, fmt.Errorf("%s names no release", api))
+	}
+	return rel.Tag, nil
+}
+
+func redirected(ctx context.Context, base string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, base+"/releases/latest", nil)
 	if err != nil {
 		return "", err
