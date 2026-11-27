@@ -134,28 +134,33 @@ func ReadAll(r io.Reader) ([]Span, []Sample, error) {
 	var samples []Sample
 	br := bufio.NewReader(r)
 	for n := 1; ; n++ {
-		b, err := br.ReadBytes('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
+		b, whole, err := next(br)
+		if err != nil {
 			return nil, nil, err
 		}
-		writing := err != nil
 		if len(bytes.TrimSpace(b)) > 0 {
 			var l line
-			if jerr := json.Unmarshal(b, &l); jerr != nil {
-				if writing {
-					break
-				}
+			jerr := json.Unmarshal(b, &l)
+			switch {
+			case jerr != nil && whole:
 				return nil, nil, fmt.Errorf("line %d: %w", n, jerr)
-			}
-			if l.Sample != nil {
+			case l.Sample != nil:
 				samples = append(samples, *l.Sample)
-			} else {
+			case jerr == nil:
 				spans = append(spans, l.Span)
 			}
 		}
-		if writing {
-			break
+		if !whole {
+			return spans, samples, nil
 		}
 	}
-	return spans, samples, nil
+}
+
+// next is br's next line, and whether it ends with a newline: the last may not.
+func next(br *bufio.Reader) ([]byte, bool, error) {
+	b, err := br.ReadBytes('\n')
+	if errors.Is(err, io.EOF) {
+		return b, false, nil
+	}
+	return b, err == nil, err
 }

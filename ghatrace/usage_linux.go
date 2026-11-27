@@ -14,6 +14,6 @@ func rusage(p *os.ProcessState, u *Usage) {
 // fromRusage adds what Linux's wait4 counted beyond CPU time: ru_maxrss in KiB, and ru_inblock and
 // ru_oublock in 512-byte blocks. Each is an int32 on a 32-bit Linux.
 func fromRusage(r *syscall.Rusage, u *Usage) {
-	u.MaxRSS = int64(r.Maxrss) * 1024
-	u.Read, u.Written = int64(r.Inblock)*512, int64(r.Oublock)*512
+	u.MaxRSS = int64(r.Maxrss) * 1024                              //nolint:unconvert // int32 on a 32-bit Linux
+	u.Read, u.Written = int64(r.Inblock)*512, int64(r.Oublock)*512 //nolint:unconvert // as Maxrss
 }
