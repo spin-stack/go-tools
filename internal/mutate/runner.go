@@ -18,7 +18,12 @@ import (
 
 // Tally is what the tests did about every mutation.
 type Tally struct {
-	Survived, Refused             []Mutation
+	Survived []Mutation
+	// Refused are the refusals a cache keeps: an edit a test failed, or whose tests held more
+	// memory than they may, which is the code's doing whatever else the machine runs. Not one
+	// stopped for its time: a stall of a loaded machine stops a test as a hang does, and kept, it
+	// would hide a survivor from every run after. Killed counts them all.
+	Refused                       []Mutation
 	Killed, Unbuildable, Untested int
 	UntestedPackages              map[string]bool
 	// Wrote are the files the tests left, changed or removed where they ran, by their paths in
@@ -79,26 +84,11 @@ func RunAll(ctx context.Context, chosen []Mutation, importers map[string][]strin
 	t := Tally{UntestedPackages: map[string]bool{}}
 	var firstErr error
 	for r := range results {
-		m := r.m
 		if r.err != nil {
 			firstErr = cmp.Or(firstErr, r.err)
 			continue
 		}
-		switch r.answer.Outcome {
-		case Killed, Exceeded, TimedOut:
-			t.Killed++
-			t.Refused = append(t.Refused, m)
-			_, _ = fmt.Fprintf(w, "  refused   %s%s\n", m, stoppedBy(r.answer))
-		case Unbuildable:
-			t.Unbuildable++
-			_, _ = fmt.Fprintf(w, "  no edit   %s (does not build)\n", m)
-		case Untested:
-			t.Untested++
-			t.UntestedPackages[filepath.Dir(m.File)] = true
-		case Survived:
-			t.Survived = append(t.Survived, m)
-			_, _ = fmt.Fprintf(w, "  SURVIVED  %s\n", m)
-		}
+		t.count(r.m, r.answer, w)
 	}
 	sort.Slice(t.Survived, func(i, j int) bool { return t.Survived[i].String() < t.Survived[j].String() })
 	// Every process is done, so every tree is back.
@@ -134,6 +124,27 @@ func RunAll(ctx context.Context, chosen []Mutation, importers map[string][]strin
 			len(t.Broken), strings.Join(t.Broken, ", "))
 	}
 	return t, firstErr
+}
+
+// count adds what the tests did about m to t, and says it to w.
+func (t *Tally) count(m Mutation, a Answer, w io.Writer) {
+	switch a.Outcome {
+	case Killed, Exceeded, TimedOut:
+		t.Killed++
+		if a.Outcome != TimedOut {
+			t.Refused = append(t.Refused, m)
+		}
+		_, _ = fmt.Fprintf(w, "  refused   %s%s\n", m, stoppedBy(a))
+	case Unbuildable:
+		t.Unbuildable++
+		_, _ = fmt.Fprintf(w, "  no edit   %s (does not build)\n", m)
+	case Untested:
+		t.Untested++
+		t.UntestedPackages[filepath.Dir(m.File)] = true
+	case Survived:
+		t.Survived = append(t.Survived, m)
+		_, _ = fmt.Fprintf(w, "  SURVIVED  %s\n", m)
+	}
 }
 
 // stoppedBy is what stopped the tests that refused an edit, where it was a bound and not a test
