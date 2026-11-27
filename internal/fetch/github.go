@@ -3,6 +3,7 @@ package fetch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,10 @@ import (
 )
 
 const githubAPI = "https://api.github.com/"
+
+// errRefused is the API refusing the token: an organization can refuse a token it did not grant,
+// as aquasecurity refuses a workflow's GITHUB_TOKEN while it answers anyone else (2026-11-27).
+var errRefused = errors.New("the API refused the token")
 
 // token is the GitHub token the environment holds: GITHUB_TOKEN, which a workflow is given, or
 // GH_TOKEN, which gh reads.
@@ -28,13 +33,17 @@ func token() string {
 // "increased timeouts due to surge in anonymous users", 504s for minutes at a time), and a token
 // on the github.com URL itself does nothing - a private release's file answers 404 with one as
 // without - so the asset is asked for where a token counts: GET /repos/{o}/{r}/releases/assets/{id}
-// with Accept: application/octet-stream, which redirects to the same bytes.
+// with Accept: application/octet-stream, which redirects to the same bytes. Where the API refuses
+// the token, the file is asked of url as it is without one.
 func (p retry) asset(ctx context.Context, url string) (string, error) {
 	owner, repo, tag, name, ok := releaseFile(url)
 	if !ok || token() == "" {
 		return url, nil
 	}
 	assets, err := p.release(ctx, owner, repo, tag)
+	if errors.Is(err, errRefused) {
+		return url, nil
+	}
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", url, err)
 	}
@@ -60,6 +69,8 @@ func (p retry) release(ctx context.Context, owner, repo, tag string) (map[string
 			return json.NewDecoder(body).Decode(&rel)
 		case http.StatusNotFound:
 			return nil
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return fmt.Errorf("%w: %w", errRefused, answered(api, resp))
 		}
 		return answered(api, resp)
 	})
