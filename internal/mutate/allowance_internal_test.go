@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// shortMargin has every test and run allowed a second beyond its multiple, not ten, for t. Not
+// beside other tests: they read it.
+func shortMargin(t *testing.T) {
+	t.Helper()
+	saved := margin
+	margin = time.Second
+	t.Cleanup(func() { margin = saved })
+}
+
 // settles is a module whose Settle sleeps a millisecond n times, counting down to zero: an edit
 // that counts up never reaches zero, and holds its caller asleep for ever, as an inverted wait loop
 // does. TestPatience sleeps for patience first; TestSettle writes its process's ID to pid, sleeps
@@ -51,8 +60,8 @@ func settles(t *testing.T, patience, pause time.Duration, checked bool, what str
 // built alone with no line known, which asks every test: there the run as a whole is allowed the
 // others' time too, and the test that hangs is stopped at its own.
 func TestAnEditThatHangsItsTestIsStoppedAtItsAllowance(t *testing.T) {
-	t.Parallel()
-	dir, pid, m := settles(t, 3*time.Second, 0, true, "- becomes +")
+	shortMargin(t)
+	dir, pid, m := settles(t, 2*time.Second, 0, true, "- becomes +")
 	started := time.Now()
 	var said strings.Builder
 	tally, err := RunAll(t.Context(), []Mutation{m}, nil, "10m", 1, &said)
@@ -63,7 +72,7 @@ func TestAnEditThatHangsItsTestIsStoppedAtItsAllowance(t *testing.T) {
 		t.Errorf("the edit was stopped after %s, not at its allowance", took)
 	}
 	if tally.Killed != 1 || !strings.Contains(said.String(), "refused   "+m.String()+" (") ||
-		!strings.Contains(said.String(), " ran past 10s, and ") {
+		!strings.Contains(said.String(), " ran past 1s, and ") {
 		t.Errorf("the edit that hangs was not refused at its allowance: %s", said.String())
 	}
 
@@ -74,7 +83,7 @@ func TestAnEditThatHangsItsTestIsStoppedAtItsAllowance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if why := stoppedBy(answer); answer.Outcome != TimedOut || why != " (TestSettle ran past 10s, and was stopped)" {
+	if why := stoppedBy(answer); answer.Outcome != TimedOut || why != " (TestSettle ran past 1s, and was stopped)" {
 		t.Errorf("asked of every test, the edit was %v%s: %s", answer.Outcome, why, answer.Said)
 	}
 	written, err := os.ReadFile(pid)
@@ -90,16 +99,16 @@ func TestAnEditThatHangsItsTestIsStoppedAtItsAllowance(t *testing.T) {
 // an edit its slow test lets through survives, and is not refused for the time the test takes
 // anyway.
 func TestASlowTestIsAllowedItsOwnTime(t *testing.T) {
-	t.Parallel()
+	shortMargin(t)
 	// An edit the test does not see, since it checks no count: no settling at all.
-	_, _, m := settles(t, 0, 12*time.Second, false, "> becomes <=")
+	_, _, m := settles(t, 0, 3*time.Second, false, "> becomes <=")
 	var said strings.Builder
 	tally, err := RunAll(t.Context(), []Mutation{m}, nil, "10m", 1, &said)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if tally.Killed != 0 || strings.Contains(said.String(), "ran past") {
-		t.Errorf("a test of twelve seconds was stopped short of its time: %s", said.String())
+		t.Errorf("a test of three seconds was stopped short of its time: %s", said.String())
 	}
 }
 

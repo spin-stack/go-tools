@@ -23,13 +23,13 @@ import (
 // Each test as well as the run: an edit asks every test of its package where no coverage block
 // holds its line - since Go 1.27, every case of a switch - and a package's tests together take
 // minutes, which a multiple of is no stop at all for the one test that hangs.
-const (
-	// slack is how many times its unbroken time a test, or a run, may take with an edit in.
-	slack = 4
-	// margin is what each may take beyond that: a process's start, and a test of milliseconds that
-	// waits on the run's one PostgreSQL behind the other jobs.
-	margin = 10 * time.Second
-)
+// slack is how many times its unbroken time a test, or a run, may take with an edit in.
+const slack = 4
+
+// margin is what each may take beyond that: a process's start, and a test of milliseconds that
+// waits on the run's one PostgreSQL behind the other jobs. A variable, as memLimit is, so that a
+// test showing a stop waits a second for it and not ten, in every run of this gate that asks it.
+var margin = 10 * time.Second
 
 // Unbroken is how long tests took with nothing broken, by the absolute directory of their package:
 // each test - a package's own each alone (Cover), an importer's as its run said - and an importer's
