@@ -59,6 +59,7 @@ func (u *Unbroken) recordWhole(dir string, took time.Duration) {
 
 // Allowance is how long one run of tests may take, and each test in it from when it starts.
 type Allowance struct {
+	// Run is 0 for no bound.
 	Run time.Duration
 	// Each is a test's own; a test with none has only the run's.
 	Each map[string]time.Duration
@@ -66,7 +67,7 @@ type Allowance struct {
 
 // allowance is what a run of the tests of the package in dir may take with an edit in: those of
 // only, or all where only is nil. The run is allowed ceiling where any of them was not measured,
-// and never more.
+// and never more; a ceiling of 0 is none, as -test.timeout 0 is.
 func (u *Unbroken) allowance(dir string, only []string, ceiling time.Duration) Allowance {
 	a := Allowance{Run: ceiling, Each: map[string]time.Duration{}}
 	if u == nil {
@@ -83,14 +84,18 @@ func (u *Unbroken) allowance(dir string, only []string, ceiling time.Duration) A
 	if only != nil || !ok {
 		run, ok = sum(tests, only)
 	}
-	if ok {
+	switch {
+	case ok && ceiling > 0:
 		a.Run = min(slack*run+margin, ceiling)
+	case ok:
+		a.Run = slack*run + margin
 	}
 	return a
 }
 
 // sum is the time of the tests of only, or all where only is nil; false where one was not
-// measured. A process running them one after another is no slower than each in one of its own.
+// measured, or none was: a package with only examples or fuzz targets has none, and a run of it is
+// theirs. A process running them one after another is no slower than each in one of its own.
 func sum(tests map[string]time.Duration, only []string) (total time.Duration, measured bool) {
 	if only == nil {
 		only = slices.Collect(maps.Keys(tests))
@@ -102,7 +107,7 @@ func sum(tests map[string]time.Duration, only []string) (total time.Duration, me
 		}
 		total += took
 	}
-	return total, tests != nil
+	return total, len(tests) > 0
 }
 
 func absDir(dir string) string {

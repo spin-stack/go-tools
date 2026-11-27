@@ -730,21 +730,29 @@ func testArgs(only []string) []string {
 // askBinary runs the test binary bin in the tree's copy of pkgDir, with env, and stops it and
 // every process it started once it, or a test in it, runs past what it is allowed.
 func askBinary(ctx context.Context, tree *Tree, what, bin, pkgDir string, env, only []string, a Allowance) (Answer, error) {
-	limited, cancel := context.WithTimeout(ctx, a.Run)
-	defer cancel()
-	pace := &pacer{each: a.Each, stop: cancel}
-	cmd := exec.CommandContext(limited, bin, testArgs(only)...) //nolint:gosec // a test binary this run built
 	var (
 		out      []byte
 		exceeded bool
 		runErr   error
 		took     time.Duration
+		pace     *pacer
+		ranOut   bool
 	)
+	// The allowance is the binary's from its start, not the copying of the module into a tree
+	// used for the first time.
 	if err := tree.in(ctx, pkgDir, func(at, tmp string) {
+		limited, cancel := ctx, context.CancelFunc(func() {})
+		if a.Run > 0 {
+			limited, cancel = context.WithTimeout(ctx, a.Run)
+		}
+		defer cancel()
+		pace = &pacer{each: a.Each, stop: cancel}
+		cmd := exec.CommandContext(limited, bin, testArgs(only)...) //nolint:gosec // a test binary this run built
 		cmd.Dir, cmd.Env = at, slices.Concat(env, []string{"TMPDIR=" + tmp})
 		started := time.Now()
 		out, exceeded, runErr = bounded(what, cmd, pace)
 		took = time.Since(started)
+		ranOut = limited.Err() != nil
 	}); err != nil {
 		return Answer{}, err
 	}
@@ -761,7 +769,7 @@ func askBinary(ctx context.Context, tree *Tree, what, bin, pkgDir string, env, o
 		answer.Outcome = Survived
 	case test != "":
 		answer.Outcome, answer.RanPast, answer.Allowed = TimedOut, test, ranPast
-	case limited.Err() != nil:
+	case ranOut:
 		answer.Outcome, answer.Allowed = TimedOut, a.Run
 	}
 	// Otherwise Killed, the zero Outcome: a test that fails is the edit refused, not this run failing.
