@@ -206,17 +206,18 @@ var taskSets = []string{
 	"TASK_VERSION", "TIMESTAMP", "USER_WORKING_DIR",
 }
 
-// commonVars is the vars the common tasks read and do not state themselves, from the tasks' own
-// file at the version this gate is of: the include's (RELEASE) and the command line's (TO).
+// commonVars is the vars the common tasks' templates read and do not state themselves, from the
+// tasks' own file at the version this gate is of: the include's (RELEASE) and the command line's
+// (TO). A var a task requires is one its templates read, or requiring it would be for nothing.
 // A task's own vars are read after every other, so a repository's of the same name hides nothing.
 func commonVars() []string {
 	var top yaml.Node
 	_ = yaml.Unmarshal(common.File, &top) //nolint:errcheck // this module's own file, which its tests run under Task
-	read, own := map[string]bool{}, map[string]bool{}
+	read := map[string]bool{}
 	var walk func(n *yaml.Node)
 	walk = func(n *yaml.Node) {
-		for _, tmpl := range templated.FindAllString(n.Value, -1) {
-			for _, m := range dotted.FindAllStringSubmatch(tmpl, -1) {
+		for _, tmpl := range templated.FindAllString(n.Value, -1) { // mutate-exempt: any n < 0 is every match
+			for _, m := range dotted.FindAllStringSubmatch(tmpl, -1) { // mutate-exempt: any n < 0 is every match
 				read[m[1]] = true
 			}
 		}
@@ -225,29 +226,20 @@ func commonVars() []string {
 		}
 	}
 	walk(&top)
-	if len(top.Content) > 0 {
-		if tasks := field(top.Content[0], "tasks"); tasks != nil && tasks.Kind == yaml.MappingNode {
-			for i := 1; i < len(tasks.Content); i += 2 {
-				body := tasks.Content[i]
-				if req := field(body, "requires"); req != nil {
-					if vars := field(req, "vars"); vars != nil {
-						for _, v := range vars.Content {
-							read[v.Value] = true
-						}
-					}
-				}
-				if vars := field(body, "vars"); vars != nil && vars.Kind == yaml.MappingNode {
-					for j := 0; j < len(vars.Content); j += 2 {
-						own[vars.Content[j].Value] = true
-					}
-				}
-			}
+	var file struct {
+		Tasks map[string]struct {
+			Vars map[string]yaml.Node `yaml:"vars"`
+		} `yaml:"tasks"`
+	}
+	_ = top.Decode(&file) //nolint:errcheck // this module's own file, which its tests run under Task
+	for _, task := range file.Tasks {
+		for n := range task.Vars {
+			delete(read, n)
 		}
 	}
 	for _, n := range taskSets {
-		own[n] = true
+		delete(read, n)
 	}
-	maps.DeleteFunc(read, func(n string, _ bool) bool { return own[n] })
 	return slices.Sorted(maps.Keys(read))
 }
 
