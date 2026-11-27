@@ -742,7 +742,7 @@ func askBinary(ctx context.Context, tree *Tree, what, bin, pkgDir string, env, o
 	// used for the first time.
 	if err := tree.in(ctx, pkgDir, func(at, tmp string) {
 		limited, cancel := ctx, context.CancelFunc(func() {})
-		if a.Run > 0 {
+		if a.Run > 0 { // mutate-exempt: a run of a nanosecond is one nobody allows; 0 is no bound
 			limited, cancel = context.WithTimeout(ctx, a.Run)
 		}
 		defer cancel()
