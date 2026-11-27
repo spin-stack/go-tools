@@ -121,9 +121,11 @@ whole module once per edit. `mutate` avoids most of that:
 3. **One build per package.** All of a package's edits are compiled into a single test binary, each
    behind a switch, and turned on one at a time. That's one build per package, not one per edit.
 
-4. **Only the tests that reach the line.** Each test runs once with coverage first. An edit is then
-   tried only against the tests that execute its line, since a test that never runs it cannot
-   notice.
+4. **Only the tests that reach the edit.** Each test runs once with coverage first. An edit is then
+   tried only against the tests that execute it, since a test that never runs it cannot notice.
+   Go's coverage counts no `case` of a switch or a select, so an edit of what a case compares is
+   tried against the tests that reach the switch: a test that evaluates the case has reached it,
+   and the edit can make a test choose a case it did not choose before.
 
 5. **Through the importers.** A package with no tests of its own is tried through the packages that
    import it. If those don't exist either, the run reports the package as untested rather than
@@ -145,8 +147,7 @@ A test's own allowance holds while the tests run one at a time. Once a package's
 are let go together, each is slowed by the others, and only the run's allowance applies.
 `-timeout` is what no run may pass, and the bound of a run whose tests were not measured; `0` is
 no bound for the run, as it is for `go test`, and each measured test still has its own. A test of seconds that an edit hangs is stopped in seconds, even
-when the edit's line is one no coverage block holds, such as a `case` of a switch, and every test
-of the package is asked.
+when every test of the package is asked about the edit.
 
 `-cache <dir>` keeps the edits already refused, so a second run over the same code tries only the
 rest. An edit stopped for its time is not kept: a stall of a loaded machine stops a test as a hang

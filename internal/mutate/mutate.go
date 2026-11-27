@@ -54,6 +54,10 @@ type Mutation struct {
 	// site's edits it is; nil where it can only be built alone, through Overlay.
 	site *site
 	role role
+	// reach is where the edit is, then the start of each statement around it, innermost first: a
+	// test that runs the edit has been at each. Empty in a function with a goto (hasGoto), and
+	// every test is asked.
+	reach []place
 }
 
 func (m Mutation) String() string {
@@ -241,7 +245,7 @@ func plan(path string, changed map[int]bool, honourExempt bool) ([]Mutation, err
 	line := func(n ast.Node) int { return fset.Position(n.Pos()).Line }
 
 	var out []Mutation
-	add := func(name string, m edit) {
+	add := func(name string, m edit, reach []place) {
 		at := line(m.node)
 		if exempt[at] || exempt[at-1] {
 			return
@@ -249,7 +253,7 @@ func plan(path string, changed map[int]bool, honourExempt bool) ([]Mutation, err
 		out = append(out, Mutation{
 			File: path, Line: at, Func: name, What: m.what,
 			Start: fset.Position(m.node.Pos()).Offset, End: fset.Position(m.node.End()).Offset, With: m.with,
-			site: m.site, role: m.role,
+			site: m.site, role: m.role, reach: reach,
 		})
 	}
 
@@ -267,18 +271,55 @@ func plan(path string, changed map[int]bool, honourExempt bool) ([]Mutation, err
 			continue
 		}
 		sizes, logged := meaningless(fn.Body)
+		jumps := hasGoto(fn.Body)
+		var around []ast.Node
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if n == nil {
+				around = around[:len(around)-1]
+				return true
+			}
+			around = append(around, n)
 			for _, m := range edits(n, source, fset) {
 				if sizes[m.node] || within(m.node, logged) {
 					continue
 				}
-				add(name, m)
+				var reach []place
+				if !jumps {
+					reach = reachOf(fset, m.node, around)
+				}
+				add(name, m, reach)
 			}
 			return true
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Line < out[j].Line })
 	return out, nil
+}
+
+// reachOf is where a test that runs node has been: node, then the start of each statement of
+// around, the nodes from the function's body down to node, innermost first.
+func reachOf(fset *token.FileSet, node ast.Node, around []ast.Node) []place {
+	reach := []place{placeOf(fset, node.Pos())}
+	for _, n := range slices.Backward(around) {
+		if s, ok := n.(ast.Stmt); ok {
+			reach = append(reach, placeOf(fset, s.Pos()))
+		}
+	}
+	return reach
+}
+
+// hasGoto is whether body jumps with a goto. Coverage counts a labeled for, switch or select in
+// the block it ends, whose counter a goto to the label skips: the test that jumped reads as one
+// that never reached the statement, and nobody knows who reaches an edit in such a function.
+func hasGoto(body *ast.BlockStmt) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if b, ok := n.(*ast.BranchStmt); ok && b.Tok == token.GOTO {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // meaningless is what, in one function, an edit would change nothing a caller could observe by:
@@ -531,6 +572,12 @@ type opPos struct {
 
 func (o opPos) Pos() token.Pos { return o.pos }
 func (o opPos) End() token.Pos { return o.pos + token.Pos(len(o.op.String())) }
+
+// placeOf is p where the file has it, not where a //line directive says: what cover names.
+func placeOf(fset *token.FileSet, p token.Pos) place {
+	at := fset.PositionFor(p, false)
+	return place{at.Line, at.Column}
+}
 
 func exprText(source []byte, fset *token.FileSet, e ast.Expr) string {
 	return string(source[fset.Position(e.Pos()).Offset:fset.Position(e.End()).Offset])
@@ -792,9 +839,9 @@ type Asked struct {
 	// Unbroken is how long the tests took with nothing broken, of which each run is allowed a
 	// multiple; nil is not known, and each is allowed Timeout.
 	Unbroken *Unbroken
-	// Reaching are the package's own tests that execute the mutated line (Coverage.Reaching),
-	// and only those are run: a test that never reaches the line cannot refuse the edit. Nil is
-	// not known, and every test is run; empty is none, and the package's tests are not run.
+	// Reaching are the package's own tests that execute the edit (Coverage.Reaching), and only
+	// those are run: a test that never reaches the edit cannot refuse it. Nil is not known, and
+	// every test is run; empty is none, and the package's tests are not run.
 	Reaching []string
 	// Importers are the packages asked when the package's own tests let the edit through.
 	Importers []string
