@@ -144,12 +144,13 @@ and its line names the test that ran past its allowance, or the run, and the all
 A test's own allowance holds while the tests run one at a time. Once a package's parallel tests
 are let go together, each is slowed by the others, and only the run's allowance applies.
 `-timeout` is what no run may pass, and the bound of a run whose tests were not measured; `0` is
-no bound, as it is for `go test`. A test of seconds that an edit hangs is stopped in seconds, even
+no bound for the run, as it is for `go test`, and each measured test still has its own. A test of seconds that an edit hangs is stopped in seconds, even
 when the edit's line is one no coverage block holds, such as a `case` of a switch, and every test
 of the package is asked.
 
 `-cache <dir>` keeps the edits already refused, so a second run over the same code tries only the
-rest. It is off by default: a run from scratch is the one to trust when a test reads files from
+rest. An edit stopped for its time is not kept: a stall of a loaded machine stops a test as a hang
+does, and the next run asks it again. It is off by default: a run from scratch is the one to trust when a test reads files from
 outside its package.
 
 ## Running it
