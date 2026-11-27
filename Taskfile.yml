@@ -48,6 +48,11 @@ vars:
 
 tasks:
 
+  test:platform:
+    desc: The tests of what differs by platform - the Task go tool task runs and how it runs it, the archives it unpacks, the interrupt every command stops on - on this machine's. CI runs it on Windows and macOS, beside the Gate on Linux.
+    cmds:
+      - go test ./cmd/task/ ./internal/toolcache/ ./internal/interrupt/
+
   test:
     desc: The Go tests, under the race detector, with their coverage in coverage.out and held to a floor.
     vars:
@@ -137,7 +142,7 @@ tasks:
     # a second task would stand in front of Task. Its tasks.yml is: the tasks a repository includes
     # are of the release their commands are from.
     vars:
-      PLATFORMS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+      PLATFORMS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
       COMMANDS:
         sh: go list ./cmd/... | grep -v '/cmd/task$' | tr '\n' ' '
     cmds:

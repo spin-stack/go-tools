@@ -1,7 +1,7 @@
 # The Task `go tool task` runs, for each platform a go-tools release is built for (the Taskfile's
-# release:build PLATFORMS): the command carries this pin (go:embed), so every repository takes it
-# by its go-tools version rather than writing its own. A repository's versions.yaml `task`, when it
-# has one, is run instead.
+# release:build PLATFORMS): the command carries these pins (go:embed), so every repository takes
+# them by its go-tools version rather than writing its own. A repository's versions.yaml `task`,
+# when it has one, is run instead.
 
 - name: task
   kind: download
@@ -17,3 +17,15 @@
     go tool task, in every repository that takes it, and this repository's CI (go-task/setup-task,
     from go run ./cmd/versions env -file cmd/task/versions.yaml task). Upstream's binary: no
     repository compiles it.
+
+- name: task-windows
+  kind: download
+  source: https://github.com/go-task/task/releases/download/v{version}/task_{os}_{arch}.zip
+  version: 3.54.0
+  pins:
+    windows/amd64: 837f42f71899ea41d07a47acc81d4d6ea80cb41c68292345f915c656473efcb7
+    windows/arm64: 4618ea027582738a056af9a5b78086c402e93c82c1c67df0eab2d20c649608e2
+  track: with task
+  note: >-
+    task's Windows files, which upstream releases as .zip, not .tar.gz: an entry of their own,
+    since a source names one file name for every platform. A bump of task moves it.

@@ -30,11 +30,17 @@ command alone, as `kill` or a timeout sends it. A second Ctrl+C ends a command a
 without waiting for that cleanup.
 
 The Task is go-tools' own: [`cmd/task/versions.yaml`](https://github.com/spin-stack/go-tools/blob/main/cmd/task/versions.yaml),
-pinned by the sha256 of its archive for every platform a release is built for (Linux and macOS,
-amd64 and arm64), and carried in the command. A repository writes no pin for it, and takes a newer
-Task with the go-tools version its `go.mod` requires. A repository whose `versions.yaml` has a
-`task` entry runs that one instead, on the platforms it lists: another platform is refused, and
-deleting the entry runs go-tools' Task.
+pinned by the sha256 of its archive for every platform a release is built for (Linux, macOS and
+Windows, amd64 and arm64), and carried in the command. A repository writes no pin for it, and takes
+a newer Task with the go-tools version its `go.mod` requires. A repository whose `versions.yaml` has
+a `task` entry runs that one instead, on the platforms it lists: another platform is refused, and
+deleting the entry runs go-tools' Task. Upstream releases Task for Windows as a `.zip`, which a
+`task` entry's source cannot name beside the `.tar.gz` of the others: on Windows a repository with
+the entry is refused, and one without it runs go-tools' Task.
+
+On Windows, `go tool task` runs Task as a process of its own, since Windows replaces no process
+with another, and exits as Task did. The commands it puts on Task's `PATH` are `.exe` files of the
+release, and a Taskfile names them as it does elsewhere: `mutate`, not `mutate.exe`.
 
 No repository bumps the tools: a release of go-tools is in every repository's next run. What a
 repository imports of go-tools as a library - `versions`, `provenance` - is `go.mod`'s. Each

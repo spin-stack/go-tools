@@ -8,6 +8,7 @@ package toolcache
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -39,8 +41,9 @@ func install(ctx context.Context, e versions.Entry, root, goos, goarch string) (
 	if err != nil {
 		return "", err
 	}
-	if !strings.HasSuffix(e.URL(), ".tar.gz") {
-		return "", fmt.Errorf("toolcache: %s is %s, and only a .tar.gz is unpacked", e.Name, e.URL())
+	unpack, ok := unpackers[path.Ext(e.URL())]
+	if !ok {
+		return "", fmt.Errorf("toolcache: %s is %s, and only a .tar.gz or a .zip is unpacked", e.Name, e.URL())
 	}
 	dir := filepath.Join(root, e.Name, e.Pin)
 	if _, err := os.Stat(dir); err == nil {
@@ -49,7 +52,7 @@ func install(ctx context.Context, e versions.Entry, root, goos, goarch string) (
 	if err := os.MkdirAll(filepath.Dir(dir), 0o750); err != nil {
 		return "", fmt.Errorf("toolcache: %w", err)
 	}
-	archive, err := os.CreateTemp(filepath.Dir(dir), e.Pin+".*.tar.gz")
+	archive, err := os.CreateTemp(filepath.Dir(dir), e.Pin+".*.archive")
 	if err != nil {
 		return "", fmt.Errorf("toolcache: %w", err)
 	}
@@ -229,10 +232,14 @@ func askLatest(ctx context.Context, base string) (string, error) {
 	return tag, nil
 }
 
-// unpack writes the regular files and directories of the gzipped tar at archive into dir, each
+// unpackers write an archive into a directory, by the extension of the file's name: upstream
+// releases Windows' programs as .zip and the others as .tar.gz.
+var unpackers = map[string]func(archive, dir string) error{".gz": untar, ".zip": unzip}
+
+// untar writes the regular files and directories of the gzipped tar at archive into dir, each
 // with its mode's permission bits. A name that would land outside dir is refused, and a link
 // is not followed or made: what the archive holds is programs, and a link is a way out of dir.
-func unpack(archive, dir string) error {
+func untar(archive, dir string) error {
 	f, err := os.Open(archive) //nolint:gosec // the archive this package just downloaded and checked
 	if err != nil {
 		return err
@@ -267,6 +274,38 @@ func unpack(archive, dir string) error {
 			}
 		}
 	}
+}
+
+// unzip is untar for a .zip: its regular files and directories, none outside dir, no link.
+func unzip(archive, dir string) error {
+	zr, err := zip.OpenReader(archive)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = zr.Close() }() // read-only
+	for _, f := range zr.File {
+		name := filepath.Clean(f.Name)
+		if !filepath.IsLocal(name) {
+			return fmt.Errorf("%s would be written outside the directory", f.Name)
+		}
+		target := filepath.Join(dir, name)
+		switch mode := f.Mode(); {
+		case mode.IsDir():
+			if err := os.MkdirAll(target, 0o750); err != nil {
+				return err
+			}
+		case mode.IsRegular():
+			r, err := f.Open()
+			if err != nil {
+				return err
+			}
+			err = write(target, r, mode.Perm())
+			if err := errors.Join(err, r.Close()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func write(target string, r io.Reader, mode fs.FileMode) error {
