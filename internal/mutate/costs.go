@@ -120,7 +120,7 @@ func TestCosts() []TestCost {
 
 var (
 	// A top-level test's end, as -test.v says it; a subtest's is indented.
-	testEnd = regexp.MustCompile(`^--- (?:PASS|FAIL|SKIP): (Test\S*) \(([0-9.]+)s\)$`)
+	testEnd = regexp.MustCompile(`^--- (?:PASS|FAIL|SKIP): ((?:Test|Fuzz|Example)\S*) \(([0-9.]+)s\)$`)
 	// go test's line for a package it ran, after its tests' lines.
 	packageEnd = regexp.MustCompile(`^(?:ok|FAIL)\s+(\S+)\s`)
 )

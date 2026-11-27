@@ -121,9 +121,9 @@ func absDir(dir string) string {
 // A top-level test's start, pause and end as -test.v says them; where in a line is framed's. A
 // subtest's name has a /.
 var (
-	testStart = regexp.MustCompile(`=== RUN   (Test[^\s/]*)$`)
-	testPause = regexp.MustCompile(`=== PAUSE (Test[^\s/]*)$`)
-	testOver  = regexp.MustCompile(`--- (?:PASS|FAIL|SKIP): (Test[^\s/]*) \(`)
+	testStart = regexp.MustCompile(`=== RUN   ((?:Test|Fuzz|Example)[^\s/]*)$`)
+	testPause = regexp.MustCompile(`=== PAUSE ((?:Test|Fuzz|Example)[^\s/]*)$`)
+	testOver  = regexp.MustCompile(`--- (?:PASS|FAIL|SKIP): ((?:Test|Fuzz|Example)[^\s/]*) \(`)
 )
 
 // framed is the test marker names in line, where the test binary said it: at the line's start, or
