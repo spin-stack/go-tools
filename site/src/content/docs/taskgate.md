@@ -140,6 +140,7 @@ common name is one Task refuses to load, and the finding is the one that names t
 | no Taskfile of the repository's states, in its own `vars:`, a var the common tasks read (`RELEASE`, `VERSIONS_FILES`, `WORKFLOWS_ALSO`, `CONSUMERS`, `GO_TOOLS`, `TO`, `NAME`, `FILE`, `BACK`, `SHA`, `RELEASE_DRY`): an included task reads that one, not the include's, so a root `RELEASE` that is a directory leaves `release` saying the include states none. Rename it after what it holds | `common:<file>:vars:<var>` |
 | in a repository that takes `go tool task`, no step runs a bare `task` or installs Task with `go-task/setup-task` | `common:<file>/<job>/<step>/task`, `.../setup-task` |
 | `RELEASE` is stated: `{proof, jobs}`, `{elsewhere}` or `{none}` | `common:RELEASE` |
+| each key of `RELEASE` is `proof`, `jobs`, `files`, `elsewhere` or `none`, with a value. In a flow map an unquoted comma ends a value, and the rest of the sentence is a key of its own: `{none: "a, b"}` | `common:RELEASE/key/<key>` |
 | `proof` is a workflow the repository has, and each of `jobs` starts the name of one of its jobs | `common:RELEASE/proof`, `common:RELEASE/jobs/<job>` |
 | each file `elsewhere` names is under `.github/workflows` | `common:RELEASE/elsewhere/<file>` |
 | with `none`, no workflow releases: none is named `release.yml`, started by a tag or a published release, uses a release action, or runs - in a step or in a task a step reaches - `gh release create`, `git tag <name>`, a push of tags or `goreleaser release` | `common:RELEASE/none/<file>` |

@@ -433,3 +433,35 @@ func TestARepositorysVarDoesNotHideOneTheCommonTasksRead(t *testing.T) {
 	assert.Contains(t, got["common:taskfiles/ci.yml:vars:SHA"], "taskfiles/ci.yml:3: var SHA")
 }
 
+// RELEASE's keys are the ones the release task reads, each with a value. In a flow map an unquoted
+// comma ends the value: runbooks' none sentence was cut there, the rest a key with no value, and
+// the task and the gate both read the cut sentence and said nothing.
+func TestReleasesKeysAreTheTasksEachWithAValue(t *testing.T) {
+	runbooks := func(m string) map[string]string {
+		return with(map[string]string{
+			"Taskfile.yml":             taskfile("  common:\n    taskfile: \"{{.GO_TOOLS_TASKS}}\"\n    flatten: true\n    vars:\n      RELEASE:\n        map: "+m+"\n", lint),
+			".github/workflows/ci.yml": "on: pull_request\njobs:\n  gate:\n    name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: go tool task lint\n",
+		})
+	}
+	const sentence = "spin pins a commit of main and copies the runbooks in, so no tag or release names a version of them"
+	got, _ := common(t, runbooks("{none: "+sentence+"}"))
+	assert.Equal(t, []string{"common:RELEASE/key/so no tag or release names a version of them"}, slices.Sorted(maps.Keys(got)))
+	assert.Equal(t, "Taskfile.yml:8: RELEASE's key \"so no tag or release names a version of them\" is not one of proof, jobs, files, elsewhere, none and has no value, "+
+		"so it says nothing the release task reads. A value that holds a comma is quoted (`{none: \"a, b\"}`): unquoted, the comma ends it and the rest is a key of its own",
+		got["common:RELEASE/key/so no tag or release names a version of them"])
+
+	got, said := common(t, runbooks("{none: \""+sentence+"\"}"))
+	assert.Empty(t, got)
+	assert.Contains(t, said, "RELEASE says none")
+
+	for m, says := range map[string]string{
+		"{elswhere: release.yml}":                  "RELEASE's key \"elswhere\" is not one of proof, jobs, files, elsewhere, none, so",
+		"{proof: ci.yml, job: Gate, jobs: Gate}":   "RELEASE's key \"job\" is not one of proof, jobs, files, elsewhere, none, so",
+		"{none: \"nothing is released\", files: }": "RELEASE's key \"files\" has no value, so",
+	} {
+		got, _ := common(t, runbooks(m))
+		key := "common:RELEASE/key/" + strings.Split(says, "\"")[1]
+		require.Contains(t, got, key, m)
+		assert.Contains(t, got[key], says, m)
+	}
+}

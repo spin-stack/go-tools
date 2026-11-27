@@ -239,8 +239,9 @@ task: release: this repository releases, but not with this task: release.yml doe
         map: {none: "its outputs are copied at a commit, which consumers.toml lists"}
 ```
 
-`none` is a sentence for a person, and the task refuses with it. A repository that states no
-`RELEASE` at all is refused too, and told to state one of the three. `elsewhere` and `none` win
+`none` is a sentence for a person, and the task refuses with it. Quote it: in a `{...}` map an
+unquoted comma ends the sentence there, and `taskgate -common` fails the key the rest becomes. A
+repository that states no `RELEASE` at all is refused too, and told to state one of the three. `elsewhere` and `none` win
 over the other keys, and `proof` without `jobs` proves nothing and is refused.
 
 ### Why a map
