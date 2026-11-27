@@ -135,7 +135,7 @@ func lookUp(t *testing.T, store string, plan []Mutation) *Cache {
 		t.Fatal(err)
 	}
 	if _, refused, err := cache.Known(t.Context(), plan, nil); err != nil || len(refused) > 0 {
-		t.Fatalf("an edit refused at one memory bound was taken from the cache at another: %v %v", refused, err)
+		t.Fatalf("the cache answered an edit from a run before: %v %v", refused, err)
 	}
 	return cache
 }
