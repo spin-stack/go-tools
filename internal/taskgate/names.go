@@ -2,6 +2,7 @@ package taskgate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +15,10 @@ import (
 // re-implemented them would be a second Task to keep in step with the first. The binary the
 // caller runs, not whatever is on PATH, so the version that resolves a name is the one a workflow
 // runs.
-func Tasks(task, root string) (map[string]bool, error) {
+func Tasks(ctx context.Context, task, root string) (map[string]bool, error) {
 	// --no-status: without it Task writes a checksum file for each task with sources, and a gate
 	// that writes the tree it reads changes what the next task believes is up to date.
-	cmd := exec.Command(task, "--dir", root, "--list-all", "--json", "--no-status") //nolint:gosec // the caller's Task
+	cmd := exec.CommandContext(ctx, task, "--dir", root, "--list-all", "--json", "--no-status") //nolint:gosec // the caller's Task
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

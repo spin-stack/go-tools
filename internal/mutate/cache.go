@@ -1,6 +1,7 @@
 package mutate
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -45,9 +46,9 @@ func OpenCache(dir string) (*Cache, error) {
 
 // Known splits chosen into the edits to ask the tests about and those a run over the same code
 // refused already. importers is Importers'.
-func (c *Cache) Known(chosen []Mutation, importers map[string][]string) (fresh, refused []Mutation, err error) {
+func (c *Cache) Known(ctx context.Context, chosen []Mutation, importers map[string][]string) (fresh, refused []Mutation, err error) {
 	for _, m := range chosen {
-		key, err := c.key(m, importers[filepath.ToSlash(filepath.Dir(m.File))])
+		key, err := c.key(ctx, m, importers[filepath.ToSlash(filepath.Dir(m.File))])
 		if err != nil {
 			return nil, nil, err
 		}
@@ -84,12 +85,12 @@ func (c *Cache) path(key string) string {
 }
 
 // key is m's, whose package's importers are importers (directories, as Importers names them).
-func (c *Cache) key(m Mutation, importers []string) (string, error) {
+func (c *Cache) key(ctx context.Context, m Mutation, importers []string) (string, error) {
 	dir, err := filepath.Abs(filepath.Dir(m.File))
 	if err != nil {
 		return "", err
 	}
-	g, err := c.module(dir)
+	g, err := c.module(ctx, dir)
 	if err != nil {
 		return "", err
 	}
@@ -191,7 +192,7 @@ type moduleGraph struct {
 }
 
 // module is the graph of the module dir is in, listed once.
-func (c *Cache) module(dir string) (*moduleGraph, error) {
+func (c *Cache) module(ctx context.Context, dir string) (*moduleGraph, error) {
 	g, ok := c.modules[dir]
 	if ok {
 		return g, nil
@@ -202,7 +203,7 @@ func (c *Cache) module(dir string) (*moduleGraph, error) {
 	}
 	g, ok = c.modules[root]
 	if !ok {
-		if g, err = listModule(root); err != nil {
+		if g, err = listModule(ctx, root); err != nil {
 			return nil, err
 		}
 	}
@@ -210,9 +211,9 @@ func (c *Cache) module(dir string) (*moduleGraph, error) {
 	return g, nil
 }
 
-func listModule(root string) (*moduleGraph, error) {
+func listModule(ctx context.Context, root string) (*moduleGraph, error) {
 	// -e for the reason Importers has it: a package that does not build still names its imports.
-	list := exec.Command("go", "list", "-e", "-f",
+	list := exec.CommandContext(ctx, "go", "list", "-e", "-f",
 		"{{.ImportPath}}\t{{.Dir}}\t{{join .Imports \" \"}}\t{{join .TestImports \" \"}} {{join .XTestImports \" \"}}", "./...")
 	list.Dir = root
 	out, err := output("listing", list)

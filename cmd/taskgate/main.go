@@ -30,10 +30,12 @@ import (
 	"os"
 
 	"github.com/spin-stack/go-tools/internal/allow"
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/taskgate"
 )
 
 func main() {
+	ctx := interrupt.Context()
 	allowPath := flag.String("allow", "", "what is allowed on purpose, `<key>  # why` a line (none by default)")
 	task := flag.String("task", "task", "the Task binary that lists the Taskfile's tasks")
 	maxLines := flag.Int("max-lines", 12, "lines of shell a task's own cmd or sh may hold; 0 is any")
@@ -60,12 +62,12 @@ func main() {
 	if *common {
 		// Before Task is asked anything: a second task of a common name is a Taskfile Task does
 		// not load, and what is wanted then is this gate's finding, which names the file.
-		if uncommon, said, err = taskgate.Common(root, *included); err != nil {
+		if uncommon, said, err = taskgate.Common(ctx, root, *included); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 	}
-	known, err := taskgate.Tasks(*task, root)
+	known, err := taskgate.Tasks(ctx, *task, root)
 	if err != nil {
 		for _, f := range uncommon {
 			fmt.Printf("%s (%s)\n", f, f.Key())
@@ -73,7 +75,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	findings, err := taskgate.Check(root, taskgate.Limits{Block: *maxLines, Script: *maxScript}, known, commands...)
+	findings, err := taskgate.Check(ctx, root, taskgate.Limits{Block: *maxLines, Script: *maxScript}, known, commands...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

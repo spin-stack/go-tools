@@ -47,7 +47,7 @@ func common(t *testing.T, files map[string]string) (map[string]string, string) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, rel), []byte(body), 0o600))
 	}
 	gittest.Run(t, root, "init", "-q")
-	findings, said, err := taskgate.Common(root, taskgate.CommonInclude)
+	findings, said, err := taskgate.Common(t.Context(), root, taskgate.CommonInclude)
 	require.NoError(t, err)
 	got := map[string]string{}
 	for _, f := range findings {
@@ -96,7 +96,7 @@ func TestARepositoryThatHasTheCommonTasksPasses(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "internal/tasks"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "internal/tasks/tasks.yml"), []byte("version: '3'\ntasks:\n  versions:\n    cmds: [go run ./cmd/versions check]\n"), 0o600))
 	gittest.Run(t, root, "init", "-q")
-	findings, _, err := taskgate.Common(root, "internal/tasks/tasks.yml")
+	findings, _, err := taskgate.Common(t.Context(), root, "internal/tasks/tasks.yml")
 	require.NoError(t, err)
 	assert.Empty(t, findings, "a bare `task` in a repository that does not take `go tool task`, or the included file's own tasks")
 }

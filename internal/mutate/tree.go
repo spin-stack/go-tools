@@ -1,6 +1,7 @@
 package mutate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -62,7 +63,7 @@ func (t *Tree) Wrote() []string {
 // directory is shared as its working directory was: a cache folder under os.TempDir() named by
 // the millisecond was one directory for two tests started at once, and each failed with nothing
 // broken - asked about no edit, so the edits only they reached were let through.
-func (t *Tree) in(dir string, run func(at, tmp string)) error {
+func (t *Tree) in(ctx context.Context, dir string, run func(at, tmp string)) error {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -73,7 +74,7 @@ func (t *Tree) in(dir string, run func(at, tmp string)) error {
 	}
 	c := t.copies[root]
 	if c == nil {
-		c, err = copyModule(root, filepath.Join(t.dir, strconv.Itoa(len(t.copies))))
+		c, err = copyModule(ctx, root, filepath.Join(t.dir, strconv.Itoa(len(t.copies))))
 		if err != nil {
 			return fmt.Errorf("mutate: copying %s to run its tests in: %w", root, err)
 		}
@@ -150,8 +151,8 @@ type treeFile struct {
 	modTime time.Time
 }
 
-func copyModule(src, dst string) (*treeCopy, error) {
-	files, inGit, err := moduleFiles(src)
+func copyModule(ctx context.Context, src, dst string) (*treeCopy, error) {
+	files, inGit, err := moduleFiles(ctx, src)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +174,7 @@ func copyModule(src, dst string) (*treeCopy, error) {
 	// the checkout's own .git: a test's git that lands there writes into what every worktree
 	// commits from.
 	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
-		git := exec.Command("git", args...)
+		git := exec.CommandContext(ctx, "git", args...)
 		git.Dir = dst
 		if _, err := output("listing", git); err != nil {
 			return nil, fmt.Errorf("git %s in the copy: %w", strings.Join(args, " "), err)
@@ -185,14 +186,19 @@ func copyModule(src, dst string) (*treeCopy, error) {
 // moduleFiles is what of the module under root is copied, by its path from root: what git
 // tracks or does not ignore, a nested repository as its directory; and whether root is in a git
 // work tree, which is what said so.
-func moduleFiles(root string) ([]string, bool, error) {
-	inside := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+func moduleFiles(ctx context.Context, root string) ([]string, bool, error) {
+	inside := exec.CommandContext(ctx, "git", "rev-parse", "--is-inside-work-tree")
 	inside.Dir = root
 	if _, err := output("listing", inside); err != nil {
+		// Stopped, git says nothing about root: copied as outside a work tree, the copy would be
+		// every file under it, a checkout's .git and build outputs with them.
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		files, err := walkFiles(root)
 		return files, false, err
 	}
-	list := exec.Command("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	list := exec.CommandContext(ctx, "git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	list.Dir = root
 	said, err := output("listing", list)
 	if err != nil {

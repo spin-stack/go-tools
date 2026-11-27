@@ -12,12 +12,12 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/testidentity"
 )
 
@@ -29,7 +29,8 @@ func main() {
 	if flag.NArg() > 0 {
 		root = flag.Arg(0)
 	}
-	err := testidentity.Run(context.Background(), root, *base, *allowPath, os.Stdout)
+	ctx := interrupt.Context()
+	err := testidentity.Run(ctx, root, *base, *allowPath, os.Stdout)
 	switch {
 	case errors.Is(err, testidentity.ErrFound):
 		os.Exit(1)

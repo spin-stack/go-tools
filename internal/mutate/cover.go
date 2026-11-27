@@ -3,6 +3,7 @@ package mutate
 import (
 	"bufio"
 	"cmp"
+	"context"
 	"fmt"
 	"maps"
 	"os"
@@ -62,15 +63,16 @@ func inAny(spans []span, line int) bool {
 // of its own per package multiplied with theirs, and a database package's tests start a
 // PostgreSQL per process. Nil where the package has no tests, or they would not build - Run then
 // asks every test, as it would without this.
-func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
+func Cover(ctx context.Context, dir, timeout string, slots chan *Tree) (*Coverage, error) {
 	work, err := os.MkdirTemp("", "mutate-cover-")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 	bin := filepath.Join(work, "pkg.test")
-	build := exec.Command("go", "test", "-c", "-cover", "-covermode=set", "-o", bin, ".")
+	build := exec.CommandContext(ctx, "go", "test", "-c", "-cover", "-covermode=set", "-o", bin, ".")
 	build.Dir = dir
+	workIn(build, work)
 	tree := <-slots
 	out, err := combined("cover: build the package's tests", build)
 	slots <- tree
@@ -80,14 +82,14 @@ func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
 	if _, err := os.Stat(bin); err != nil {
 		return nil, nil //nolint:nilnil // no test binary: the package has no tests
 	}
-	name := exec.Command("go", "list", "-f", "{{.ImportPath}}", ".")
+	name := exec.CommandContext(ctx, "go", "list", "-f", "{{.ImportPath}}", ".")
 	name.Dir = dir
 	importPath, err := output("listing", name)
 	if err != nil {
 		return nil, fmt.Errorf("mutate: naming %s: %w", dir, err)
 	}
-	list := exec.Command(bin, "-test.list", ".*") //nolint:gosec // the binary this built
-	list.Dir = dir                                // mutate-exempt: listing runs no test, so where it runs changes nothing it says
+	list := exec.CommandContext(ctx, bin, "-test.list", ".*") //nolint:gosec // the binary this built
+	list.Dir = dir                                            // mutate-exempt: listing runs no test, so where it runs changes nothing it says
 	listed, err := output("listing", list)
 	if err != nil {
 		return nil, fmt.Errorf("mutate: listing %s's tests: %w", dir, err)
@@ -110,7 +112,7 @@ func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
 			defer wg.Done()
 			defer func() { slots <- tree }()
 			profile := filepath.Join(work, strconv.Itoa(i)+".cov")
-			run := exec.Command(bin, "-test.run", "^"+test+"$", "-test.count=1", //nolint:gosec // the binary this built
+			run := exec.CommandContext(ctx, bin, "-test.run", "^"+test+"$", "-test.count=1", //nolint:gosec // the binary this built
 				"-test.timeout", timeout, "-test.coverprofile", profile)
 			run.Env = testEnv()
 			// A failure here is the package's own tests' to report, not this gate's; what this
@@ -121,13 +123,17 @@ func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
 				exceeded bool
 				runErr   error
 			)
-			if err := tree.in(dir, func(at, tmp string) {
+			if err := tree.in(ctx, dir, func(at, tmp string) {
 				run.Dir, run.Env = at, append(run.Env, "TMPDIR="+tmp)
 				said, exceeded, runErr = bounded("cover: run one test", run)
 			}); err != nil {
 				mu.Lock()
 				treeErr = cmp.Or(treeErr, err)
 				mu.Unlock()
+				return
+			}
+			// Killed by the cancellation, a test reads as one that fails with nothing broken.
+			if ctx.Err() != nil {
 				return
 			}
 			if exceeded {
@@ -160,6 +166,9 @@ func Cover(dir, timeout string, slots chan *Tree) (*Coverage, error) {
 		}()
 	}
 	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if treeErr != nil {
 		return nil, treeErr
 	}

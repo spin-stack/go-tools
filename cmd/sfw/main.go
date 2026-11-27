@@ -11,7 +11,6 @@
 package main
 
 import (
-	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -20,7 +19,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"syscall"
 
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/sfw"
 	"github.com/spin-stack/go-tools/versions"
 )
@@ -55,7 +56,7 @@ func check(args []string) int {
 	if len(args) > 0 {
 		root = args[0]
 	}
-	findings, err := sfw.Check(root)
+	findings, err := sfw.Check(interrupt.Context(), root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -73,8 +74,7 @@ func check(args []string) int {
 
 // run is the package manager's command through the firewall, and its exit status.
 func run(args []string) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
+	ctx := interrupt.Context()
 	v, err := versions.Parse(pins)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -97,9 +97,11 @@ func run(args []string) int {
 	}
 	// The terminal's interrupt reaches the firewall and the package manager as it reaches this:
 	// they are one process group. This waits for them to end rather than leaving them running.
-	stop()
+	// A SIGTERM sent to this alone is passed on, so they end as they would have, and are not left
+	// running when this does.
 	signal.Ignore(os.Interrupt)
-	cmd := exec.Command(bin, args...) //nolint:gosec // the pinned firewall, running what the caller asked
+	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // the pinned firewall, running what the caller asked
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		if exit := (*exec.ExitError)(nil); errors.As(err, &exit) {

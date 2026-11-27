@@ -1,9 +1,16 @@
 package mutate
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 // The memory free is MemAvailable's, in bytes; a meminfo without it, or with one unreadable, is
@@ -107,5 +114,49 @@ func TestABoundIsNamedAsItIsHeld(t *testing.T) {
 	memLimit = 0
 	if got, want := bound(), fmt.Sprintf("%d tasks", pidsMax); got != want {
 		t.Errorf("in a cgroup with no memory bound, the bound is named %q, want %q", got, want)
+	}
+}
+
+// A cancelled run stops a test process with everything it started: a test's own go build, left
+// running when only the binary is killed, writes into the directory the run is removing.
+func TestACancelledTestStopsWhatItStarted(t *testing.T) {
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("no /proc: a process's children cannot be read")
+	}
+	t.Cleanup(func() { testCgroup = "" })
+	testCgroup = ""
+	pidFile := filepath.Join(t.TempDir(), "child")
+	ctx, cancel := context.WithCancel(t.Context())
+	cmd := exec.CommandContext(ctx, "sh", "-c", `sleep 300 & echo $! > "$0"; wait`, pidFile)
+	// A child left running holds the output open; without this Wait waits for it, and the child is
+	// gone by its own end before it is looked for.
+	cmd.WaitDelay = time.Second
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := bounded("a test", cmd)
+		done <- err
+	}()
+	var child int
+	for deadline := time.Now().Add(10 * time.Second); child == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the test process never started its child")
+		}
+		raw, _ := os.ReadFile(pidFile)
+		child, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+	}
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("a cancelled test process ended as if it had run")
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat("/proc/" + strconv.Itoa(child)); err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			if p, err := os.FindProcess(child); err == nil {
+				_ = p.Kill()
+			}
+			t.Fatal("the test process's child outlived it")
+		}
 	}
 }

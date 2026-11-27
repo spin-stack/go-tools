@@ -37,7 +37,7 @@ func tree(t *testing.T, prose string) string {
 
 func check(t *testing.T, root string, tasks refs.TaskLister) []refs.Finding {
 	t.Helper()
-	found, err := refs.Check(refs.Options{
+	found, err := refs.Check(t.Context(), refs.Options{
 		Root:    root,
 		Files:   []string{"CLAUDE.md"},
 		TopDirs: []string{"internal", "docs", "cmd"},
@@ -167,7 +167,7 @@ func TestAComponentResolvesAgainstItsOwnTaskfileAndTheRoot(t *testing.T) {
 		[]byte("`task ci:full` is the merge gate; `task generate` is a root task; `task nope` is not.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	found, err := refs.Check(refs.Options{
+	found, err := refs.Check(t.Context(), refs.Options{
 		Root:    root,
 		Files:   []string{"storage/CLAUDE.md"},
 		TopDirs: []string{"storage"},
@@ -192,7 +192,7 @@ func TestAComponentResolvesAgainstItsOwnTaskfileAndTheRoot(t *testing.T) {
 // and the report was believed.
 func TestAnEmptyTaskListIsARefusalAndNotAnAnswer(t *testing.T) {
 	root := tree(t, "Run `task build`.\n")
-	_, err := refs.Check(refs.Options{
+	_, err := refs.Check(t.Context(), refs.Options{
 		Root:    root,
 		Files:   []string{"CLAUDE.md"},
 		TopDirs: []string{"internal"},
@@ -277,7 +277,7 @@ func TestADecisionAndASymbolOfAMissingPackage(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "docs/decisions/ADR-0001-one.md"), []byte("x"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			found, err := refs.Check(refs.Options{
+			found, err := refs.Check(t.Context(), refs.Options{
 				Root:      root,
 				Files:     []string{"CLAUDE.md"},
 				TopDirs:   []string{"internal", "docs", "cmd"},
@@ -311,7 +311,7 @@ func TestTasksAreAskedOfTheTaskGoModPins(t *testing.T) {
 	t.Chdir(mod)
 	t.Setenv("GOCACHE", t.TempDir())
 
-	task := refs.TaskCommand("")
+	task := refs.TaskCommand(t.Context(), "")
 	if !slices.Equal(task, []string{"go", "tool", "task"}) {
 		t.Fatalf("a module that pins Task asks %v", task)
 	}
@@ -319,13 +319,13 @@ func TestTasksAreAskedOfTheTaskGoModPins(t *testing.T) {
 	if err != nil || string(out) != "the pinned task\n" {
 		t.Errorf("the pinned Task, from a cold cache, said %q: %v", out, err)
 	}
-	if got := refs.TaskCommand("/opt/task"); !slices.Equal(got, []string{"/opt/task"}) {
+	if got := refs.TaskCommand(t.Context(), "/opt/task"); !slices.Equal(got, []string{"/opt/task"}) {
 		t.Errorf("a Task named outright is not the one asked: %v", got)
 	}
 	if err := os.WriteFile(filepath.Join(mod, "go.mod"), []byte("module example.com/m\n\ngo 1.24\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := refs.TaskCommand(""); !slices.Equal(got, []string{"task"}) {
+	if got := refs.TaskCommand(t.Context(), ""); !slices.Equal(got, []string{"task"}) {
 		t.Errorf("a module that pins no Task asks %v, not task on PATH", got)
 	}
 }

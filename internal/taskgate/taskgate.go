@@ -10,6 +10,7 @@ package taskgate
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -86,8 +87,8 @@ type Limits struct {
 // every name the root's Taskfile answers to (Tasks); a step naming another is Missing. Nil asks
 // nothing of the names. commands are the repository's own commands a step may be instead of a
 // task (`go run ./cmd/spin-os`, `spin-os`): one invocation of one of them, as a task is one.
-func Check(root string, limits Limits, known map[string]bool, commands ...string) ([]Finding, error) {
-	out, err := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
+func Check(ctx context.Context, root string, limits Limits, known map[string]bool, commands ...string) ([]Finding, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
 	if err != nil {
 		return nil, fmt.Errorf("taskgate: listing %s: %w", root, err)
 	}

@@ -24,6 +24,11 @@ latest is asked at most every ten minutes - and again at once when the cache nam
 before the release `go.mod` requires - and a machine that cannot ask goes on with the one it
 has. Task's and the tools' own modules - about 450 together - are in no `go.mod` and no CI cache.
 
+Ctrl+C stops a command and every process it started, on Linux, macOS and Windows, and the command
+removes what it wrote to the temporary directory before it exits. So does a SIGTERM sent to the
+command alone, as `kill` or a timeout sends it. A second Ctrl+C ends a command at once,
+without waiting for that cleanup.
+
 The Task is go-tools' own: [`cmd/task/versions.yaml`](https://github.com/spin-stack/go-tools/blob/main/cmd/task/versions.yaml),
 pinned by the sha256 of its archive for every platform a release is built for (Linux and macOS,
 amd64 and arm64), and carried in the command. A repository writes no pin for it, and takes a newer

@@ -18,6 +18,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,15 +28,16 @@ import (
 
 	"github.com/spin-stack/go-tools/internal/allow"
 	"github.com/spin-stack/go-tools/internal/deadgate"
+	"github.com/spin-stack/go-tools/internal/interrupt"
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) // mutate-exempt: the process's own arguments; run is what the test drives
+	os.Exit(run(interrupt.Context(), os.Args[1:], os.Stdout, os.Stderr)) // mutate-exempt: the process's own arguments; run is what the test drives
 }
 
 // run answers the exit status: 0 every finding explained and every reason still true, 1 not,
 // 2 no answer.
-func run(args []string, stdout, stderr *os.File) int {
+func run(ctx context.Context, args []string, stdout, stderr *os.File) int {
 	fs := flag.NewFlagSet("deadgate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	allowPath := fs.String("allow", "", "unreachable, and correct for ever: `<symbol>  # why` a line (required)")
@@ -55,7 +57,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	if *skip != "" {
 		skipped = strings.Split(*skip, ",")
 	}
-	report, err := judge(*binary, *roots, *packages, skipped, *allowPath, *pendingPath)
+	report, err := judge(ctx, *binary, *roots, *packages, skipped, *allowPath, *pendingPath)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "deadgate:", err)
 		return 2
@@ -69,7 +71,7 @@ func run(args []string, stdout, stderr *os.File) int {
 
 // judge is the report: the roots built, deadcode run over them, the package pass, and the two
 // lists read.
-func judge(binary, rootsPattern, packages string, skipped []string, allowPath, pendingPath string) (deadgate.Report, error) {
+func judge(ctx context.Context, binary, rootsPattern, packages string, skipped []string, allowPath, pendingPath string) (deadgate.Report, error) {
 	var r deadgate.Report
 	// The lists first: a list with an entry and no reason is refused before a minute of building.
 	allowed, err := allow.Read(allowPath)
@@ -80,12 +82,12 @@ func judge(binary, rootsPattern, packages string, skipped []string, allowPath, p
 	if err != nil {
 		return r, err
 	}
-	module, err := sh("go", "list", "-m")
+	module, err := sh(ctx, "go", "list", "-m")
 	if err != nil {
 		return r, err
 	}
 	module = strings.TrimSpace(module)
-	mains, err := sh("go", "list", "-f", `{{if eq .Name "main"}}{{.ImportPath}}{{end}}`, rootsPattern)
+	mains, err := sh(ctx, "go", "list", "-f", `{{if eq .Name "main"}}{{.ImportPath}}{{end}}`, rootsPattern)
 	if err != nil {
 		return r, err
 	}
@@ -102,21 +104,21 @@ func judge(binary, rootsPattern, packages string, skipped []string, allowPath, p
 		return r, err
 	}
 	defer func() { _ = os.RemoveAll(out) }()
-	if _, err := sh("go", append([]string{"build", "-o", out + "/"}, roots...)...); err != nil {
+	if _, err := sh(ctx, "go", append([]string{"build", "-o", out + "/"}, roots...)...); err != nil {
 		return r, fmt.Errorf("the roots do not build, so deadcode would report on a program that is missing packages; a short report here would mean 'not analysed', not 'nothing dead': %w", err)
 	}
 	// -filter anchored: unanchored, a module's path also matches a module whose path begins with
 	// it, and the report fills with unreachable methods of a dependency the repository does not own.
-	report, err := sh(binary, append([]string{"-filter", "^" + module + "/", `-f={{range .Funcs}}{{$.Path}}.{{.Name}}{{"\n"}}{{end}}`}, roots...)...)
+	report, err := sh(ctx, binary, append([]string{"-filter", "^" + module + "/", `-f={{range .Funcs}}{{$.Path}}.{{.Name}}{{"\n"}}{{end}}`}, roots...)...)
 	if err != nil {
 		return r, err
 	}
 	found := deadgate.Symbols(report, module, trimDots(skipped))
-	all, err := sh("go", "list", packages)
+	all, err := sh(ctx, "go", "list", packages)
 	if err != nil {
 		return r, err
 	}
-	deps, err := sh("go", append([]string{"list", "-deps"}, roots...)...)
+	deps, err := sh(ctx, "go", append([]string{"list", "-deps"}, roots...)...)
 	if err != nil {
 		return r, err
 	}
@@ -134,8 +136,8 @@ func trimDots(skipped []string) []string {
 }
 
 // sh is a command's standard output; what it said on standard error is in the error.
-func sh(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).Output() //nolint:gosec // go and the deadcode binary the caller names, over its own module
+func sh(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, name, args...).Output() //nolint:gosec // go and the deadcode binary the caller names, over its own module
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(exit.Stderr)))
 	}

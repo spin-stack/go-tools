@@ -1,12 +1,15 @@
 package mutate_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,7 +62,7 @@ func TestEveryEditIsCountedAsTheTestsAnswered(t *testing.T) {
 		chosen[i].ID = i + 1
 	}
 	var said strings.Builder
-	tally, err := mutate.RunAll(chosen, nil, "2m", 2, &said)
+	tally, err := mutate.RunAll(t.Context(), chosen, nil, "2m", 2, &said)
 	require.NoError(t, err)
 
 	var double, unchecked int
@@ -111,7 +114,7 @@ func TestATestThatAlwaysFailsRefusesNothing(t *testing.T) {
 		plan[i].ID = i + 1
 	}
 	var said strings.Builder
-	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
+	tally, err := mutate.RunAll(t.Context(), plan, nil, "2m", 2, &said)
 	require.Error(t, err, "a run with a test that fails with nothing broken passed")
 	assert.Contains(t, err.Error(), dir+": TestBroken")
 	assert.Equal(t, []string{dir + ": TestBroken"}, tally.Broken)
@@ -145,7 +148,7 @@ func TestAnImporterTestThatAlwaysFailsStopsTheRunBeforeAnyEdit(t *testing.T) {
 		plan[i].ID = i + 1
 	}
 	var said strings.Builder
-	tally, err := mutate.RunAll(plan, map[string][]string{"lib": {"./use"}}, "2m", 2, &said)
+	tally, err := mutate.RunAll(t.Context(), plan, map[string][]string{"lib": {"./use"}}, "2m", 2, &said)
 	require.Error(t, err, "a run whose importer has a test that fails with nothing broken started: %s", said.String())
 	assert.Contains(t, err.Error(), "./use: TestBroken")
 	assert.Equal(t, []string{"./use: TestBroken"}, tally.Broken)
@@ -183,7 +186,7 @@ func TestAPackageWithNoTestsIsAskedThroughItsImporters(t *testing.T) {
 	require.Positive(t, half)
 
 	var said strings.Builder
-	tally, err := mutate.RunAll(plan, map[string][]string{"lib": {"./use", "./also"}}, "2m", 2, &said)
+	tally, err := mutate.RunAll(t.Context(), plan, map[string][]string{"lib": {"./use", "./also"}}, "2m", 2, &said)
 	require.NoError(t, err)
 	assert.Equal(t, double, tally.Killed, "Double's edits refused by the importer: %s", said.String())
 	assert.Len(t, tally.Survived, half, "Half's edits, which no importer's test reaches: %s", said.String())
@@ -194,7 +197,7 @@ func TestAPackageWithNoTestsIsAskedThroughItsImporters(t *testing.T) {
 // there has no overlay.
 func TestAnEditThatCannotBeAskedIsAnError(t *testing.T) {
 	gone := mutate.Mutation{ID: 1, File: filepath.Join(t.TempDir(), "gone.go"), Func: "F", What: "+ becomes -"}
-	_, err := mutate.RunAll([]mutate.Mutation{gone}, nil, "1m", 1, &strings.Builder{})
+	_, err := mutate.RunAll(t.Context(), []mutate.Mutation{gone}, nil, "1m", 1, &strings.Builder{})
 	assert.Error(t, err)
 }
 
@@ -215,7 +218,7 @@ func TestATestThatWritesInItsDirectoryWritesInACopyOfItsOwn(t *testing.T) {
 		plan[i].ID = i + 1
 	}
 	var said strings.Builder
-	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
+	tally, err := mutate.RunAll(t.Context(), plan, nil, "2m", 2, &said)
 	require.NoError(t, err)
 	assert.Equal(t, len(plan), tally.Killed, "an edit that stops Save writing the note was let through: %s", said.String())
 	assert.Empty(t, tally.Survived, said.String())
@@ -231,7 +234,7 @@ func TestAnEditBuiltAloneIsAskedInACopyOfItsOwn(t *testing.T) {
 	dir := notes(t)
 	code := filepath.Join(dir, "p", "code.go")
 	tree := mutate.NewTree(t.TempDir())
-	outcome, out, err := mutate.Run(mutate.Mutation{File: code}, mutate.Asked{Timeout: "2m", Tree: tree})
+	outcome, out, err := mutate.Run(t.Context(), mutate.Mutation{File: code}, mutate.Asked{Timeout: "2m", Tree: tree})
 	require.NoError(t, err)
 	require.Equal(t, mutate.Survived, outcome, "the package's test fails unmutated: %s", out)
 	assert.Contains(t, out, "ok  \texample.com/notes/p\n", "the package's answer is not named")
@@ -241,7 +244,7 @@ func TestAnEditBuiltAloneIsAskedInACopyOfItsOwn(t *testing.T) {
 	require.NotEmpty(t, plan)
 	overlay, err := mutate.Overlay(plan[0], t.TempDir())
 	require.NoError(t, err)
-	outcome, out, err = mutate.Run(plan[0], mutate.Asked{Overlay: overlay, Timeout: "2m", Tree: tree})
+	outcome, out, err = mutate.Run(t.Context(), plan[0], mutate.Asked{Overlay: overlay, Timeout: "2m", Tree: tree})
 	require.NoError(t, err)
 	assert.Equal(t, mutate.Killed, outcome, "%s was let through by the note a run before it left: %s", plan[0], out)
 	assert.Contains(t, out, "no note was written", "what refused it was not the package's own test")
@@ -286,7 +289,7 @@ func TestAnEditItsOwnTestsLetThroughIsAskedOfEachImporterInTurn(t *testing.T) {
 		plan[i].ID = i + 1
 	}
 	var said strings.Builder
-	tally, err := mutate.RunAll(plan, map[string][]string{"lib": importers}, "2m", 2, &said)
+	tally, err := mutate.RunAll(t.Context(), plan, map[string][]string{"lib": importers}, "2m", 2, &said)
 	require.NoError(t, err)
 	assert.Equal(t, len(plan), tally.Killed, "Double's edits are refused by use, after lib and also let them through: %s", said.String())
 
@@ -356,7 +359,7 @@ func TestEachTestProcessHasATemporaryDirectoryOfItsOwn(t *testing.T) {
 	require.Positive(t, double)
 	require.Positive(t, half)
 	var said strings.Builder
-	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
+	tally, err := mutate.RunAll(t.Context(), plan, nil, "2m", 2, &said)
 	require.NoError(t, err)
 	assert.Equal(t, double, tally.Killed, "only Double's edits are refused: %s", said.String())
 	assert.Len(t, tally.Survived, half, "Half's edits, which nothing checks, were refused by a claim another run made: %s", said.String())
@@ -407,7 +410,7 @@ func TestADirectoryGitIgnoresIsNotSharedWithTheCopies(t *testing.T) {
 	require.Positive(t, double)
 	require.Positive(t, half)
 	var said strings.Builder
-	tally, err := mutate.RunAll(plan, nil, "2m", 2, &said)
+	tally, err := mutate.RunAll(t.Context(), plan, nil, "2m", 2, &said)
 	require.NoError(t, err)
 	assert.Equal(t, double, tally.Killed, "only Double's edits are refused: %s", said.String())
 	assert.Len(t, tally.Survived, half, "Half's edits, which nothing checks, were refused by a claim another copy made: %s", said.String())
@@ -418,4 +421,58 @@ func TestADirectoryGitIgnoresIsNotSharedWithTheCopies(t *testing.T) {
 		names = append(names, e.Name())
 	}
 	assert.Equal(t, []string{"bin"}, names, "a test wrote into the checkout's _output")
+}
+
+// A run cancelled while a test binary is asked about an edit stops it, asks nothing more, and
+// fails, leaving no directory of its own behind. The killed binary failed, and counted, the edit
+// it was asked about would read as refused: a Ctrl+C that made a gate pass.
+func TestACancelledRunStopsItsTestsAndCountsNothing(t *testing.T) {
+	dir := t.TempDir()
+	asked := filepath.Join(t.TempDir(), "asked")
+	for name, body := range map[string]string{
+		"go.mod":  "module example.com/hangs\n\ngo 1.24\n",
+		"code.go": "package hangs\n\nfunc Double(n int) int {\n\treturn n + n\n}\n",
+		"code_test.go": "package hangs\n\nimport (\n\t\"os\"\n\t\"testing\"\n\t\"time\"\n)\n\n" +
+			"func TestDouble(t *testing.T) {\n\tif Double(2) != 4 {\n\t\t_ = os.WriteFile(" + strconv.Quote(asked) + ", nil, 0o600)\n" +
+			"\t\ttime.Sleep(time.Hour)\n\t}\n}\n",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	plan, err := mutate.Plan(filepath.Join(dir, "code.go"), map[int]bool{4: true})
+	require.NoError(t, err)
+	require.NotEmpty(t, plan)
+	for i := range plan {
+		plan[i].ID = i + 1
+	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		for {
+			if _, err := os.Stat(asked); err == nil {
+				cancel()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
+	var said strings.Builder
+	started := time.Now()
+	tally, err := mutate.RunAll(ctx, plan, nil, "2m", 1, &said)
+	require.ErrorIs(t, err, context.Canceled, "said: %s", said.String())
+	assert.Less(t, time.Since(started), 30*time.Second, "the test binary asked about the edit was not stopped")
+	assert.Zero(t, tally.Killed, "an edit was counted as refused: %s", said.String())
+	assert.Empty(t, tally.Refused)
+	assert.Empty(t, tally.Survived)
+	assert.NotContains(t, said.String(), "refused ")
+	assert.NotContains(t, said.String(), "SURVIVED")
+	left, err := os.ReadDir(tmp)
+	require.NoError(t, err)
+	assert.Empty(t, left, "the run left these in TMPDIR")
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/mod/modfile"
 )
 
 // Cost is what the processes a run started for one purpose took: how many, how long they ran end
@@ -38,6 +40,13 @@ func Costs() []Cost {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CPU > out[j].CPU })
 	return out
+}
+
+// workIn has cmd, a go command, keep its work directory under dir, which the caller removes: the
+// go command removes its own as it exits, and killed when a run is stopped, it leaves one
+// (go-build*) in TMPDIR, with a package's compiled archives in it, for every build it was making.
+func workIn(cmd *exec.Cmd, dir string) {
+	cmd.Env = append(os.Environ(), "GOTMPDIR="+dir)
 }
 
 // combined is cmd's CombinedOutput, counted under what.
@@ -118,11 +127,15 @@ var (
 
 // modulePath is the import path of the module this runs in, "" outside one.
 var modulePath = sync.OnceValue(func() string {
-	out, err := output("listing", exec.Command("go", "list", "-m", "-f", "{{.Path}}"))
+	root, err := moduleRoot(".")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	gomod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	return modfile.ModulePath(gomod)
 })
 
 // packageOf is how the report names a package: its directory from its module's root, whether it

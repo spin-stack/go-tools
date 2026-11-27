@@ -33,6 +33,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/spin-stack/go-tools/consumers"
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/release"
 )
 
@@ -368,7 +369,9 @@ func run(ctx context.Context, args []string, w io.Writer) error {
 }
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil { // mutate-exempt: the process's own arguments; run is what the test drives
+	ctx := interrupt.Context()
+	err := run(ctx, os.Args[1:], os.Stdout) // mutate-exempt: the process's own arguments; run is what the test drives
+	if err != nil {
 		if !errors.Is(err, flag.ErrHelp) {
 			fmt.Fprintln(os.Stderr, "consumers:", err) //nolint:errcheck // the exit status says it
 		}

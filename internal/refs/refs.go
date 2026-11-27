@@ -16,6 +16,7 @@
 package refs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -82,7 +83,7 @@ const extensions = `go|sh|sql|md|txt|yml|yaml|json|proto|dot|svg|js|ts|tsx|css|r
 	`config|conf|dict|lock|toml|env|d2|py|rs|service|mount|socket|timer|patch|hcl|tf|html`
 
 // Check returns every reference in Files that resolves to nothing, sorted.
-func Check(o Options) ([]Finding, error) {
+func Check(ctx context.Context, o Options) ([]Finding, error) {
 	if len(o.TopDirs) == 0 {
 		return nil, errors.New("refs: no top-level directories, so no reference could be recognised as a path")
 	}
@@ -111,7 +112,7 @@ func Check(o Options) ([]Finding, error) {
 		texts[i] = text
 
 		for _, ref := range pathRE.matches(text) {
-			if resolves(o.Root, ref) {
+			if resolves(ctx, o.Root, ref) {
 				continue
 			}
 			found = append(found, Finding{File: file, Ref: ref})
@@ -225,20 +226,20 @@ func symbolPattern(pkgs map[string]bool) matcher {
 // it even when it is on disk: it is what a build or a run left behind - the dashboard's copy in
 // cmd/controlplane/web, for one - and reading it as present made the answer depend on whether
 // whoever ran this had built first, so CI passed or failed on the order of its steps.
-func resolves(root, ref string) bool {
+func resolves(ctx context.Context, root, ref string) bool {
 	if !strings.Contains(ref, "*") {
 		if _, err := os.Stat(filepath.Join(root, ref)); err != nil {
 			return false
 		}
-		return !ignored(root, ref)
+		return !ignored(ctx, root, ref)
 	}
 	return globResolves(root, ref)
 }
 
 // ignored is whether git keeps this path out of the tree. Outside a repository - a test's
 // temporary directory - nothing is ignored, and check-ignore says so by failing.
-func ignored(root, ref string) bool {
-	cmd := exec.Command("git", "check-ignore", "--quiet", "--", ref)
+func ignored(ctx context.Context, root, ref string) bool {
+	cmd := exec.CommandContext(ctx, "git", "check-ignore", "--quiet", "--", ref)
 	cmd.Dir = root
 	return cmd.Run() == nil
 }
@@ -305,11 +306,11 @@ func globRegexp(pattern string) (*regexp.Regexp, error) {
 // module's go.mod pins, else task on PATH. A repository that takes Task as a go.mod tool runs it as
 // `go tool task`, which puts no task on PATH. `go tool -n task` says whether go.mod pins one, but
 // not where to run it from: the path it printed in CI was a build directory gone once go returned.
-func TaskCommand(exe string) []string {
+func TaskCommand(ctx context.Context, exe string) []string {
 	if exe != "" {
 		return []string{exe}
 	}
-	if exec.Command("go", "tool", "-n", "task").Run() == nil {
+	if exec.CommandContext(ctx, "go", "tool", "-n", "task").Run() == nil {
 		return []string{"go", "tool", "task"}
 	}
 	return []string{"task"}

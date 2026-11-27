@@ -20,11 +20,11 @@ func TestTheSitesCIExamplePasses(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.CopyFS(root, os.DirFS(filepath.Join("..", "..", "site", "examples", "github"))))
 	gittest.Run(t, root, "init", "-q")
-	known, err := taskgate.Tasks("task", root)
+	known, err := taskgate.Tasks(t.Context(), "task", root)
 	require.NoError(t, err)
 	require.Contains(t, known, "mutate", "the example's Taskfile was not the one listed")
 
-	findings, err := taskgate.Check(root, taskgate.Limits{Block: 12, Script: 40}, known)
+	findings, err := taskgate.Check(t.Context(), root, taskgate.Limits{Block: 12, Script: 40}, known)
 	require.NoError(t, err)
 	require.Empty(t, findings)
 }

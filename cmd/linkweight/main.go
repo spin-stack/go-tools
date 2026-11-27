@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -25,16 +26,17 @@ import (
 	"strings"
 
 	"github.com/spin-stack/go-tools/internal/allow"
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/linkweight"
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) // mutate-exempt: the process's own arguments; run is what the test drives
+	os.Exit(run(interrupt.Context(), os.Args[1:], os.Stdout, os.Stderr)) // mutate-exempt: the process's own arguments; run is what the test drives
 }
 
 // run answers the exit status: 0 reported (and with -allow, every finding explained), 1 a finding
 // or a line unexplained, 2 no answer.
-func run(args []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("linkweight", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	roots := fs.String("roots", "./...", "the pattern every binary is under")
@@ -59,7 +61,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
-	bins, err := measure(*roots, skipped, *tags, stderr)
+	bins, err := measure(ctx, *roots, skipped, *tags, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "linkweight:", err)
 		return 2
@@ -88,13 +90,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // measure builds and reads every root, one at a time: a binary's linker graph is hundreds of
 // megabytes of text and the next one waits for its memory.
-func measure(rootsPattern string, skipped []string, tags string, progress io.Writer) ([]linkweight.Binary, error) {
-	module, err := sh("go", "list", "-m")
+func measure(ctx context.Context, rootsPattern string, skipped []string, tags string, progress io.Writer) ([]linkweight.Binary, error) {
+	module, err := sh(ctx, "go", "list", "-m")
 	if err != nil {
 		return nil, err
 	}
 	module = strings.TrimSpace(module)
-	mains, err := sh("go", "list", "-tags", tags, "-f", `{{if eq .Name "main"}}{{.ImportPath}}{{end}}`, rootsPattern)
+	mains, err := sh(ctx, "go", "list", "-tags", tags, "-f", `{{if eq .Name "main"}}{{.ImportPath}}{{end}}`, rootsPattern)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +118,7 @@ func measure(rootsPattern string, skipped []string, tags string, progress io.Wri
 	var bins []linkweight.Binary
 	for _, root := range roots {
 		_, _ = fmt.Fprintln(progress, "linkweight: linking", root)
-		b, err := one(root, module, tags, dir)
+		b, err := one(ctx, root, module, tags, dir)
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +128,7 @@ func measure(rootsPattern string, skipped []string, tags string, progress io.Wri
 }
 
 // one is a root's report: built with the linker's graph on, its packages listed, both read.
-func one(root, module, tags, dir string) (linkweight.Binary, error) {
+func one(ctx context.Context, root, module, tags, dir string) (linkweight.Binary, error) {
 	bin := filepath.Join(dir, path.Base(root))
 	depsPath := bin + ".deps"
 	deps, err := os.Create(depsPath) //nolint:gosec // a file in our own temporary directory
@@ -135,7 +137,7 @@ func one(root, module, tags, dir string) (linkweight.Binary, error) {
 	}
 	// -dumpdep writes the graph to standard error, which is where the build's own errors go too:
 	// a failed build is told by its exit status, and its message is the lines that are no edge.
-	cmd := exec.Command("go", "build", "-trimpath", "-tags", tags, "-ldflags=-dumpdep", "-o", bin, root) //nolint:gosec // go, over the caller's own module
+	cmd := exec.CommandContext(ctx, "go", "build", "-trimpath", "-tags", tags, "-ldflags=-dumpdep", "-o", bin, root) //nolint:gosec // go, over the caller's own module
 	cmd.Stderr = deps
 	err = cmd.Run()
 	_ = deps.Close() // written by the build; it is read below from its path
@@ -151,7 +153,7 @@ func one(root, module, tags, dir string) (linkweight.Binary, error) {
 	if err != nil {
 		return linkweight.Binary{}, fmt.Errorf("%s: %w", root, err)
 	}
-	listed, err := sh("go", "list", "-tags", tags, "-deps", "-json=ImportPath,Imports,Standard,Module", root)
+	listed, err := sh(ctx, "go", "list", "-tags", tags, "-deps", "-json=ImportPath,Imports,Standard,Module", root)
 	if err != nil {
 		return linkweight.Binary{}, err
 	}
@@ -189,8 +191,8 @@ func notEdges(path string) string {
 }
 
 // sh is a command's standard output; what it said on standard error is in the error.
-func sh(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).Output() //nolint:gosec // go, over the caller's own module
+func sh(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, name, args...).Output() //nolint:gosec // go, over the caller's own module
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(exit.Stderr)))
 	}

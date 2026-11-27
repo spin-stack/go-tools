@@ -19,6 +19,7 @@ package mutate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -59,8 +60,8 @@ func (m Mutation) String() string {
 
 // Changed is the lines a diff against base touches, by file: the Go files that are not tests,
 // because a mutation of a test is a question about nothing.
-func Changed(base string) (map[string]map[int]bool, error) {
-	out, err := output("listing", exec.Command("git", "diff", "--unified=0", "--no-color", base, "--", "*.go"))
+func Changed(ctx context.Context, base string) (map[string]map[int]bool, error) {
+	out, err := output("listing", exec.CommandContext(ctx, "git", "diff", "--unified=0", "--no-color", base, "--", "*.go"))
 	if err != nil {
 		return nil, fmt.Errorf("reading the diff against %s: %w", base, err)
 	}
@@ -88,7 +89,7 @@ func Changed(base string) (map[string]map[int]bool, error) {
 	}
 	// A file nothing has yet been committed of is not in a diff, and is all new code: locally
 	// that is most of what a change is before it becomes a commit.
-	untracked, err := output("listing", exec.Command("git", "ls-files", "--others", "--exclude-standard", "--", "*.go"))
+	untracked, err := output("listing", exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard", "--", "*.go"))
 	if err != nil {
 		return nil, fmt.Errorf("reading what is not committed yet: %w", err)
 	}
@@ -743,9 +744,9 @@ type Asked struct {
 //
 // The binaries are built with go test -c and run here rather than by go test, which runs each in
 // its package's directory, where every edit asked at once would read what the others wrote.
-func Run(m Mutation, a Asked) (Outcome, string, error) {
+func Run(ctx context.Context, m Mutation, a Asked) (Outcome, string, error) {
 	dir := filepath.Dir(m.File)
-	tests := hasTests(dir)
+	tests := hasTests(ctx, dir)
 	if !tests && len(a.Importers) == 0 {
 		return Untested, "", nil
 	}
@@ -775,7 +776,7 @@ func Run(m Mutation, a Asked) (Outcome, string, error) {
 	}
 	var said strings.Builder
 	for _, set := range runs {
-		list := exec.Command("go", append([]string{"list", "-f", "{{.ImportPath}} {{.Dir}}"}, set.pkgs...)...) //nolint:gosec // go list over this repository's packages
+		list := exec.CommandContext(ctx, "go", append([]string{"list", "-f", "{{.ImportPath}} {{.Dir}}"}, set.pkgs...)...) //nolint:gosec // go list over this repository's packages
 		list.Dir = set.dir
 		listed, err := output("listing", list)
 		if err != nil {
@@ -783,7 +784,7 @@ func Run(m Mutation, a Asked) (Outcome, string, error) {
 		}
 		for line := range strings.SplitSeq(strings.TrimSpace(string(listed)), "\n") {
 			path, pkgDir, _ := strings.Cut(line, " ")
-			outcome, err := runPackage(tree, path, pkgDir, set.dir, set.what, set.only, a.Timeout, a.Overlay, &said)
+			outcome, err := runPackage(ctx, tree, path, pkgDir, set.dir, set.what, set.only, a.Timeout, a.Overlay, &said)
 			if err != nil || outcome != Survived {
 				return outcome, said.String(), err
 			}
@@ -794,7 +795,7 @@ func Run(m Mutation, a Asked) (Outcome, string, error) {
 
 // runPackage builds the tests of the package at path, from dir, and runs them in the tree's copy
 // of pkgDir, writing what they said to said. Survived where it has no test this build would run.
-func runPackage(tree *Tree, path, pkgDir, dir, what string, only []string, timeout, overlay string, said *strings.Builder) (Outcome, error) {
+func runPackage(ctx context.Context, tree *Tree, path, pkgDir, dir, what string, only []string, timeout, overlay string, said *strings.Builder) (Outcome, error) {
 	bin, err := tree.bin()
 	if err != nil {
 		return 0, err
@@ -803,10 +804,16 @@ func runPackage(tree *Tree, path, pkgDir, dir, what string, only []string, timeo
 	if overlay != "" {
 		args = append(args, "-overlay", overlay)
 	}
-	build := exec.Command("go", append(args, path)...) //nolint:gosec // go test over this repository's packages
+	build := exec.CommandContext(ctx, "go", append(args, path)...) //nolint:gosec // go test over this repository's packages
 	build.Dir = dir
+	workIn(build, filepath.Dir(bin))
 	out, exceeded, err := bounded("alone: build "+what, build)
 	said.Write(out)
+	// A build or a test binary the cancellation killed failed, and would read as the edit not
+	// building or refused.
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if exceeded {
 		return Exceeded, nil
 	}
@@ -816,13 +823,16 @@ func runPackage(tree *Tree, path, pkgDir, dir, what string, only []string, timeo
 	if _, err := os.Stat(bin); err != nil {
 		return Survived, nil //nolint:nilerr // no test binary: the package has no tests
 	}
-	run := exec.Command(bin, testArgs(timeout, only)...) //nolint:gosec // a test binary this run built
+	run := exec.CommandContext(ctx, bin, testArgs(timeout, only)...) //nolint:gosec // a test binary this run built
 	run.Env = testEnv()
 	var runErr error
-	if err := tree.in(pkgDir, func(at, tmp string) {
+	if err := tree.in(ctx, pkgDir, func(at, tmp string) {
 		run.Dir, run.Env = at, append(run.Env, "TMPDIR="+tmp)
 		out, exceeded, runErr = bounded("alone: run "+what, run)
 	}); err != nil {
+		return 0, err
+	}
+	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	countTests(path, out)
@@ -845,8 +855,8 @@ func runPackage(tree *Tree, path, pkgDir, dir, what string, only []string, timeo
 // hasTests is whether the package in dir has a test go would build: one whose tests are all of
 // another build (integration, e2e) has none, and running it would answer a pass nothing gave. A
 // listing that fails is taken as tests, so go test is the one to say what is wrong.
-func hasTests(dir string) bool {
-	list := exec.Command("go", "list", "-f", "{{if or .TestGoFiles .XTestGoFiles}}tests{{end}}", ".")
+func hasTests(ctx context.Context, dir string) bool {
+	list := exec.CommandContext(ctx, "go", "list", "-f", "{{if or .TestGoFiles .XTestGoFiles}}tests{{end}}", ".")
 	list.Dir = dir
 	out, err := output("listing", list)
 	return err != nil || strings.TrimSpace(string(out)) == "tests"
@@ -855,8 +865,8 @@ func hasTests(dir string) bool {
 // Importers is, for each package directory this repository has, the directories of the packages
 // whose code or tests import it directly: where Run looks for a test when the package's own let
 // an edit through.
-func Importers() (map[string][]string, error) {
-	module, err := output("listing", exec.Command("go", "list", "-m", "-f", "{{.Path}} {{.Dir}}"))
+func Importers(ctx context.Context) (map[string][]string, error) {
+	module, err := output("listing", exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Path}} {{.Dir}}"))
 	if err != nil {
 		return nil, fmt.Errorf("mutate: reading the module: %w", err)
 	}
@@ -867,7 +877,7 @@ func Importers() (map[string][]string, error) {
 	// From the module's root, wherever this runs from: `./...` anywhere else is part of it. -e
 	// because a package that does not build still names its imports, and one that embeds a build
 	// output (the control plane's dashboard) does not build in a checkout that has not built it.
-	list := exec.Command("go", "list", "-e", "-f",
+	list := exec.CommandContext(ctx, "go", "list", "-e", "-f",
 		`{{.ImportPath}} {{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}`, "./...")
 	list.Dir = root
 	var stderr strings.Builder

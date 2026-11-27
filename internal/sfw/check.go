@@ -2,6 +2,7 @@ package sfw
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,8 +76,8 @@ var valued = []string{"-C", "--dir", "--prefix", "--cwd", "-F", "--filter", "--w
 // ignored: the commands workflows and composite actions, Taskfiles, shell scripts and Dockerfiles
 // run, and the package.json files and lockfiles themselves. pnpm is the one package manager, and
 // what it fetches it fetches through the firewall, wherever that is written.
-func Check(root string) ([]Finding, error) {
-	out, err := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
+func Check(ctx context.Context, root string) ([]Finding, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
 	if err != nil {
 		return nil, fmt.Errorf("sfw: listing %s: %w", root, err)
 	}

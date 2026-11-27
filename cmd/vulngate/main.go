@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/vuln/scan"
 
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/vulngate"
 )
 
@@ -25,10 +26,14 @@ import (
 const scanOne = "VULNGATE_SCAN"
 
 func main() {
+	ctx := interrupt.Context()
+	var code int
 	if os.Getenv(scanOne) != "" { // mutate-exempt: the child's way in; govulncheck's own run, which TestEachScanIsAProcessOfItsOwn drives
-		os.Exit(child(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+		code = child(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	} else {
+		code = run(ctx, ownProcess, goList, os.Args[1:], os.Stdout, os.Stderr) // mutate-exempt: the process's own arguments, past its name; run is what the tests drive
 	}
-	os.Exit(run(context.Background(), ownProcess, goList, os.Args[1:], os.Stdout, os.Stderr)) // mutate-exempt: the process's own arguments, past its name; run is what the tests drive
+	os.Exit(code)
 }
 
 // scanner is govulncheck asked for json: a process of its own in a build, a script in a test.

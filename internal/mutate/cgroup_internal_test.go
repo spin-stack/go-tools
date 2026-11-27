@@ -20,7 +20,7 @@ func TestATestProcessIsHeldByItsCgroup(t *testing.T) {
 	if !inDelegatedScope(t) {
 		return
 	}
-	dir, err := Confine()
+	dir, err := Confine(t.Context())
 	if err != nil || dir == "" {
 		t.Fatalf("a delegated scope was taken as %q, %v", dir, err)
 	}
@@ -28,7 +28,7 @@ func TestATestProcessIsHeldByItsCgroup(t *testing.T) {
 	memLimit, pidsMax = 64<<20, 32
 	run := func(script string) (string, bool, time.Duration, error) {
 		started := time.Now()
-		out, exceeded, err := bounded("test", exec.Command("sh", "-c", script))
+		out, exceeded, err := bounded("test", exec.CommandContext(t.Context(), "sh", "-c", script))
 		return string(out), exceeded, time.Since(started), err
 	}
 

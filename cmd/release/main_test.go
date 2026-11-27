@@ -105,15 +105,15 @@ func TestGitIsTheClonesGit(t *testing.T) {
 	t.Chdir(dir)
 	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"},
 		{"tag", "v20261110.01"}, {"tag", "v20261110.02"}} {
-		if _, err := git(args...); err != nil {
+		if _, err := git(t.Context(), args...); err != nil {
 			t.Fatal(err)
 		}
 	}
-	tags, err := git("tag", "--list")
+	tags, err := git(t.Context(), "tag", "--list")
 	if err != nil || !slices.Equal(tags, []string{"v20261110.01", "v20261110.02"}) {
 		t.Errorf("tags = %v, %v", tags, err)
 	}
-	if _, err := git("no-such-command"); err == nil || !strings.Contains(err.Error(), "git no-such-command") {
+	if _, err := git(t.Context(), "no-such-command"); err == nil || !strings.Contains(err.Error(), "git no-such-command") {
 		t.Errorf("err = %v", err)
 	}
 }

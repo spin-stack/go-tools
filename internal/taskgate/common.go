@@ -2,6 +2,7 @@ package taskgate
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"maps"
 	"os/exec"
@@ -54,8 +55,8 @@ func (u Uncommon) String() string { return u.At + ": " + u.Says }
 // tasks; of any other it asks nothing, and says so. All of it is read from the tree: nothing is
 // run, Task least of all, since a repository with a second task of a common name is one Task
 // stops at.
-func Common(root, included string) ([]Finding, string, error) {
-	listed, workflows, err := list(root)
+func Common(ctx context.Context, root, included string) ([]Finding, string, error) {
+	listed, workflows, err := list(ctx, root)
 	if err != nil {
 		return nil, "", err
 	}
@@ -129,8 +130,8 @@ func Common(root, included string) ([]Finding, string, error) {
 
 // list is what git lists under root, tracked or untracked and not ignored, and the workflows and
 // composite actions among it.
-func list(root string) (listed map[string]bool, workflows []string, err error) {
-	out, err := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
+func list(ctx context.Context, root string) (listed map[string]bool, workflows []string, err error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard").Output()
 	if err != nil {
 		return nil, nil, fmt.Errorf("taskgate: listing %s: %w", root, err)
 	}
