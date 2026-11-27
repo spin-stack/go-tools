@@ -118,13 +118,32 @@ func absDir(dir string) string {
 	return abs
 }
 
-// A top-level test's start, pause and end as -test.v says them; read anywhere in a line, since
-// what a test printed with no newline after it comes first. A subtest's name has a /.
+// A top-level test's start, pause and end as -test.v says them; where in a line is framed's. A
+// subtest's name has a /.
 var (
 	testStart = regexp.MustCompile(`=== RUN   (Test[^\s/]*)$`)
 	testPause = regexp.MustCompile(`=== PAUSE (Test[^\s/]*)$`)
 	testOver  = regexp.MustCompile(`--- (?:PASS|FAIL|SKIP): (Test[^\s/]*) \(`)
 )
+
+// framed is the test marker names in line, where the test binary said it: at the line's start, or
+// straight after what a test printed with no newline, which comes first. Never after a space or a
+// tab: a test's own output saying another binary's -test.v - a t.Log of a go test run inside it -
+// is indented, or follows its file and line.
+func framed(marker *regexp.Regexp, line string) string {
+	m := marker.FindStringSubmatchIndex(line)
+	if m == nil || m[0] > 0 && (line[m[0]-1] == ' ' || line[m[0]-1] == '\t') {
+		return ""
+	}
+	return line[m[2]:m[3]]
+}
+
+// keep is how much of a line the pacer holds while it waits for the line's end: a marker and a
+// test's name, which is all it reads, and room to spare. A test that prints with no newline - a
+// dot a write, for minutes - would otherwise be held whole, and scanned again on every write the
+// test waits on. It holds at most twice keep, and a line longer than that is read by its last keep
+// bytes: what it loses is a test whose name is most of them.
+const keep = 4096
 
 // pacer stops a test binary once a test runs past its own allowance, reading what the binary says
 // as it says it. A test is timed from its start until it ends or pauses: a parallel test pauses
@@ -146,29 +165,39 @@ type pacer struct {
 func (p *pacer) Write(b []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.partial = append(p.partial, b...)
+	n := len(b)
 	for {
-		i := bytes.IndexByte(p.partial, '\n')
+		i := bytes.IndexByte(b, '\n')
 		if i < 0 {
-			break
+			p.hold(b)
+			return n, nil
 		}
-		p.line(strings.TrimRight(string(p.partial[:i]), "\r"))
-		p.partial = p.partial[i+1:]
+		p.hold(b[:i])
+		p.line(strings.TrimRight(string(p.partial), "\r"))
+		p.partial = p.partial[:0]
+		b = b[i+1:]
 	}
-	return len(b), nil
+}
+
+// hold adds b to the line read so far, keeping its last keep bytes once it holds twice that.
+func (p *pacer) hold(b []byte) {
+	p.partial = append(p.partial, b...)
+	if len(p.partial) > 2*keep {
+		p.partial = append(p.partial[:0], p.partial[len(p.partial)-keep:]...)
+	}
 }
 
 func (p *pacer) line(line string) {
-	if testPause.MatchString(line) || testOver.MatchString(line) {
+	if framed(testPause, line) != "" || framed(testOver, line) != "" {
 		p.running++
 		return
 	}
-	m := testStart.FindStringSubmatch(line)
-	if m == nil {
+	test := framed(testStart, line)
+	if test == "" {
 		return
 	}
 	p.running++
-	allowed, ok := p.each[m[1]]
+	allowed, ok := p.each[test]
 	if !ok {
 		return
 	}
@@ -177,7 +206,7 @@ func (p *pacer) line(line string) {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if p.running == running {
-			p.ranPast, p.allowed = m[1], allowed
+			p.ranPast, p.allowed = test, allowed
 			p.stop()
 		}
 	})
