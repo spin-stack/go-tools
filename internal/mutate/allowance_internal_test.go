@@ -72,6 +72,10 @@ func TestATestIsStoppedPastItsOwnAllowance(t *testing.T) {
 		{"a start a test logs, after its file and line", []string{"=== RUN   TestOuter\n    outer_test.go:12: === RUN   TestSlow\n"}, ""},
 		{"an end a test's output echoes", []string{"=== RUN   TestSlow\n        --- PASS: TestSlow (0.00s)\n"}, "TestSlow"},
 		{"a start a test's output echoes, while it runs", []string{"=== RUN   TestSlow\n        === RUN   TestInner\n"}, "TestSlow"},
+		{"a start echoed after one space", []string{"=== RUN   TestOuter\n === RUN   TestSlow\n"}, ""},
+		{"a start echoed after a tab", []string{"=== RUN   TestOuter\n\t=== RUN   TestSlow\n"}, ""},
+		{"after an indented line", []string{"    said first\n=== RUN   TestSlow\n"}, "TestSlow"},
+		{"its newline in a write of its own", []string{"=== RUN   TestSlow", "\n"}, "TestSlow"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -102,10 +106,15 @@ func TestOutputWithNoNewlineIsReadOnce(t *testing.T) {
 	p := &pacer{each: map[string]time.Duration{"TestSlow": 50 * time.Millisecond}, stop: func() { close(stopped) }}
 	dots := bytes.Repeat([]byte("."), 50)
 	started := time.Now()
+	held := 0
 	for range 200_000 {
 		if _, err := p.Write(dots); err != nil {
 			t.Fatal(err)
 		}
+		held = max(held, len(p.partial))
+	}
+	if held > 2*keep {
+		t.Errorf("the pacer held %d bytes of one line, more than twice keep", held)
 	}
 	if took := time.Since(started); took > 2*time.Second {
 		t.Errorf("10 MB of dots with no newline took %s to read", took)
