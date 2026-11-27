@@ -212,7 +212,7 @@ func latestTag(ctx context.Context, base, stamp, since string, now time.Time, wa
 
 // askLatest is the tag base's /releases/latest redirects to or, when it answers anything else, the
 // tag GitHub's API names as base's latest release. The redirect is asked first because no API quota
-// counts it. The API is asked after because GitHub answered that page 504 for hours on 2026-11-27
+// counts it. The API is asked after because GitHub answered that page 504 on 2026-11-27
 // while the API answered, and every go tool task failed; it is asked with GITHUB_TOKEN or GH_TOKEN
 // when there is one, as a download is, so a workflow spends its token's quota, not its address's.
 func askLatest(ctx context.Context, base string) (string, error) {
