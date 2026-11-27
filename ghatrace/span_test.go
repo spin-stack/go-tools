@@ -2,10 +2,12 @@ package ghatrace_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -100,4 +102,24 @@ func TestSamplesShareTheFileWithSpans(t *testing.T) {
 	assert.True(t, strings.HasPrefix(sampleLine, `{"sample":{"runner":"r7"`), "a sample's line holds the sample alone: %s", sampleLine)
 	require.NoError(t, json.Unmarshal([]byte(sampleLine), &before))
 	assert.Zero(t, before)
+}
+
+// The sampler writes while a job's last steps read the file: a last line not yet whole is left
+// out, and a whole line that is not JSON is still an error.
+func TestReadLeavesOutALastLineStillBeingWritten(t *testing.T) {
+	spans, samples, err := ghatrace.ReadAll(strings.NewReader("{\"name\":\"a\"}\n{\"sample\":{\"runner\":\"r7\",\"at\":\"2026-11"))
+	require.NoError(t, err)
+	assert.Len(t, spans, 1)
+	assert.Empty(t, samples)
+
+	spans, err = ghatrace.Read(strings.NewReader("{\"name\":\"a\"}\n{\"name\":\"b\"}"))
+	require.NoError(t, err)
+	assert.Len(t, spans, 2, "a whole last line with no newline is read")
+
+	_, err = ghatrace.Read(strings.NewReader("{\"name\":\"a\"}\n{\"name\n{\"name\":\"b\"}\n"))
+	assert.ErrorContains(t, err, "line 2")
+	_, err = ghatrace.Read(strings.NewReader("x\n"))
+	assert.ErrorContains(t, err, "line 1", "a line of one character is a line")
+	_, err = ghatrace.Read(iotest.ErrReader(errors.New("artifact cut short")))
+	assert.ErrorContains(t, err, "artifact cut short")
 }

@@ -191,7 +191,7 @@ func TestRunRefusesSpansItCannotRead(t *testing.T) {
 	t.Setenv("GITHUB_STEP_SUMMARY", "")
 	dir := t.TempDir()
 	assert.ErrorContains(t, run(t.Context(), []string{"run", "-repo", "o/r", "-run", "9", "-out", dir, "-spans", filepath.Join(dir, "missing")}), "no such file")
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.jsonl"), []byte("{"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.jsonl"), []byte("{\n"), 0o600))
 	assert.ErrorContains(t, run(t.Context(), []string{"run", "-repo", "o/r", "-run", "9", "-out", dir, "-spans", dir}), "bad.jsonl: line 1")
 }
 

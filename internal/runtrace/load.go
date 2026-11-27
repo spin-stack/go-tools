@@ -9,8 +9,8 @@ import (
 	"github.com/spin-stack/go-tools/ghatrace"
 )
 
-// Load is what a job's machine did between two of its samples: each measure's value over that
-// time, by its name (machineSeries). A measure the machine does not have is absent.
+// Load is what a job's machine did between two of its samples: each series' value over that time,
+// by its name (machineSeries). A series the machine does not have is absent.
 type Load struct {
 	Start time.Time          `json:"start"`
 	End   time.Time          `json:"end"`
@@ -21,7 +21,7 @@ type Load struct {
 // it is only read), and its value between two samples that both have it.
 type series struct {
 	name, counter string
-	of            func(a, b ghatrace.Sample, secs float64) (float64, bool)
+	of            func(a, b ghatrace.Sample, secs float64) (v float64, ok bool)
 }
 
 // The machineSeries' names, for what reads them by name.
@@ -41,30 +41,17 @@ const (
 )
 
 var machineSeries = []series{
-	{cpus, "", func(_, b ghatrace.Sample, _ float64) (float64, bool) {
-		if b.CPU == nil {
-			return 0, false
+	{cpus, "", func(_, b ghatrace.Sample, _ float64) (v float64, ok bool) {
+		if b.CPU != nil {
+			v, ok = float64(b.CPU.CPUs), true
 		}
-		return float64(b.CPU.CPUs), true
+		return v, ok
 	}},
-	// How many CPUs' worth ran something: neither idle, nor idle waiting on I/O, nor taken by the
-	// hypervisor.
-	{busy, "CPUs busy", func(a, b ghatrace.Sample, _ float64) (float64, bool) {
-		total, ok := cpuTotal(a, b)
-		if !ok {
-			return 0, false
-		}
-		idle := delta(a.CPU.Idle, b.CPU.Idle) + delta(a.CPU.IOWait, b.CPU.IOWait) + delta(a.CPU.Steal, b.CPU.Steal)
-		return float64(total-idle) / float64(total) * float64(b.CPU.CPUs), idle <= total
-	}},
-	{iowait, "CPU time %", func(a, b ghatrace.Sample, _ float64) (float64, bool) {
-		total, ok := cpuTotal(a, b)
-		return pct(float64(delta(a.CPU.IOWait, b.CPU.IOWait)) / float64(total)), ok
-	}},
-	{steal, "CPU time %", func(a, b ghatrace.Sample, _ float64) (float64, bool) {
-		total, ok := cpuTotal(a, b)
-		return pct(float64(delta(a.CPU.Steal, b.CPU.Steal)) / float64(total)), ok
-	}},
+	// The share of all CPUs' time that ran something: neither idle, nor idle with IO outstanding
+	// (iowait), nor taken by the hypervisor (steal).
+	{busy, "CPU time %", cpuShare(func(c *ghatrace.CPU) []uint64 { return []uint64{c.User, c.Nice, c.System, c.IRQ, c.SoftIRQ} })},
+	{iowait, "CPU time %", cpuShare(func(c *ghatrace.CPU) []uint64 { return []uint64{c.IOWait} })},
+	{steal, "CPU time %", cpuShare(func(c *ghatrace.CPU) []uint64 { return []uint64{c.Steal} })},
 	stall(cpuStall, func(p *ghatrace.Pressure) uint64 { return p.CPUSome }),
 	stall(ioStall, func(p *ghatrace.Pressure) uint64 { return p.IOSome }),
 	stall(ioFull, func(p *ghatrace.Pressure) uint64 { return p.IOFull }),
@@ -83,50 +70,60 @@ var machineSeries = []series{
 	}, maxOf),
 }
 
+// cpuShare is a series of the share of all CPUs' time spent in the states part names. Each
+// state's ticks are its own difference, and all of them the sum of those: iowait can go back
+// (Documentation/filesystems/proc.rst), and a state that went back counts nothing.
+func cpuShare(part func(*ghatrace.CPU) []uint64) func(a, b ghatrace.Sample, _ float64) (float64, bool) {
+	all := func(c *ghatrace.CPU) []uint64 {
+		return []uint64{c.User, c.Nice, c.System, c.IRQ, c.SoftIRQ, c.Idle, c.IOWait, c.Steal}
+	}
+	return func(a, b ghatrace.Sample, _ float64) (v float64, ok bool) {
+		if a.CPU == nil || b.CPU == nil {
+			return v, ok
+		}
+		total := ticks(all(a.CPU), all(b.CPU))
+		if total > 0 {
+			v, ok = pct(float64(ticks(part(a.CPU), part(b.CPU)))/float64(total)), true
+		}
+		return v, ok
+	}
+}
+
+// ticks is the sum of how much each of a's counters grew to b's.
+func ticks(a, b []uint64) uint64 {
+	var n uint64
+	for i := range a {
+		n += delta(a[i], b[i])
+	}
+	return n
+}
+
 // stall is a share of the time at least one task (some) or every task (full) waited for a
 // resource, from the stall time /proc/pressure counts to the microsecond.
 func stall(name string, of func(*ghatrace.Pressure) uint64) series {
-	return series{name, "stalled %", func(a, b ghatrace.Sample, secs float64) (float64, bool) {
-		if a.Pressure == nil || b.Pressure == nil || of(b.Pressure) < of(a.Pressure) {
-			return 0, false
+	return series{name, "stalled %", func(a, b ghatrace.Sample, secs float64) (v float64, ok bool) {
+		if a.Pressure != nil && b.Pressure != nil {
+			v, ok = pct(float64(delta(of(a.Pressure), of(b.Pressure)))/(secs*1e6)), true
 		}
-		return pct(float64(of(b.Pressure)-of(a.Pressure)) / (secs * 1e6)), true
+		return v, ok
 	}}
 }
 
-// disk is a measure of the disks both samples have, each disk's value put together by combine.
+// disk is a series of the disks both samples have, each disk's value put together by combine.
 func disk(name, counter string, of func(a, b ghatrace.Disk, secs float64) float64, combine func(float64, float64) float64) series {
-	return series{name, counter, func(a, b ghatrace.Sample, secs float64) (float64, bool) {
-		var v float64
-		found := false
+	return series{name, counter, func(a, b ghatrace.Sample, secs float64) (v float64, ok bool) {
 		for _, db := range b.Disks {
 			i := slices.IndexFunc(a.Disks, func(da ghatrace.Disk) bool { return da.Name == db.Name })
-			if i < 0 {
-				continue
+			if i >= 0 {
+				v, ok = combine(v, of(a.Disks[i], db, secs)), true
 			}
-			v = combine(v, of(a.Disks[i], db, secs))
-			found = true
 		}
-		return v, found
+		return v, ok
 	}}
 }
 
 func sum(a, b float64) float64   { return a + b }
 func maxOf(a, b float64) float64 { return max(a, b) }
-
-// cpuTotal is the ticks all CPUs counted between a and b, when both have them and some passed.
-func cpuTotal(a, b ghatrace.Sample) (uint64, bool) {
-	if a.CPU == nil || b.CPU == nil {
-		return 1, false
-	}
-	t := func(c *ghatrace.CPU) uint64 {
-		return c.User + c.Nice + c.System + c.Idle + c.IOWait + c.IRQ + c.SoftIRQ + c.Steal
-	}
-	if t(b.CPU) <= t(a.CPU) {
-		return 1, false
-	}
-	return t(b.CPU) - t(a.CPU), true
-}
 
 // delta is how much a counter grew: nothing, when it went back.
 func delta(a, b uint64) uint64 {
@@ -198,12 +195,18 @@ func latest(a, b time.Time) time.Time {
 	return b
 }
 
+// cpusBusy is how many CPUs' worth were busy, of how many: 0.3 of 64 is one process working a
+// third of the time, not a busy machine.
+func cpusBusy(m map[string]float64) string {
+	return fmt.Sprintf("%.1f of %.0f", m[busy]/100*m[cpus], m[cpus])
+}
+
 // loadCells is a load as the summary's columns: how many CPUs were busy, how long tasks stalled
 // for a CPU, for I/O and for memory, and the disks; "-" for what the machine did not say.
 func loadCells(m map[string]float64) [3]string {
 	cells := [3]string{"-", "-", "-"}
-	if b, ok := m[busy]; ok {
-		cells[0] = fmt.Sprintf("%.1f of %.0f", b, m[cpus])
+	if _, ok := m[busy]; ok {
+		cells[0] = cpusBusy(m)
 	}
 	if _, ok := m[cpuStall]; ok {
 		cells[1] = fmt.Sprintf("%.0f%%, %.0f%%, %.0f%%", m[cpuStall], m[ioStall], m[memoryStall])
@@ -214,22 +217,11 @@ func loadCells(m map[string]float64) [3]string {
 	return cells
 }
 
-// loadText is a load in a line: what loadCells says, with the CPUs' time waiting on I/O and taken
-// by the hypervisor when either is more than a trace of it.
+// loadText is a load in a line: what loadCells says, with the CPUs' time in iowait and steal.
 func loadText(m map[string]float64) string {
-	if len(m) == 0 {
-		return ""
-	}
 	var parts []string
-	if b, ok := m[busy]; ok {
-		parts = append(parts, fmt.Sprintf("%.1f of %.0f CPUs busy", b, m[cpus]))
-	}
-	for _, c := range []struct {
-		name, label string
-	}{{iowait, "iowait"}, {steal, "steal"}} {
-		if v := m[c.name]; v >= 1 {
-			parts = append(parts, fmt.Sprintf("%s %.0f%%", c.label, v))
-		}
+	if _, ok := m[busy]; ok {
+		parts = append(parts, fmt.Sprintf("%s CPUs busy, iowait %.0f%%, steal %.0f%%", cpusBusy(m), m[iowait], m[steal]))
 	}
 	if _, ok := m[cpuStall]; ok {
 		parts = append(parts, fmt.Sprintf("stalled on CPU %.0f%%, IO %.0f%%, memory %.0f%%", m[cpuStall], m[ioStall], m[memoryStall]))
@@ -247,7 +239,7 @@ func usageText(u *ghatrace.Usage) string {
 	}
 	parts := []string{short(u.CPU()) + " CPU"}
 	// A process that ran had a resident set: none is a kernel that does not count one, or the rest.
-	if u.MaxRSS > 0 {
+	if u.MaxRSS > 0 { // mutate-exempt: > 1 differs at a resident set of one byte, which no process has
 		parts = append(parts, megabytes(u.MaxRSS)+" largest process", megabytes(u.Read)+" read", megabytes(u.Written)+" written")
 	}
 	return strings.Join(parts, ", ")

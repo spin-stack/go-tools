@@ -6,6 +6,7 @@ package ghatrace
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
@@ -126,24 +127,35 @@ func Read(r io.Reader) ([]Span, error) {
 	return spans, err
 }
 
-// ReadAll is every span and every sample in r.
+// ReadAll is every span and every sample in r. A last line with no newline that is not JSON is
+// one a sampler is still writing, and is left out.
 func ReadAll(r io.Reader) ([]Span, []Sample, error) {
 	var spans []Span
 	var samples []Sample
-	sc := bufio.NewScanner(r)
-	for n := 1; sc.Scan(); n++ {
-		if len(sc.Bytes()) == 0 {
-			continue
+	br := bufio.NewReader(r)
+	for n := 1; ; n++ {
+		b, err := br.ReadBytes('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, nil, err
 		}
-		var l line
-		if err := json.Unmarshal(sc.Bytes(), &l); err != nil {
-			return nil, nil, fmt.Errorf("line %d: %w", n, err)
+		writing := err != nil
+		if len(bytes.TrimSpace(b)) > 0 {
+			var l line
+			if jerr := json.Unmarshal(b, &l); jerr != nil {
+				if writing {
+					break
+				}
+				return nil, nil, fmt.Errorf("line %d: %w", n, jerr)
+			}
+			if l.Sample != nil {
+				samples = append(samples, *l.Sample)
+			} else {
+				spans = append(spans, l.Span)
+			}
 		}
-		if l.Sample != nil {
-			samples = append(samples, *l.Sample)
-			continue
+		if writing {
+			break
 		}
-		spans = append(spans, l.Span)
 	}
-	return spans, samples, sc.Err()
+	return spans, samples, nil
 }

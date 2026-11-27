@@ -92,11 +92,11 @@ func counterEvents(pid int, ls []Load, us func(time.Time) int64) []event {
 				events = append(events, event{Ph: "C", PID: pid, Name: c[0].counter, TS: us(ts), Args: args})
 			}
 		}
-		for _, l := range ls {
+		for i, l := range ls {
 			at(l.Start, l.Of)
-		}
-		if len(ls) > 0 {
-			at(ls[len(ls)-1].End, ls[len(ls)-1].Of)
+			if i == len(ls)-1 {
+				at(l.End, l.Of)
+			}
 		}
 	}
 	return events

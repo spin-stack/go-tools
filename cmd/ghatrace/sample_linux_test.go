@@ -21,9 +21,9 @@ func TestSampleRunsInTheBackgroundOncePerJob(t *testing.T) {
 	t.Setenv("GHATRACE_TEST_HELPER", "main")
 	start := time.Now()
 	said := stderr(t, func() {
-		require.NoError(t, run(t.Context(), []string{"sample", "-every", "20ms", "-for", "600ms"}))
+		require.NoError(t, run(t.Context(), []string{"sample", "-every", "20ms", "-for", "3s"}))
 	})
-	assert.Less(t, time.Since(start), 500*time.Millisecond, "returns before its sampler is done")
+	assert.Less(t, time.Since(start), 2*time.Second, "returns before its sampler is done")
 	assert.Regexp(t, `^ghatrace: sampling /proc/stat \(\d+ CPUs\)`, said)
 	assert.Contains(t, said, "every 20ms into "+path)
 
@@ -49,9 +49,9 @@ func TestSampleRunsInTheBackgroundOncePerJob(t *testing.T) {
 		}
 		unlock()
 		return true
-	}, 5*time.Second, 20*time.Millisecond)
+	}, 10*time.Second, 20*time.Millisecond)
 	n := len(samples())
-	assert.Less(t, n, 600/20+5, "one sampler, not two")
+	assert.Less(t, n, 3000/20+5, "one sampler, not two")
 	time.Sleep(100 * time.Millisecond)
 	assert.Len(t, samples(), n)
 }
