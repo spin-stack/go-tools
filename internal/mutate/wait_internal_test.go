@@ -1,7 +1,9 @@
 package mutate
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -78,6 +80,9 @@ func TestAnEditThatHangsItsTestIsStoppedAtItsAllowance(t *testing.T) {
 		!strings.Contains(said.String(), " ran past 1s, and ") {
 		t.Errorf("the edit that hangs was not refused at its allowance: %s", said.String())
 	}
+	if len(tally.Refused) != 0 {
+		t.Errorf("an edit stopped for its time is among the refusals a cache keeps, and a stall would never be asked again: %v", tally.Refused)
+	}
 
 	unbroken := NewUnbroken()
 	covers := &coverages{by: map[string]*coverage{}, timeout: "10m", slots: Slots(t.TempDir(), 1), unbroken: unbroken}
@@ -95,6 +100,27 @@ func TestAnEditThatHangsItsTestIsStoppedAtItsAllowance(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join("/proc", string(written))); err == nil {
 		t.Errorf("the test binary, %s, was left running past its allowance", written)
+	}
+}
+
+// With -timeout 0 and a test asked that nobody measured, the run has no bound; a test it asks
+// that was measured is still stopped at its own allowance, and the edit refused for it.
+func TestAnUnboundedRunStopsATestAtItsOwnAllowance(t *testing.T) {
+	shortMargin(t)
+	dir, _, m := settles(t, 0, 0, true, "- becomes +")
+	unbroken := NewUnbroken()
+	covers := &coverages{by: map[string]*coverage{}, timeout: "10m", slots: Slots(t.TempDir(), 1), unbroken: unbroken}
+	covers.of(t.Context(), dir)
+	// What stops the run where the edit's test is not: past it, the run fails, and the test says so.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	answer, err := runAlone(ctx, m, t.TempDir(), Asked{Timeout: "0", Unbroken: unbroken, Tree: NewTree(t.TempDir()),
+		Reaching: []string{"TestSettle", "TestNobodyMeasured"}}, nil, io.Discard)
+	if err != nil {
+		t.Fatalf("the test that hangs was not stopped at its allowance: %v", err)
+	}
+	if why := stoppedBy(answer); answer.Outcome != TimedOut || why != " (TestSettle ran past 1s, and was stopped)" {
+		t.Errorf("the edit was %v%s: %s", answer.Outcome, why, answer.Said)
 	}
 }
 
