@@ -473,6 +473,37 @@ func TestAReleaseFileThatIsNotThereIsSaidSo(t *testing.T) {
 	assert.Equal(t, []string{"github.com/o/r/releases/download/v1.2/tool |", cdn + "/tool |"}, *asked)
 }
 
+// A release's file whose API refuses the token is asked of github.com as it is without one: the
+// bytes are the same, and what checks them is the caller's pin, not who asked.
+func TestAReleaseFileTheAPIRefusesTheTokenForIsAskedOfGitHub(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "tok")
+	t.Setenv("GH_TOKEN", "")
+	for _, status := range []int{http.StatusForbidden, http.StatusUnauthorized} {
+		asked := github(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "the tool") })
+		before := http.DefaultClient.Transport
+		http.DefaultClient.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Host == "api.github.com" {
+				*asked = append(*asked, r.URL.Host+r.URL.Path+" "+r.Header.Get("Authorization")+"|")
+				rec := httptest.NewRecorder()
+				rec.WriteHeader(status)
+				resp := rec.Result()
+				resp.Request = r
+				return resp, nil
+			}
+			return before.RoundTrip(r)
+		})
+		got, err := Bytes(t.Context(), releaseURL, 64)
+		http.DefaultClient.Transport = before
+		require.NoError(t, err, status)
+		assert.Equal(t, "the tool", string(got))
+		assert.Equal(t, []string{
+			"api.github.com/repos/o/r/releases/tags/v1.2 Bearer tok|",
+			"github.com/o/r/releases/download/v1.2/tool |",
+			cdn + "/tool |",
+		}, *asked, status)
+	}
+}
+
 // A failure names the host that answered: a 504 from GitHub's CDN, behind a redirect, is not
 // github.com's.
 func TestAFailureNamesTheHostThatAnswered(t *testing.T) {
