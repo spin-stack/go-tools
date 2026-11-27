@@ -29,6 +29,8 @@ func cpuOf(root string) *ghatrace.CPU {
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
 		switch {
+		// cpu, then user, nice, system, idle, iowait, irq, softirq and steal: 9 since Linux 2.6.11,
+		// and more since.
 		case len(fields) > 8 && fields[0] == "cpu":
 			n, ok := numbers(fields[1:9])
 			if !ok {
@@ -88,9 +90,10 @@ func disksOf(root string) []ghatrace.Disk {
 	var disks []ghatrace.Disk
 	for l := range strings.Lines(string(raw)) {
 		// major minor name, then reads, merged, sectors read, ms, writes, merged, sectors written,
-		// ms, in flight, ms with a request in flight (Documentation/admin-guide/iostats.rst).
+		// ms, in flight, ms with a request in flight, weighted ms (Documentation/admin-guide/
+		// iostats.rst): 14 since Linux 2.6, and more since.
 		fields := strings.Fields(l)
-		if len(fields) < 13 {
+		if len(fields) < 14 {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(root, "sys", "block", fields[2], "device")); err != nil {

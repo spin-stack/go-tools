@@ -33,9 +33,9 @@ type pageLane struct {
 	Critical bool     `json:"critical"`
 	Queue    node     `json:"queue"`
 	Job      node     `json:"job"`
-	// Load is the machine's load as the page draws it under the job: from, to, the share of all
-	// CPUs busy, and the percentage of the time tasks waited on I/O - stalled on it, or the CPUs'
-	// iowait where the machine has no pressure to say it.
+	// Load is the machine's load as the page draws it under the job, where it has its CPUs: from,
+	// to, the share of all CPUs busy, and the percentage of the time tasks waited on I/O - stalled
+	// on it, or the CPUs' iowait where the machine has no pressure to say it.
 	Load [][4]float64 `json:"load,omitempty"`
 }
 
@@ -58,15 +58,15 @@ func WriteHTML(w io.Writer, t Trace) error {
 		}
 		pl := pageLane{URL: l.URL, Runner: l.Runner, Labels: l.Labels, Critical: l.Critical, Queue: conv(l.Queue), Job: conv(l.Job)}
 		for _, ld := range l.Load {
+			b, ok := ld.Of[busy]
+			if !ok {
+				continue
+			}
 			io, ok := ld.Of[ioStall]
 			if !ok {
 				io = ld.Of[iowait]
 			}
-			share := 0.0
-			if n := ld.Of[cpus]; n > 0 {
-				share = ld.Of[busy] / n
-			}
-			pl.Load = append(pl.Load, [4]float64{float64(ms(ld.Start)), float64(ms(ld.End)), share, io})
+			pl.Load = append(pl.Load, [4]float64{float64(ms(ld.Start)), float64(ms(ld.End)), b / 100, io})
 		}
 		lanes = append(lanes, pl)
 	}

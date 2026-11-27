@@ -24,6 +24,9 @@ func sample(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *every <= 0 || *limit <= 0 {
+		return errors.New("sample: -every and -for are lengths of time, more than none")
+	}
 	path := ghatrace.File()
 	if path == "" {
 		fmt.Fprintln(os.Stderr, "ghatrace: sample: not on a runner and no $GHATRACE_SPANS: nothing sampled")
@@ -32,25 +35,20 @@ func sample(ctx context.Context, args []string) error {
 	if *foreground {
 		return sampleUntil(ctx, "/", path, *every, *limit)
 	}
-	has, hasNot := what(machine("/", time.Now()))
-	if len(has) == 0 {
-		fmt.Fprintf(os.Stderr, "ghatrace: sample: no %s here: nothing sampled\n", strings.Join(hasNot, ", "))
-		return nil
+	said, ok := announce(machine("/", time.Now()), *every, path)
+	if ok {
+		if err := background(ctx, path, "sample", "-foreground", "-every", every.String(), "-for", limit.String()); err != nil {
+			said = fmt.Sprintf("ghatrace: sample: not sampling: %v", err)
+		}
 	}
-	if err := background(ctx, path, "sample", "-foreground", "-every", every.String(), "-for", limit.String()); err != nil {
-		fmt.Fprintf(os.Stderr, "ghatrace: sample: not sampling: %v\n", err)
-		return nil
-	}
-	msg := fmt.Sprintf("ghatrace: sampling %s every %s into %s", strings.Join(has, ", "), every, path)
-	if len(hasNot) > 0 {
-		msg += "; no " + strings.Join(hasNot, ", ") + " here"
-	}
-	fmt.Fprintln(os.Stderr, msg)
+	fmt.Fprintln(os.Stderr, said)
 	return nil
 }
 
-// what is what a sample has, and what it has not, as a reader names it.
-func what(s ghatrace.Sample) (has, hasNot []string) {
+// announce is what sample says it samples on a machine whose sample is s, and whether there is
+// anything to: what the machine has, and what it has not.
+func announce(s ghatrace.Sample, every time.Duration, path string) (string, bool) {
+	var has, hasNot []string
 	add := func(ok bool, name string) {
 		if ok {
 			has = append(has, name)
@@ -64,16 +62,19 @@ func what(s ghatrace.Sample) (has, hasNot []string) {
 	}
 	add(s.CPU != nil, cpus)
 	add(s.Pressure != nil, "/proc/pressure")
-	disks := "/proc/diskstats' disks"
-	if len(s.Disks) > 0 {
-		names := make([]string, len(s.Disks))
-		for i, d := range s.Disks {
-			names[i] = d.Name
-		}
-		disks = "/proc/diskstats (" + strings.Join(names, ", ") + ")"
+	names := make([]string, len(s.Disks))
+	for i, d := range s.Disks {
+		names[i] = d.Name
 	}
-	add(len(s.Disks) > 0, disks)
-	return has, hasNot
+	add(len(s.Disks) > 0, "/proc/diskstats ("+strings.Join(names, ", ")+")")
+	if len(has) == 0 {
+		return "ghatrace: sample: nothing here to sample: no /proc", false
+	}
+	said := fmt.Sprintf("ghatrace: sampling %s every %s into %s", strings.Join(has, ", "), every, path)
+	if len(hasNot) > 0 {
+		said += "; no " + strings.Join(hasNot, ", ") + " here"
+	}
+	return said, true
 }
 
 // sampleUntil records the machine under root every so often until limit has passed, ctx is done,

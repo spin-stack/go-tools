@@ -48,9 +48,9 @@ from that run, so it is always what the code draws ([open it on its own](example
 - **`trace.json`** in `-out`: the same run as Chrome trace events, for
   [ui.perfetto.dev](https://ui.perfetto.dev). A job is a process with its steps on one track and
   its spans on as many as it takes, which is where to zoom into a step or compare shards. A sampled
-  job's machine is counters under it - `CPUs busy`, `CPU time %` (iowait, steal), `stalled %`
-  (each pressure), `disk MB/s` (read, written), `disk busy %` - and a slice's args say what its
-  command used and what the machine did meanwhile.
+  job's machine is counters under it - `CPU time %` (busy, iowait, steal), `stalled %` (each
+  pressure), `disk MB/s` (read, written), `disk busy %` - and a slice's args say what its command
+  used and what the machine did meanwhile.
 
 **The critical path** is the chain of jobs the wall time is made of. The API does not say what a
 job needs, but a job is queued the moment the last job it needs finishes, so the chain is read
@@ -121,10 +121,11 @@ The time says a step was slow, not why. `ghatrace sample` reads the job's machin
 (`-every`) into the same file as its spans, from what Linux counts from boot - so what the machine
 did between two samples is their difference, exact whatever happened between them:
 
-- **CPUs busy**: `/proc/stat`'s ticks of all CPUs, less idle, iowait and steal, as a number of
-  CPUs: `0.3 of 64` is a machine with one process working a third of the time, not a busy one.
-  **iowait** and **steal** are shares of the CPUs' time: idle with IO outstanding, and taken by
-  the hypervisor.
+- **CPUs busy**: the share of all CPUs' `/proc/stat` ticks that were neither idle, nor iowait,
+  nor steal, said as a number of CPUs: `0.3 of 64` is a machine with one process working a third
+  of the time, not a busy one. **iowait** and **steal** are shares of the same ticks: idle with IO
+  outstanding, and taken by the hypervisor. Each state's ticks are its own difference: iowait can
+  go back, and then counts nothing.
 - **Stalled on CPU, IO, memory**: `/proc/pressure`'s `total` - the microseconds in which at least
   one task waited for a CPU, for IO, or for memory (`some`), and, for IO and memory, in which every
   task that could run waited (`full`) - as a share of the time. A step stalled on IO most of the
@@ -136,11 +137,12 @@ did between two samples is their difference, exact whatever happened between the
 
 A step of a job's own starts it, near the start, and it returns at once: each step is a process
 the runner waits for, and a process a step leaves running lives on through the steps after it.
-The sampler is one such, in a session of its own with nothing to say to the step, and the runner
-ends it when the job ends, as it ends every process the job started (they carry the job's
-`RUNNER_TRACKING_ID`). Each sample is written as it is taken, so nothing waits on that end. A job
-that starts it twice has one sampler; it stops on its own after six hours (`-for`), should nothing
-end it.
+The sampler is one such, with nothing to say to the step, and the runner ends it when the job
+ends, as it ends every process the job started (they carry the job's `RUNNER_TRACKING_ID`; the
+job's log says `Terminate orphan process: ... (ghatrace)`). Each sample is written as it is taken,
+so nothing waits on that end, and a reader of the file while the sampler writes leaves out a last
+line not yet whole. A job that starts it twice has one sampler; it stops on its own after six
+hours (`-for`), should nothing end it, or when a sample cannot be written.
 
 What a machine does not have is not sampled, and `sample` says so: a kernel without PSI has no
 pressure, a container no disk of its own. Off Linux there is nothing to read, and off a runner
