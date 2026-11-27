@@ -94,6 +94,7 @@ func Common(ctx context.Context, root, included string) ([]Finding, string, erro
 		out = append(out, bare(flows)...)
 	}
 	out = append(out, own(t)...)
+	out = append(out, hidden(t)...)
 	said := "no include"
 	if t.Common == nil {
 		file := cmp.Or(t.Root, roots[0])
@@ -186,6 +187,83 @@ func own(t *taskfiles) []Uncommon {
 				", after what it does (with both Task refuses every task: `Found multiple tasks (" + name + ") included by \"" + d.Via + "\"\"`)"
 		}
 		out = append(out, u)
+	}
+	return out
+}
+
+// templated is a template of Task's, and dotted a var it reads: `.RELEASE` of `.RELEASE.none`,
+// and not a word of a string the template holds, which is not upper case after a dot.
+var (
+	templated = regexp.MustCompile(`\{\{[^}]*\}\}`)
+	dotted    = regexp.MustCompile(`\.([A-Z][A-Z0-9_]*)`)
+)
+
+// taskSets are the vars Task gives every task itself. A template of the common tasks may read
+// one, and no repository states one, so they are not names a repository is told to rename.
+var taskSets = []string{
+	"ALIAS", "CHECKSUM", "CLI_ARGS", "CLI_ARGS_LIST", "CLI_ASSUME_YES", "CLI_FORCE", "CLI_OFFLINE", "CLI_SILENT", "CLI_VERBOSE",
+	"EXIT_CODE", "ITEM", "MATCH", "ROOT_DIR", "ROOT_TASKFILE", "TASK", "TASKFILE", "TASKFILE_DIR", "TASK_DIR", "TASK_EXE",
+	"TASK_VERSION", "TIMESTAMP", "USER_WORKING_DIR",
+}
+
+// commonVars is the vars the common tasks read and do not state themselves, from the tasks' own
+// file at the version this gate is of: the include's (RELEASE) and the command line's (TO).
+// A task's own vars are read after every other, so a repository's of the same name hides nothing.
+func commonVars() []string {
+	var top yaml.Node
+	_ = yaml.Unmarshal(common.File, &top) //nolint:errcheck // this module's own file, which its tests run under Task
+	read, own := map[string]bool{}, map[string]bool{}
+	var walk func(n *yaml.Node)
+	walk = func(n *yaml.Node) {
+		for _, tmpl := range templated.FindAllString(n.Value, -1) {
+			for _, m := range dotted.FindAllStringSubmatch(tmpl, -1) {
+				read[m[1]] = true
+			}
+		}
+		for _, c := range n.Content {
+			walk(c)
+		}
+	}
+	walk(&top)
+	if len(top.Content) > 0 {
+		if tasks := field(top.Content[0], "tasks"); tasks != nil && tasks.Kind == yaml.MappingNode {
+			for i := 1; i < len(tasks.Content); i += 2 {
+				body := tasks.Content[i]
+				if req := field(body, "requires"); req != nil {
+					if vars := field(req, "vars"); vars != nil {
+						for _, v := range vars.Content {
+							read[v.Value] = true
+						}
+					}
+				}
+				if vars := field(body, "vars"); vars != nil && vars.Kind == yaml.MappingNode {
+					for j := 0; j < len(vars.Content); j += 2 {
+						own[vars.Content[j].Value] = true
+					}
+				}
+			}
+		}
+	}
+	for _, n := range taskSets {
+		own[n] = true
+	}
+	maps.DeleteFunc(read, func(n string, _ bool) bool { return own[n] })
+	return slices.Sorted(maps.Keys(read))
+}
+
+// hidden is each var a Taskfile of the repository states under a name the common tasks read: Task
+// gives it to an included task over the include's vars and the command line's, so the task reads
+// the repository's value - a root RELEASE that is a directory is a release the task says nobody
+// stated, while the include states one.
+func hidden(t *taskfiles) []Uncommon {
+	names := commonVars()
+	var out []Uncommon
+	for _, v := range t.Vars {
+		if !slices.Contains(names, v.Name) {
+			continue
+		}
+		out = append(out, Uncommon{v.File + ":vars:" + v.Name, v.File + ":" + strconv.Itoa(v.Line), "var " + v.Name + " is one the common tasks read, " +
+			"and a Taskfile's own var of that name is what they read instead of the include's or the command line's: rename it after what it holds"})
 	}
 	return out
 }

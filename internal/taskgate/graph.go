@@ -43,6 +43,15 @@ type taskfiles struct {
 	Root   string // the root Taskfile, "" when the repository has none
 	Tasks  map[string]*definition
 	Common *include
+	// Vars is each var a file of the repository's own states in its top-level vars:, in the
+	// order read.
+	Vars []ownVar
+}
+
+// ownVar is a var a Taskfile states, by its name and where.
+type ownVar struct {
+	File, Name string
+	Line       int
 }
 
 // roots are the names Task finds a directory's Taskfile by, in its order.
@@ -82,6 +91,7 @@ func (t *taskfiles) read(root string, listed map[string]bool, common, rel, prefi
 		return err
 	}
 	t.define(field(top, "tasks"), rel, prefix, via)
+	t.state(field(top, "vars"), rel)
 	inc := field(top, "includes")
 	if inc == nil || inc.Kind != yaml.MappingNode {
 		return nil
@@ -123,6 +133,16 @@ func (t *taskfiles) read(root string, listed map[string]bool, common, rel, prefi
 		}
 	}
 	return nil
+}
+
+// state adds the vars of one file's top-level vars: mapping.
+func (t *taskfiles) state(vars *yaml.Node, rel string) {
+	if vars == nil || vars.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(vars.Content); i += 2 {
+		t.Vars = append(t.Vars, ownVar{rel, vars.Content[i].Value, vars.Content[i].Line})
+	}
 }
 
 // define adds the tasks of one file's tasks: mapping, each named prefix and its own name.

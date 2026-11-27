@@ -157,7 +157,10 @@ Only what differs, as the include's `vars`:
 
 They are the include's vars and not the Taskfile's own because of how Task orders them: in an
 included task a Taskfile's own var wins over the command line's. A repository with a root
-`VERSION` would have it answer for `bump VERSION=...`, which is why the argument is `TO`.
+`VERSION` would have it answer for `bump VERSION=...`, which is why the argument is `TO`. The
+same order hides the include's own vars: a root `RELEASE` that names a directory is the `RELEASE`
+`release` reads, so a Taskfile's own var of a name the tasks read is one
+[`taskgate -common`](../taskgate/#the-common-tasks--common) fails.
 
 `bump VERSION=<version>`, the spelling three repositories had, is not refused: it pins the newest,
 as `bump` with no version does. The task cannot refuse it. Under Task 3.54.0 an included task

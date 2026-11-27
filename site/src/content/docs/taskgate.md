@@ -137,6 +137,7 @@ common name is one Task refuses to load, and the finding is the one that names t
 | the root Taskfile includes `{{.GO_TOOLS_TASKS}}`, with `flatten: true`, so the names are `versions` and not `common:versions` | `common:include` |
 | the include has no `excludes` | `common:excludes` |
 | no Taskfile of the repository's defines a common name: in the root, or in a file an include gives a namespace (`workflows` in a file included as `lint` is `lint:workflows`) | `common:<file>:<task>` |
+| no Taskfile of the repository's states, in its own `vars:`, a var the common tasks read (`RELEASE`, `VERSIONS_FILES`, `WORKFLOWS_ALSO`, `CONSUMERS`, `GO_TOOLS`, `TO`, `NAME`, `FILE`, `BACK`, `SHA`, `RELEASE_DRY`): an included task reads that one, not the include's, so a root `RELEASE` that is a directory leaves `release` saying the include states none. Rename it after what it holds | `common:<file>:vars:<var>` |
 | in a repository that takes `go tool task`, no step runs a bare `task` or installs Task with `go-task/setup-task` | `common:<file>/<job>/<step>/task`, `.../setup-task` |
 | `RELEASE` is stated: `{proof, jobs}`, `{elsewhere}` or `{none}` | `common:RELEASE` |
 | `proof` is a workflow the repository has, and each of `jobs` starts the name of one of its jobs | `common:RELEASE/proof`, `common:RELEASE/jobs/<job>` |
