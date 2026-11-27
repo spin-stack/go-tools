@@ -124,6 +124,12 @@ var (
 	testStart = regexp.MustCompile(`=== RUN   ((?:Test|Fuzz|Example)[^\s/]*)$`)
 	testPause = regexp.MustCompile(`=== PAUSE ((?:Test|Fuzz|Example)[^\s/]*)$`)
 	testOver  = regexp.MustCompile(`--- (?:PASS|FAIL|SKIP): ((?:Test|Fuzz|Example)[^\s/]*) \(`)
+	// aloneOver is what the binary says once no test runs alone: a paused test let go, or the
+	// run's verdict, each a line of its own. It is how a test whose end framed cannot read stops
+	// being timed: one that printed only spaces with no newline, onto which the binary appends its
+	// end, which is then an indented echo to a line reader. Its end is read by the next test's
+	// start, and the last test's by this, before a TestMain's teardown, which is not its time.
+	aloneOver = regexp.MustCompile(`^(?:=== CONT  (?:Test|Fuzz|Example)[^\s/]*|PASS|FAIL)$`)
 )
 
 // framed is the test marker names in line, where the test binary said it: at the line's start, or
@@ -196,7 +202,7 @@ func (p *pacer) hold(b []byte) {
 }
 
 func (p *pacer) line(line string) {
-	if framed(testPause, line, true) != "" || framed(testOver, line, true) != "" {
+	if framed(testPause, line, true) != "" || framed(testOver, line, true) != "" || aloneOver.MatchString(line) {
 		p.running++
 		return
 	}
