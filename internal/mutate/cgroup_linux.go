@@ -1,7 +1,6 @@
 package mutate
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -98,10 +97,10 @@ var confinedRuns atomic.Int64
 // exceeded says they reached either.
 //
 // mutate-lane: TestATestProcessIsHeldByItsCgroup
-func confined(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error) {
+func confined(what string, cmd *exec.Cmd) (exceeded bool, err error) {
 	dir := filepath.Join(testCgroup, "t"+strconv.FormatInt(confinedRuns.Add(1), 10))
 	if err := os.Mkdir(dir, 0o755); err != nil {
-		return nil, false, err
+		return false, err
 	}
 	defer release(dir)
 	limits := [][2]string{
@@ -113,17 +112,15 @@ func confined(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error)
 	}
 	for _, l := range limits {
 		if err := set(dir, l[0], l[1]); err != nil {
-			return nil, false, err
+			return false, err
 		}
 	}
 	fd, err := os.Open(dir)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	defer func() { _ = fd.Close() }()
 
-	var buf bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &buf, &buf
 	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: int(fd.Fd())}
 	// A process cmd started and left running holds its output open, and Wait would wait for it
 	// for ever; release kills it once cmd is done.
@@ -131,7 +128,7 @@ func confined(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error)
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		account(what, cmd, time.Since(started))
-		return nil, false, err
+		return false, err
 	}
 	done, stopped := make(chan struct{}), make(chan bool)
 	go func() { stopped <- watchPids(dir, done) }()
@@ -142,7 +139,7 @@ func confined(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error)
 	if errors.Is(err, exec.ErrWaitDelay) {
 		err = nil // cmd itself succeeded; what it left is release's
 	}
-	return buf.Bytes(), stoppedAtPids || event(dir, "memory.events", "oom_kill") > 0, err
+	return stoppedAtPids || event(dir, "memory.events", "oom_kill") > 0, err
 }
 
 // watchPids kills dir's processes once a fork was refused there, and says whether it did: what

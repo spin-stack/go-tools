@@ -369,34 +369,15 @@ func writeSchema(dir string, ms []Mutation, work string) (string, error) {
 }
 
 // Ask runs a test binary in the tree's copy of dir, a package's directory, with mutation id
-// switched on, stopping at the first test that fails: only, when it names any, and every test
-// when it is nil.
-func Ask(ctx context.Context, tree *Tree, bin, dir string, id int, timeout string, only []string) (Outcome, string, error) {
-	cmd := exec.CommandContext(ctx, bin, testArgs(timeout, only)...) //nolint:gosec // a test binary this run built
-	cmd.Env = testEnv(switchEnv + "=" + strconv.Itoa(id))
-	var (
-		out      []byte
-		exceeded bool
-		runErr   error
-	)
-	if err := tree.in(ctx, dir, func(at, tmp string) {
-		cmd.Dir, cmd.Env = at, append(cmd.Env, "TMPDIR="+tmp)
-		out, exceeded, runErr = bounded("schema: run one edit", cmd)
-	}); err != nil {
-		return 0, "", err
+// switched on, stopping at the first test that fails, or at a: only, when it names any, and
+// every test when it is nil.
+func Ask(ctx context.Context, tree *Tree, bin, dir string, id int, a Allowance, only []string) (Answer, error) {
+	answer, err := askBinary(ctx, tree, "schema: run one edit", bin, dir, testEnv(switchEnv+"="+strconv.Itoa(id)), only, a)
+	if err != nil {
+		return answer, err
 	}
-	// A test binary the cancellation killed failed, and would read as the edit refused.
-	if err := ctx.Err(); err != nil {
-		return 0, string(out), err
-	}
-	countTests(dir, out)
-	if exceeded {
-		return Exceeded, string(out), nil
-	}
-	if runErr != nil {
-		return Killed, string(out), nil //nolint:nilerr // a test that fails is the edit refused, not this run failing
-	}
-	return Survived, string(out), nil
+	countTests(dir, []byte(answer.Said))
+	return answer, nil
 }
 
 // ImporterBinary builds the tests of importer, a package named from the module's root, at out,
