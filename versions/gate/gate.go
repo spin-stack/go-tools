@@ -105,7 +105,7 @@ func (g Gate) Check() error {
 			}
 		}
 	}
-	errs = append(errs, taskCommand(v, files["go.mod"], used)...)
+	taskCommand(files["go.mod"], used)
 	errs = append(errs, commonTasks(v, files, tasks.File, used)...)
 	for _, e := range v.Entries {
 		if !used[e.Name] {
@@ -132,22 +132,18 @@ func apart(v *versions.Versions) []error {
 	return errs
 }
 
-// TaskCommand is the go-tools command a go.mod takes as `go tool task`: Task at versions.yaml's
-// `task`, with go-tools' latest release on its PATH.
+// TaskCommand is the go-tools command a go.mod takes as `go tool task`: the Task go-tools pins, or
+// versions.yaml's `task` when there is one, with go-tools' latest release on its PATH.
 const TaskCommand = "github.com/spin-stack/go-tools/cmd/task"
 
-// taskCommand is what a go.mod that takes go-tools' task command owes versions.yaml: the `task` it
-// runs. The command reads that entry, which no line of the repository spells as a read, so it is
-// marked used here. go-tools itself is its latest release, which no versions.yaml pins.
-func taskCommand(v *versions.Versions, gomod string, used map[string]bool) []error {
-	if !slices.ContainsFunc(strings.Fields(gomod), func(f string) bool { return f == TaskCommand }) {
-		return nil
+// taskCommand marks versions.yaml's `task` used when go.mod takes go-tools' task command: the
+// command reads that entry, which no line of the repository spells as a read. A repository owes
+// none, since the command carries its own Task; go-tools itself is its latest release, which no
+// versions.yaml pins.
+func taskCommand(gomod string, used map[string]bool) {
+	if slices.ContainsFunc(strings.Fields(gomod), func(f string) bool { return f == TaskCommand }) {
+		used["task"] = true
 	}
-	used["task"] = true
-	if _, err := v.Get("task"); err != nil {
-		return []error{fmt.Errorf("go.mod takes %s, which runs the Task %s pins: %w", TaskCommand, versions.File, err)}
-	}
-	return nil
 }
 
 // tasksInclude is what a Taskfile includes to have go-tools' common tasks: the variable

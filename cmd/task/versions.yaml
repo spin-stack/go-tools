@@ -1,0 +1,19 @@
+# The Task `go tool task` runs, for each platform a go-tools release is built for (the Taskfile's
+# release:build PLATFORMS): the command carries this pin (go:embed), so every repository takes it
+# by its go-tools version rather than writing its own. A repository's versions.yaml `task`, when it
+# has one, is run instead.
+
+- name: task
+  kind: download
+  source: https://github.com/go-task/task/releases/download/v{version}/task_{os}_{arch}.tar.gz
+  version: 3.54.0
+  pins:
+    linux/amd64: 680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb
+    linux/arm64: d7189d439d4a6058e39e1b2acd7c8b27acd4856691b408f23b242e4294e1df5b
+    darwin/amd64: 0543b0844a725814c0412d3f4bed12873ce9ed0da207b15775f63a97d734aac0
+    darwin/arm64: 12a69fcf37bb8d5bc9150c44f9a936775b73e59ff044c2c245232f198c135637
+  track: github-release https://github.com/go-task/task
+  note: >-
+    go tool task, in every repository that takes it, and this repository's CI (go-task/setup-task,
+    from go run ./cmd/versions env -file cmd/task/versions.yaml task). Upstream's binary: no
+    repository compiles it.

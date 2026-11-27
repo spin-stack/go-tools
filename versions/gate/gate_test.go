@@ -150,8 +150,8 @@ func TestAGateOutsideARepositorySaysWhatGitSaid(t *testing.T) {
 	}
 }
 
-// A go.mod that takes go-tools' task command reads versions.yaml's task through it, and owes it
-// one; a go.mod without it reads no task.
+// A go.mod that takes go-tools' task command reads versions.yaml's task through it, and owes none:
+// the command carries its own. A go.mod without it reads no task.
 func TestTheTaskCommandReadsTask(t *testing.T) {
 	const task = "- name: task\n  kind: download\n  source: https://x/v{version}/task_{os}_{arch}.tar.gz\n  version: 3.54.0\n  pins:\n    linux/amd64: " +
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  track: github-release https://github.com/go-task/task\n"
@@ -163,7 +163,7 @@ func TestTheTaskCommandReadsTask(t *testing.T) {
 		{"the command and its task", tool, task, nil},
 		{"the command on a tool line of its own", "module x\n\ntool " + TaskCommand + "\n", task, nil},
 		{"the command and no task", tool, "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n",
-			[]string{"go.mod takes " + TaskCommand + ", which runs the Task versions.yaml pins", "pins go, and nothing reads it"}},
+			[]string{"pins go, and nothing reads it"}},
 		{"no command: nothing reads the task", "module x\n", task, []string{"pins task, and nothing reads it"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

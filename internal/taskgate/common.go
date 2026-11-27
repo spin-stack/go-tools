@@ -304,7 +304,7 @@ func bare(flows []flow) []Uncommon {
 				if strings.HasPrefix(s.Uses, "go-task/setup-task@") || s.Uses == "go-task/setup-task" {
 					out = append(out, Uncommon{f.key(j, s) + "/setup-task", f.File + ":" + strconv.Itoa(s.Line),
 						"step " + strconv.Quote(s.Name) + " installs Task with go-task/setup-task, and go.mod takes " + taskCommand +
-							": remove the step, `go tool task` runs the Task versions.yaml pins (actions/setup-go with `go-version-file: go.mod` is what it needs)"})
+							": remove the step, `go tool task` runs the Task go-tools pins (actions/setup-go with `go-version-file: go.mod` is what it needs)"})
 				}
 				for _, l := range s.Run {
 					if strings.HasPrefix(l.Text+" ", "task ") {
