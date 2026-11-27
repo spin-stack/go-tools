@@ -28,11 +28,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/proven"
 )
 
 func main() {
-	if err := run(context.Background(), os.Args[1:]); err != nil { // mutate-exempt: main's way out; run is what the tests drive
+	ctx := interrupt.Context()
+	err := run(ctx, os.Args[1:]) // mutate-exempt: main's way out; run is what the tests drive
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "proven: %v\n", err)
 		os.Exit(1) // mutate-exempt: a refusal's exit code, which a workflow reads as the step failing
 	}

@@ -106,10 +106,10 @@ func cachedRun(t *testing.T, m mutate.Mutation) func() (fresh, known []mutate.Mu
 		t.Helper()
 		c, err := mutate.OpenCache(store)
 		require.NoError(t, err)
-		fresh, known, err = c.Known([]mutate.Mutation{m}, nil)
+		fresh, known, err = c.Known(t.Context(), []mutate.Mutation{m}, nil)
 		require.NoError(t, err)
 		if len(fresh) > 0 {
-			tally, err := mutate.RunAll(fresh, nil, "2m", 1, io.Discard)
+			tally, err := mutate.RunAll(t.Context(), fresh, nil, "2m", 1, io.Discard)
 			require.NoError(t, err)
 			require.NoError(t, c.Keep(tally.Refused))
 			if len(tally.Survived) > 0 {

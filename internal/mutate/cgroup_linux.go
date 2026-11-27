@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -37,7 +38,7 @@ const leadCgroup = "mutate"
 // children can be bounded; empty for any other, which this run must not rearrange.
 //
 // mutate-lane: TestATestProcessIsHeldByItsCgroup
-func delegated() (string, error) {
+func delegated(ctx context.Context) (string, error) {
 	self, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
 		return "", nil //nolint:nilerr // no /proc: no cgroup to be given
@@ -47,7 +48,7 @@ func delegated() (string, error) {
 	if !ok || strings.Contains(path, "\n") {
 		return "", nil
 	}
-	said, err := exec.Command("systemctl", "--user", "show", "--property=Delegate", "--value", filepath.Base(path)).Output()
+	said, err := exec.CommandContext(ctx, "systemctl", "--user", "show", "--property=Delegate", "--value", filepath.Base(path)).Output()
 	if err != nil || strings.TrimSpace(string(said)) != "yes" {
 		return "", nil //nolint:nilerr // no user manager, or a unit it did not delegate
 	}

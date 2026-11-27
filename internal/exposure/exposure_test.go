@@ -96,7 +96,7 @@ func TestEveryRefIsReadAndAPullRequestsHeadToo(t *testing.T) {
 	git("checkout", "-q", "main")
 	git("branch", "-qD", "pr")
 
-	h, err := exposure.ReadHistory(dir, exposure.DefaultPatterns())
+	h, err := exposure.ReadHistory(t.Context(), dir, exposure.DefaultPatterns())
 	require.NoError(t, err)
 	assert.Equal(t, 3, h.Commits)
 	assert.Equal(t, 1, h.OffDefault)

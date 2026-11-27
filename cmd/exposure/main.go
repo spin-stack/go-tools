@@ -21,12 +21,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strings"
 
 	"github.com/spin-stack/go-tools/internal/allow"
 	"github.com/spin-stack/go-tools/internal/exposure"
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/versions"
 )
 
@@ -45,12 +45,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: exposure [flags] <owner/repo>")
 		os.Exit(2)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx := interrupt.Context()
 	status, err := run(ctx, os.Stdout, options{
 		repo: flag.Arg(0), allow: *allowPath, patterns: *patternsPath, leaksConfig: *leaksConfig,
 		mirror: *mirror, github: *github, private: *private,
 	})
-	stop()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "exposure: %v\n", err)
 		os.Exit(2)
@@ -69,7 +68,7 @@ func run(ctx context.Context, w io.Writer, o options) (int, error) {
 		return 0, err
 	}
 	owner, name, _ := strings.Cut(o.repo, "/")
-	gh := exposure.GitHub{API: "https://api.github.com", Token: token()}
+	gh := exposure.GitHub{API: "https://api.github.com", Token: token(ctx)}
 	patterns, err := kinds(ctx, o, gh, owner, name)
 	if err != nil {
 		return 0, err
@@ -88,7 +87,7 @@ func run(ctx context.Context, w io.Writer, o options) (int, error) {
 		return 0, err
 	}
 
-	history, err := exposure.ReadHistory(dir, patterns)
+	history, err := exposure.ReadHistory(ctx, dir, patterns)
 	if err != nil {
 		return 0, err
 	}
@@ -227,7 +226,7 @@ func secrets(ctx context.Context, dir, config string) ([]exposure.Finding, strin
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, "", fmt.Errorf("gitleaks: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	onDefault, err := exposure.DefaultBranch(dir)
+	onDefault, err := exposure.DefaultBranch(ctx, dir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -237,13 +236,13 @@ func secrets(ctx context.Context, dir, config string) ([]exposure.Finding, strin
 
 // token is the GitHub token to read with: GITHUB_TOKEN, else gh's. A private repository's issues
 // cannot be read without one.
-func token() string {
+func token(ctx context.Context) string {
 	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
 		return t
 	}
 	// No gh, or not logged in: anonymous, which reads a public repository and fails, saying so,
 	// on a private one.
-	out, err := exec.Command("gh", "auth", "token").Output()
+	out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
 	if err != nil {
 		return ""
 	}

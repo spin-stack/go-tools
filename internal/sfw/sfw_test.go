@@ -86,7 +86,7 @@ tasks:
 	write("ignored/install.sh", "npm install\n")
 	gittest.Run(t, repo, "init", "-q")
 
-	findings, err := sfw.Check(repo)
+	findings, err := sfw.Check(t.Context(), repo)
 	require.NoError(t, err)
 	var got []string
 	for _, f := range findings {

@@ -14,20 +14,19 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/versions"
 	"github.com/spin-stack/go-tools/versions/upstream"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	err := run(ctx, os.Args[1:]) // mutate-exempt: the process's own arguments; run is what the tests drive
-	stop()
+	ctx := interrupt.Context()
+	err := run(ctx, os.Args[1:])              // mutate-exempt: the process's own arguments; run is what the tests drive
 	if msg, code := failure(err); code != 0 { // mutate-exempt: the process's exit; failure is what the tests drive
 		fmt.Fprintln(os.Stderr, msg)
 		os.Exit(code)

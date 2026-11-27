@@ -68,7 +68,7 @@ jobs:
 	gittest.Run(t, repo, "add", ".github/workflows/staged.yml")
 	require.NoError(t, os.Remove(filepath.Join(repo, ".github/workflows/staged.yml")))
 
-	findings, err := taskgate.Check(repo, taskgate.Limits{}, nil)
+	findings, err := taskgate.Check(t.Context(), repo, taskgate.Limits{}, nil)
 	require.NoError(t, err)
 	type step struct {
 		key  string
@@ -115,7 +115,7 @@ jobs:
 	})
 	known := map[string]bool{"lint": true, "test": true, "build": true, "l": true}
 
-	findings, err := taskgate.Check(root, taskgate.Limits{}, known)
+	findings, err := taskgate.Check(t.Context(), root, taskgate.Limits{}, known)
 	require.NoError(t, err)
 	var got []string
 	for _, f := range findings {
@@ -130,7 +130,7 @@ jobs:
 	require.NotEmpty(t, findings)
 	assert.Contains(t, findings[0].String(), "has no task")
 
-	none, err := taskgate.Check(root, taskgate.Limits{}, nil)
+	none, err := taskgate.Check(t.Context(), root, taskgate.Limits{}, nil)
 	require.NoError(t, err)
 	assert.Empty(t, none)
 }
@@ -149,7 +149,7 @@ func TestTheNamesAreWhatTaskLists(t *testing.T) {
 	lists := stub("task", `echo "$@" > `+args+`
 echo '{"tasks":[{"name":"lint","aliases":["l"]},{"name":"e2e:up","aliases":[]}]}'
 `)
-	got, err := taskgate.Tasks(lists, "/repo")
+	got, err := taskgate.Tasks(t.Context(), lists, "/repo")
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"lint": true, "l": true, "e2e:up": true}, got)
 	said, err := os.ReadFile(args) //nolint:gosec // the stub's own file
@@ -162,7 +162,7 @@ echo '{"tasks":[{"name":"lint","aliases":["l"]},{"name":"e2e:up","aliases":[]}]}
 		"prose": "echo hello\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := taskgate.Tasks(stub(name, body), "/repo")
+			_, err := taskgate.Tasks(t.Context(), stub(name, body), "/repo")
 			require.Error(t, err)
 			if name == "fails" {
 				assert.Contains(t, err.Error(), "no Taskfile found")
@@ -188,7 +188,7 @@ jobs:
       - run: go run ./cmd/other build
 `,
 	})
-	findings, err := taskgate.Check(root, taskgate.Limits{}, nil, "go run ./cmd/spin-os", "spin-os")
+	findings, err := taskgate.Check(t.Context(), root, taskgate.Limits{}, nil, "go run ./cmd/spin-os", "spin-os")
 	require.NoError(t, err)
 	var got []string
 	for _, f := range findings {

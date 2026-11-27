@@ -31,13 +31,13 @@ func TestAnEditWithNoCoverageIsAskedOfEveryTest(t *testing.T) {
 	for i := range plan {
 		plan[i].ID = i + 1
 	}
-	s, err := Schemata(dir, plan, t.TempDir())
+	s, err := Schemata(t.Context(), dir, plan, t.TempDir())
 	if err != nil || s.Binary == "" || len(s.Built) == 0 {
 		t.Fatalf("schema: %+v, %v", s, err)
 	}
 	p := pkgRun{dir: dir, timeout: "2m", slots: Slots(t.TempDir(), 1)}
 	for _, m := range s.Built {
-		if got, err := p.built(m, s, nil); err != nil || got != Killed {
+		if got, err := p.built(t.Context(), m, s, nil); err != nil || got != Killed {
 			t.Errorf("%s: %v (%v) with no coverage, want refused by the test nobody measured", m, got, err)
 		}
 	}
@@ -84,7 +84,7 @@ func TestAnEditThatAllocatesForEverIsStoppedAndRefused(t *testing.T) {
 	t.Cleanup(func() { memLimit = 0 })
 
 	var said strings.Builder
-	tally, err := RunAll(plan, nil, "2m", 1, &said)
+	tally, err := RunAll(t.Context(), plan, nil, "2m", 1, &said)
 	if err != nil {
 		t.Fatal(err)
 	}

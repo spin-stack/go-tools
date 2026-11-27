@@ -65,7 +65,7 @@ func TestEveryTestProcessIsHeldToItsShare(t *testing.T) {
 	dir := oneProc(t)
 	share(t, 1<<20)
 
-	c, err := Cover(dir, "1m", Slots(t.TempDir(), 1))
+	c, err := Cover(t.Context(), dir, "1m", Slots(t.TempDir(), 1))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -349,7 +349,7 @@ func TestTheLinesAChangeTouchesAreTheOnesItChanged(t *testing.T) {
 	require.NoError(t, os.WriteFile("notes.txt", []byte("a\nb\n"), 0o600))
 	run("add", "notes.txt")
 
-	changed, err := mutate.Changed("HEAD")
+	changed, err := mutate.Changed(t.Context(), "HEAD")
 	require.NoError(t, err)
 	assert.NotContains(t, changed, "", "a hunk of a file that is not Go was counted as a file with no name")
 
@@ -563,7 +563,7 @@ func G() int {
 // says which, per test.
 func TestAnEditIsPutToTheTestsThatReachIt(t *testing.T) {
 	dir := refuses(t)
-	c, err := mutate.Cover(dir, "2m", mutate.Slots(t.TempDir(), 2))
+	c, err := mutate.Cover(t.Context(), dir, "2m", mutate.Slots(t.TempDir(), 2))
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	assert.Equal(t, []string{"TestDouble"}, c.Reaching(filepath.Join(dir, "code.go"), 4))
@@ -595,7 +595,7 @@ func TestAnEditIsPutToTheTestsThatReachIt(t *testing.T) {
 // Who imports a package is asked of the whole module, from wherever this runs: the tests here run
 // in internal/mutate/, where `./...` alone would be this directory's packages and nothing else.
 func TestImportersAreTheWholeModulesWhereverThisRuns(t *testing.T) {
-	importers, err := mutate.Importers()
+	importers, err := mutate.Importers(t.Context())
 	require.NoError(t, err)
 	assert.Contains(t, importers["versions"], "./versions/upstream",
 		"versions/upstream, which bumps what versions reads, is not among its importers")
@@ -611,7 +611,7 @@ func TestAListingThatFailsSaysWhatGoListSaid(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(bin, "go"), []byte(fake), 0o755))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	_, err := mutate.Importers()
+	_, err := mutate.Importers(t.Context())
 	require.ErrorContains(t, err, "pattern ./...: the reason")
 }
 

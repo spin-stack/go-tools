@@ -2,7 +2,10 @@
 
 package mutate
 
-import "os/exec"
+import (
+	"context"
+	"os/exec"
+)
 
 // testCgroup is never set where there are no cgroups: a test's memory is measured from /proc.
 var testCgroup string
@@ -10,7 +13,7 @@ var testCgroup string
 // pidsMax bounds nothing where there are no cgroups.
 var pidsMax = 0
 
-func delegated() (string, error) { return "", nil }
+func delegated(context.Context) (string, error) { return "", nil }
 
 func confined(what string, cmd *exec.Cmd) ([]byte, bool, error) {
 	out, err := combined(what, cmd)

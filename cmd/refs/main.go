@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -18,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/spin-stack/go-tools/internal/allow"
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/refs"
 )
 
@@ -29,20 +31,21 @@ func main() {
 	decisions := flag.String("decisions", "docs/decisions", "the directory an ADR-NNNN resolves in")
 	flag.Parse()
 
-	if err := run(".", *allowPath, strings.Fields(*pathspecs), refs.TaskCommand(*taskExe), *decisions); err != nil {
+	ctx := interrupt.Context()
+	if err := run(ctx, ".", *allowPath, strings.Fields(*pathspecs), refs.TaskCommand(ctx, *taskExe), *decisions); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(root, allowPath string, pathspecs, task []string, decisions string) error {
+func run(ctx context.Context, root, allowPath string, pathspecs, task []string, decisions string) error {
 	allowed, err := allow.Read(allowPath)
 	if err != nil {
 		return fmt.Errorf("refs: %w", err)
 	}
 	// A document either has something holding it to the tree or it is deleted, and this is
 	// what holds the ones named.
-	files, err := git(root, append([]string{"ls-files", "--"}, pathspecs...)...)
+	files, err := git(ctx, root, append([]string{"ls-files", "--"}, pathspecs...)...)
 	if err != nil {
 		return err
 	}
@@ -54,16 +57,16 @@ func run(root, allowPath string, pathspecs, task []string, decisions string) err
 	if len(files) == 0 {
 		return fmt.Errorf("refs: git tracks nothing %s names, so this check read nothing", strings.Join(pathspecs, " "))
 	}
-	tops, err := git(root, "ls-tree", "-d", "--name-only", "HEAD")
+	tops, err := git(ctx, root, "ls-tree", "-d", "--name-only", "HEAD")
 	if err != nil {
 		return err
 	}
 
-	found, err := refs.Check(refs.Options{
+	found, err := refs.Check(ctx, refs.Options{
 		Root:      root,
 		Files:     files,
 		TopDirs:   tops,
-		Tasks:     taskLister(root, task),
+		Tasks:     taskLister(ctx, root, task),
 		Decisions: decisions,
 	})
 	if err != nil {
@@ -102,7 +105,7 @@ func run(root, allowPath string, pathspecs, task []string, decisions string) err
 // taskLister asks `task` for names as JSON and decodes it as JSON. The shell this replaced
 // pulled them out with a sed expression anchored on the pretty listing's layout; when the
 // layout moved, it read an empty list and called every reference broken.
-func taskLister(root string, task []string) refs.TaskLister {
+func taskLister(ctx context.Context, root string, task []string) refs.TaskLister {
 	return func(dir string) ([]string, error) {
 		// A directory with no Taskfile has no tasks, and that is an answer. Any other error
 		// is not: a Taskfile this process cannot read would otherwise report every `task
@@ -117,7 +120,7 @@ func taskLister(root string, task []string) refs.TaskLister {
 		// 3.54), so a listing left every task that had not run since its sources changed
 		// reporting itself as up to date. spin's e2e lane served a control plane built before the
 		// dashboard change it was gating, because `task refs` had run first in lint.
-		cmd := exec.Command(task[0], append(task[1:], "-d", dir, "--list-all", "--json", "--no-status")...) //nolint:gosec // the binary is the gate's own argument
+		cmd := exec.CommandContext(ctx, task[0], append(task[1:], "-d", dir, "--list-all", "--json", "--no-status")...) //nolint:gosec // the binary is the gate's own argument
 		cmd.Dir = root
 		cmd.Env = append(os.Environ(), "NO_COLOR=1")
 		out, err := cmd.Output()
@@ -143,8 +146,8 @@ func taskLister(root string, task []string) refs.TaskLister {
 	}
 }
 
-func git(root string, args ...string) ([]string, error) {
-	cmd := exec.Command("git", args...)
+func git(ctx context.Context, root string, args ...string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {

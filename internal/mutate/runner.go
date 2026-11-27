@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -37,8 +38,9 @@ type result struct {
 // RunAll puts every mutation to the tests, jobs at a time, and says each outcome as it comes.
 // Each package's mutations are built into one binary (Schemata), run once per mutation;
 // an edit the schema could not build is built alone, through an overlay of its own. Each
-// package's coverage is measured once, for both.
-func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jobs int, w io.Writer) (Tally, error) {
+// package's coverage is measured once, for both. Once ctx is cancelled no edit is asked, and the
+// run fails with what cancelled it.
+func RunAll(ctx context.Context, chosen []Mutation, importers map[string][]string, timeout string, jobs int, w io.Writer) (Tally, error) {
 	work, err := os.MkdirTemp("", "mutate-")
 	if err != nil {
 		return Tally{}, err
@@ -55,7 +57,7 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 	b := &builds{sem: make(chan struct{}, 1), work: work, bins: map[string]*importerBinary{}}
 	covers := &coverages{by: map[string]*coverage{}, timeout: timeout, slots: slots}
 	byDir, dirs := byPackage(chosen)
-	if broken, err := brokenImporters(dirs, importers, timeout, slots); err != nil {
+	if broken, err := brokenImporters(ctx, dirs, importers, timeout, slots); err != nil {
 		return Tally{Broken: broken}, err
 	}
 	results := make(chan result)
@@ -64,7 +66,7 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 		wg.Go(func() {
 			p := pkgRun{dir: dir, work: filepath.Join(work, strconv.Itoa(i)), timeout: timeout, slots: slots,
 				builds: b, importers: importers[filepath.ToSlash(dir)], results: results, out: w}
-			p.run(byDir[dir], covers)
+			p.run(ctx, byDir[dir], covers)
 		})
 	}
 	go func() { wg.Wait(); close(results) }()
@@ -120,6 +122,9 @@ func RunAll(chosen []Mutation, importers map[string][]string, timeout string, jo
 		}
 	}
 	slices.Sort(t.Broken)
+	if ctx.Err() != nil {
+		return t, stoppedEarly(ctx)
+	}
 	// After every edit was asked, so the run says all it can first. A test that fails with nothing
 	// broken is asked about no edit, so what it would have refused is let through, and the run
 	// that reports it and passes is a green check over a failing test.
@@ -151,7 +156,7 @@ func byPackage(chosen []Mutation) (map[string][]Mutation, []string) {
 // are measured that way (Cover), and one that fails is asked about no edit; an importer's are
 // asked whole, so one that fails regardless refuses every edit asked of it, and the run reports
 // none survived. One that does not build asks nothing either way, and is not named.
-func brokenImporters(dirs []string, importers map[string][]string, timeout string, slots chan *Tree) ([]string, error) {
+func brokenImporters(ctx context.Context, dirs []string, importers map[string][]string, timeout string, slots chan *Tree) ([]string, error) {
 	seen := map[string]bool{}
 	for _, dir := range dirs {
 		for _, importer := range importers[filepath.ToSlash(dir)] {
@@ -176,7 +181,7 @@ func brokenImporters(dirs []string, importers map[string][]string, timeout strin
 			tree := <-slots
 			defer func() { slots <- tree }()
 			var said strings.Builder
-			outcome, err := runPackage(tree, importer, filepath.Join(root, importer), root, "an importer's tests, unbroken",
+			outcome, err := runPackage(ctx, tree, importer, filepath.Join(root, importer), root, "an importer's tests, unbroken",
 				nil, timeout, "", &said)
 			mu.Lock()
 			defer mu.Unlock()
@@ -199,6 +204,9 @@ func brokenImporters(dirs []string, importers map[string][]string, timeout strin
 		})
 	}
 	wg.Wait()
+	if ctx.Err() != nil {
+		return nil, stoppedEarly(ctx)
+	}
 	if firstErr != nil {
 		return nil, firstErr
 	}
@@ -235,10 +243,16 @@ type pkgRun struct {
 
 // run builds the package's schema and puts each mutation in it to the binary, and each it could
 // not build to the tests alone, all side by side within the slots.
-func (p pkgRun) run(ms []Mutation, covers *coverages) {
+func (p pkgRun) run(ctx context.Context, ms []Mutation, covers *coverages) {
 	p.builds.sem <- struct{}{}
-	s, err := Schemata(p.dir, ms, filepath.Join(p.work, "schema"))
+	s, err := Schemata(ctx, p.dir, ms, filepath.Join(p.work, "schema"))
 	<-p.builds.sem
+	if ctx.Err() != nil {
+		for _, m := range ms {
+			p.results <- result{m: m, err: ctx.Err()}
+		}
+		return
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  (%s: no schema, each edit is built alone: %v)\n", p.dir, err)
 		s = &Schema{Alone: ms}
@@ -247,39 +261,54 @@ func (p pkgRun) run(ms []Mutation, covers *coverages) {
 	// The package as it is says which tests reach a line: the schema moves none.
 	var c *Coverage
 	if len(s.Built) > 0 && s.Binary != "" { // mutate-exempt: with no edit built, only one built alone reads it, and measures it itself
-		c = covers.of(p.dir)
+		c = covers.of(ctx, p.dir)
 	}
 	var wg sync.WaitGroup
 	for _, m := range s.Built {
 		wg.Go(func() {
-			outcome, err := p.built(m, s, c)
-			p.results <- result{m: m, outcome: outcome, err: err}
+			outcome, err := p.built(ctx, m, s, c)
+			p.results <- stopped(ctx, result{m: m, outcome: outcome, err: err})
 		})
 	}
 	for i, m := range s.Alone {
 		wg.Go(func() {
 			// Measured before a slot is taken: the measuring takes slots of its own, and holding
 			// one while waiting on the others is how a budget of one never finishes.
-			reaching := covers.of(p.dir)
+			reaching := covers.of(ctx, p.dir)
 			tree := <-p.slots
 			defer func() { p.slots <- tree }()
-			outcome, err := runAlone(m, filepath.Join(p.work, "alone-"+strconv.Itoa(i)), p.timeout, reaching, p.importers, tree, p.out)
-			p.results <- result{m: m, outcome: outcome, err: err}
+			outcome, err := runAlone(ctx, m, filepath.Join(p.work, "alone-"+strconv.Itoa(i)), p.timeout, reaching, p.importers, tree, p.out)
+			p.results <- stopped(ctx, result{m: m, outcome: outcome, err: err})
 		})
 	}
 	wg.Wait()
 }
 
+// stopped is r, failed with ctx's error once ctx is cancelled: what the tests did then may be the
+// cancellation's doing - an importer it kept from building asks nothing, and the edit reads as
+// one no test refused.
+func stopped(ctx context.Context, r result) result {
+	if err := ctx.Err(); err != nil {
+		return result{m: r.m, err: err}
+	}
+	return r
+}
+
+// stoppedEarly is how a run cancelled before it asked every edit fails.
+func stoppedEarly(ctx context.Context) error {
+	return fmt.Errorf("mutate: stopped before every edit was asked: %w", ctx.Err())
+}
+
 // built puts m, which is in s's binary, to the package's tests that reach its line, then to each
 // importer's tests, built once with the same schema: a survivor pays for the second.
-func (p pkgRun) built(m Mutation, s *Schema, c *Coverage) (Outcome, error) {
+func (p pkgRun) built(ctx context.Context, m Mutation, s *Schema, c *Coverage) (Outcome, error) {
 	if s.Binary == "" && len(p.importers) == 0 {
 		return Untested, nil
 	}
 	ask := func(bin, dir string, only []string) (Outcome, error) {
 		tree := <-p.slots
 		defer func() { p.slots <- tree }()
-		outcome, _, err := Ask(tree, bin, dir, m.ID, p.timeout, only)
+		outcome, _, err := Ask(ctx, tree, bin, dir, m.ID, p.timeout, only)
 		return outcome, err
 	}
 	if s.Binary != "" {
@@ -294,7 +323,7 @@ func (p pkgRun) built(m Mutation, s *Schema, c *Coverage) (Outcome, error) {
 		}
 	}
 	for _, importer := range p.importers {
-		bin, dir := p.builds.importer(p.dir, importer, s.Overlay)
+		bin, dir := p.builds.importer(ctx, p.dir, importer, s.Overlay)
 		if bin == "" {
 			continue
 		}
@@ -320,7 +349,7 @@ type importerBinary struct {
 
 // importer is importer's test binary with the schema of the package in dir, and the directory it
 // runs in; an empty binary where it has no tests or would not build, which asks it nothing.
-func (b *builds) importer(dir, importer, overlay string) (string, string) {
+func (b *builds) importer(ctx context.Context, dir, importer, overlay string) (string, string) {
 	key := dir + " " + importer
 	b.mu.Lock()
 	ib := b.bins[key]
@@ -334,7 +363,7 @@ func (b *builds) importer(dir, importer, overlay string) (string, string) {
 		b.sem <- struct{}{}
 		defer func() { <-b.sem }()
 		var err error
-		ib.bin, ib.dir, err = ImporterBinary(importer, overlay, filepath.Join(b.work, "importer-"+strconv.Itoa(n)+".test"))
+		ib.bin, ib.dir, err = ImporterBinary(ctx, importer, overlay, filepath.Join(b.work, "importer-"+strconv.Itoa(n)+".test"))
 		if err != nil { // mutate-exempt: what is said on stderr; an importer with no binary asks nothing either way
 			fmt.Fprintf(os.Stderr, "  (%v)\n", err)
 		}
@@ -344,7 +373,7 @@ func (b *builds) importer(dir, importer, overlay string) (string, string) {
 
 // runAlone builds the mutation in through an overlay under dir, and runs the package's tests that
 // reach its line and then its importers', in tree. The file itself is never written.
-func runAlone(m Mutation, dir, timeout string, c *Coverage, importers []string, tree *Tree, out io.Writer) (Outcome, error) {
+func runAlone(ctx context.Context, m Mutation, dir, timeout string, c *Coverage, importers []string, tree *Tree, out io.Writer) (Outcome, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return 0, err
 	}
@@ -357,7 +386,7 @@ func runAlone(m Mutation, dir, timeout string, c *Coverage, importers []string, 
 		asked.Reaching = c.Reaching(m.File, m.Line)
 	}
 	started := time.Now()
-	outcome, _, err := Run(m, asked)
+	outcome, _, err := Run(ctx, m, asked)
 	if err != nil {
 		return 0, err
 	}
@@ -381,7 +410,7 @@ type coverage struct {
 }
 
 // of is dir's coverage, or nil where it could not be measured: every test is asked then.
-func (cs *coverages) of(dir string) *Coverage {
+func (cs *coverages) of(ctx context.Context, dir string) *Coverage {
 	cs.mu.Lock()
 	c, ok := cs.by[dir]
 	if !ok {
@@ -390,7 +419,7 @@ func (cs *coverages) of(dir string) *Coverage {
 	}
 	cs.mu.Unlock()
 	c.once.Do(func() {
-		measured, err := Cover(dir, cs.timeout, cs.slots)
+		measured, err := Cover(ctx, dir, cs.timeout, cs.slots)
 		if err != nil { // mutate-exempt: what is said on stderr; the coverage is nil either way
 			fmt.Fprintf(os.Stderr, "  (%s: no coverage, every test is asked: %v)\n", dir, err)
 		}

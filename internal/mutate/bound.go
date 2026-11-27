@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,8 +45,8 @@ func memAvailable(meminfo []byte) int64 {
 // after Share and before anything is asked.
 //
 // mutate-lane: TestATestProcessIsHeldByItsCgroup
-func Confine() (string, error) {
-	dir, err := delegated()
+func Confine(ctx context.Context) (string, error) {
+	dir, err := delegated(ctx)
 	testCgroup = dir
 	return dir, err
 }
@@ -72,6 +73,13 @@ func gib(n int64) string {
 func bounded(what string, cmd *exec.Cmd) (out []byte, exceeded bool, err error) {
 	if testCgroup != "" {
 		return confined(what, cmd)
+	}
+	// Cancelled, cmd is stopped with every process under it, as one that holds too much is: a test
+	// binary's own go build, left running when only the binary is killed, writes into the
+	// temporary directory the run is removing, and outlives the run.
+	cmd.Cancel = func() error {
+		stopOver(cmd.Process, -1) // mutate-exempt: any limit below zero is under what every tree holds
+		return nil
 	}
 	limit := memLimit
 	if limit == 0 {

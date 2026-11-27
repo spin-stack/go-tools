@@ -3,17 +3,16 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 
 	"github.com/spin-stack/go-tools/internal/gencache"
+	"github.com/spin-stack/go-tools/internal/interrupt"
 )
 
 func main() { os.Exit(run()) }
@@ -40,8 +39,7 @@ func run() int {
 		return 2
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
+	ctx := interrupt.Context()
 	res, err := gencache.Run(ctx, gencache.Options{
 		Dir: wd, Tags: *tags, Patterns: flag.Args(), Cache: *dir, Jobs: *jobs, Out: os.Stdout,
 	})

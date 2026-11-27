@@ -20,7 +20,7 @@ func TestATreeIsTheModuleAsGitSeesItPutBackAfterEachRun(t *testing.T) {
 	var at string
 	ran := func(run func(at string)) {
 		t.Helper()
-		if err := tree.in(filepath.Join(root, "p"), func(at, _ string) { run(at) }); err != nil {
+		if err := tree.in(t.Context(), filepath.Join(root, "p"), func(at, _ string) { run(at) }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -75,7 +75,7 @@ func TestARunsTemporaryDirectoryTakesASocketFromATestWithALongName(t *testing.T)
 	tree := NewTree(filepath.Join(t.TempDir(), "trees", "12", "a-tree-as-deep-as-a-runner-makes-it"))
 	var tmps []string
 	for range 2 {
-		err := tree.in(filepath.Join(root, "p"), func(_, tmp string) {
+		err := tree.in(t.Context(), filepath.Join(root, "p"), func(_, tmp string) {
 			tmps = append(tmps, tmp)
 			if entries, err := os.ReadDir(tmp); err != nil || len(entries) != 0 {
 				t.Errorf("the run's temporary directory holds %v (%v), not nothing", entries, err)
@@ -272,7 +272,7 @@ func TestATestThatAsksGitWhatTheModuleHoldsIsAnsweredInTheCopy(t *testing.T) {
 	}
 	want := sorted(gittest.Run(t, filepath.Join(root, "p"), listing...))
 	for range 2 {
-		if err := tree.in(filepath.Join(root, "p"), func(at, _ string) {
+		if err := tree.in(t.Context(), filepath.Join(root, "p"), func(at, _ string) {
 			if got := sorted(gittest.Run(t, at, listing...)); got != want {
 				t.Errorf("git in the copy lists\n%s\nnot the checkout's\n%s", got, want)
 			}

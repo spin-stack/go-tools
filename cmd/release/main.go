@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,11 +25,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/release"
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, git, time.Now()); err != nil { // mutate-exempt: the process's own arguments; run is what the test drives
+	ctx := interrupt.Context()
+	gitIn := func(args ...string) ([]string, error) { return git(ctx, args...) }
+	if err := run(os.Args[1:], os.Stdout, gitIn, time.Now()); err != nil { // mutate-exempt: the process's own arguments; run is what the test drives
 		fmt.Fprintln(os.Stderr, "release:", err) //nolint:errcheck // the exit status says it
 		os.Exit(1)                               // mutate-exempt: any status but 0 fails the step; run is what the tests drive
 	}
@@ -74,8 +78,8 @@ func run(args []string, w io.Writer, g gitFunc, now time.Time) error {
 	return err
 }
 
-func git(args ...string) ([]string, error) {
-	out, err := exec.Command("git", args...).Output() //nolint:gosec // git, with the commit release.yml names: a tag listing, not a command line
+func git(ctx context.Context, args ...string) ([]string, error) {
+	out, err := exec.CommandContext(ctx, "git", args...).Output() //nolint:gosec // git, with the commit release.yml names: a tag listing, not a command line
 	if err != nil {
 		var said []byte
 		if exit := (*exec.ExitError)(nil); errors.As(err, &exit) {

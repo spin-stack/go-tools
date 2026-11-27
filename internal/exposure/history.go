@@ -2,6 +2,7 @@ package exposure
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -74,13 +75,13 @@ type History struct {
 // ReadHistory reads every commit every ref of the repository at dir reaches - a mirror clone's
 // refs/pull/* included - for the patterns, in every line a commit adds, and for its authors'
 // and committers' addresses.
-func ReadHistory(dir string, patterns []Pattern) (History, error) {
+func ReadHistory(ctx context.Context, dir string, patterns []Pattern) (History, error) {
 	var h History
-	all, err := lines(dir, "rev-list", "--all")
+	all, err := lines(ctx, dir, "rev-list", "--all")
 	if err != nil {
 		return h, err
 	}
-	onDefault, err := DefaultBranch(dir)
+	onDefault, err := DefaultBranch(ctx, dir)
 	if err != nil {
 		return h, err
 	}
@@ -88,7 +89,7 @@ func ReadHistory(dir string, patterns []Pattern) (History, error) {
 	h.OffDefault = len(all) - len(onDefault)
 
 	var t tally
-	people, err := lines(dir, "log", "--all", "--format=%H %ae%n%H %ce")
+	people, err := lines(ctx, dir, "log", "--all", "--format=%H %ae%n%H %ce")
 	if err != nil {
 		return h, err
 	}
@@ -101,7 +102,7 @@ func ReadHistory(dir string, patterns []Pattern) (History, error) {
 
 	ever := map[string]bool{}
 	binaries := map[string]bool{}
-	err = patches(dir, func(commit, file string, kind added, line string) {
+	err = patches(ctx, dir, func(commit, file string, kind added, line string) {
 		switch kind {
 		case touched:
 			ever[file] = true
@@ -116,7 +117,7 @@ func ReadHistory(dir string, patterns []Pattern) (History, error) {
 	if err != nil {
 		return h, err
 	}
-	tree, err := lines(dir, "ls-tree", "-r", "--name-only", "HEAD")
+	tree, err := lines(ctx, dir, "ls-tree", "-r", "--name-only", "HEAD")
 	if err != nil {
 		return h, err
 	}
@@ -139,8 +140,8 @@ func ReadHistory(dir string, patterns []Pattern) (History, error) {
 }
 
 // DefaultBranch is the commits the default branch (HEAD) reaches.
-func DefaultBranch(dir string) (map[string]bool, error) {
-	head, err := lines(dir, "rev-list", "HEAD")
+func DefaultBranch(ctx context.Context, dir string) (map[string]bool, error) {
+	head, err := lines(ctx, dir, "rev-list", "HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +164,8 @@ const (
 
 // patches calls each with every file every commit touches and every line it adds, by commit and
 // file. Read as a stream: a repository's whole history does not fit in memory as one string.
-func patches(dir string, each func(commit, file string, kind added, line string)) error {
-	cmd := exec.Command("git", "-C", dir, "log", "--all", "-p", "--no-color", "--no-ext-diff", "--format=commit %H")
+func patches(ctx context.Context, dir string, each func(commit, file string, kind added, line string)) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "log", "--all", "-p", "--no-color", "--no-ext-diff", "--format=commit %H")
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -209,8 +210,8 @@ func patches(dir string, each func(commit, file string, kind added, line string)
 	return nil
 }
 
-func lines(dir string, args ...string) ([]string, error) {
-	raw, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+func lines(ctx context.Context, dir string, args ...string) ([]string, error) {
+	raw, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
 	if err != nil {
 		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(exit.Stderr)))

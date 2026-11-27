@@ -91,7 +91,7 @@ func TestTheGateReadsTheRootsAndTheTwoLists(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			stdout, stderr := capture(t)
-			status := run(tc.args, stdout.w, stderr.w)
+			status := run(t.Context(), tc.args, stdout.w, stderr.w)
 			out, errText := stdout.read(t), stderr.read(t)
 			if status != tc.status {
 				t.Errorf("status %d, want %d; stderr:\n%s", status, tc.status, errText)
@@ -114,7 +114,7 @@ func TestTheGateReadsTheRootsAndTheTwoLists(t *testing.T) {
 	// The roots did not build: the report would be of a program missing a package.
 	write(t, dir, "lib/broken.go", "package lib\n\nfunc Broken() { undefined() }\n")
 	stdout, stderr := capture(t)
-	if status := run([]string{"-deadcode", deadcode, "-allow", allow, "-pending", pending}, stdout.w, stderr.w); status != 2 {
+	if status := run(t.Context(), []string{"-deadcode", deadcode, "-allow", allow, "-pending", pending}, stdout.w, stderr.w); status != 2 {
 		t.Errorf("status %d with roots that do not build", status)
 	}
 	if text := stderr.read(t); !strings.Contains(text, "the roots do not build") || !strings.Contains(text, "undefined") {

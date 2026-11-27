@@ -155,7 +155,7 @@ func TestAnEditInTheSchemaIsAnsweredAsItIsAlone(t *testing.T) {
 	}
 	assert.Equal(t, schemaPlan, planned, "the edits planned")
 
-	s, err := mutate.Schemata(dir, plan, t.TempDir())
+	s, err := mutate.Schemata(t.Context(), dir, plan, t.TempDir())
 	require.NoError(t, err)
 	require.NotEmpty(t, s.Binary, "the package's tests were not built")
 	var alone []string
@@ -170,7 +170,7 @@ func TestAnEditInTheSchemaIsAnsweredAsItIsAlone(t *testing.T) {
 	outcome, out := askTests(t, s.Binary, dir, 0, "2m", nil)
 	require.Equal(t, mutate.Survived, outcome, "with no edit on, the package failed its own tests: %s", out)
 
-	covered, err := mutate.Cover(dir, "2m", mutate.Slots(t.TempDir(), 2))
+	covered, err := mutate.Cover(t.Context(), dir, "2m", mutate.Slots(t.TempDir(), 2))
 	require.NoError(t, err)
 	killed := 0
 	for _, m := range s.Built {
@@ -212,7 +212,7 @@ func TestOneEditIsASchemaToo(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"Scale: 2 becomes 3"}, whats(plan), "the plan of Scale's line")
 	plan[0].ID = 1
-	s, err := mutate.Schemata(dir, plan, t.TempDir())
+	s, err := mutate.Schemata(t.Context(), dir, plan, t.TempDir())
 	require.NoError(t, err)
 	assert.Len(t, s.Built, 1)
 	assert.NotEmpty(t, s.Binary, "the one edit was not built")
@@ -241,7 +241,7 @@ func TestABuildThatFailsWhereNoEditIsBuildsEachAlone(t *testing.T) {
 	for i := range plan {
 		plan[i].ID = i + 1
 	}
-	s, err := mutate.Schemata(dir, plan, t.TempDir())
+	s, err := mutate.Schemata(t.Context(), dir, plan, t.TempDir())
 	require.NoError(t, err)
 	assert.Empty(t, s.Built, "edits were left in a schema that does not build")
 	assert.Empty(t, s.Binary)
@@ -262,7 +262,7 @@ func TestAPackageWhoseTestsAreOfAnotherBuildHasNoBinary(t *testing.T) {
 	for i := range plan {
 		plan[i].ID = i + 1
 	}
-	s, err := mutate.Schemata(dir, plan, t.TempDir())
+	s, err := mutate.Schemata(t.Context(), dir, plan, t.TempDir())
 	require.NoError(t, err)
 	assert.Empty(t, s.Binary, "a binary of no tests was named")
 	assert.NotEmpty(t, s.Built)
@@ -291,18 +291,18 @@ func TestAnImportersTestsAreBuiltFromTheModulesRoot(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	require.NoError(t, err)
 
-	bin, dir, err := mutate.ImporterBinary("./internal/mutate", overlay, filepath.Join(work, "mutate.test"))
+	bin, dir, err := mutate.ImporterBinary(t.Context(), "./internal/mutate", overlay, filepath.Join(work, "mutate.test"))
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(work, "mutate.test"), bin)
 	assert.FileExists(t, bin)
 	assert.Equal(t, filepath.Join(root, "internal", "mutate"), dir)
 
-	bin, dir, err = mutate.ImporterBinary("./cmd/ctxlife", overlay, filepath.Join(work, "cmd.test"))
+	bin, dir, err = mutate.ImporterBinary(t.Context(), "./cmd/ctxlife", overlay, filepath.Join(work, "cmd.test"))
 	require.NoError(t, err)
 	assert.Empty(t, bin, "a package with no tests was given a binary")
 	assert.Empty(t, dir)
 
-	_, _, err = mutate.ImporterBinary("./internal/mutate/nothing-here", overlay, filepath.Join(work, "none.test"))
+	_, _, err = mutate.ImporterBinary(t.Context(), "./internal/mutate/nothing-here", overlay, filepath.Join(work, "none.test"))
 	assert.Error(t, err, "a package that is not there was built")
 }
 

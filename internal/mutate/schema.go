@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -236,7 +237,7 @@ type Schema struct {
 // Schemata builds every mutation of ms, which are all in the package in dir, into one test binary
 // under work. A mutation the compiler refuses there is moved to Alone and the rest built again;
 // errors it cannot put on a mutation's line move them all.
-func Schemata(dir string, ms []Mutation, work string) (*Schema, error) {
+func Schemata(ctx context.Context, dir string, ms []Mutation, work string) (*Schema, error) {
 	if err := os.MkdirAll(work, 0o700); err != nil {
 		return nil, err
 	}
@@ -248,23 +249,28 @@ func Schemata(dir string, ms []Mutation, work string) (*Schema, error) {
 			s.Built = append(s.Built, m)
 		}
 	}
-	tests := hasTests(dir)
+	tests := hasTests(ctx, dir)
 	for len(s.Built) > 0 {
 		overlay, err := writeSchema(dir, s.Built, work)
 		if err != nil {
 			return nil, err
 		}
 		bin := ""
-		build := exec.Command("go", "build", "-gcflags=-e", "-overlay", overlay, "-o", os.DevNull, ".")
+		build := exec.CommandContext(ctx, "go", "build", "-gcflags=-e", "-overlay", overlay, "-o", os.DevNull, ".")
 		if tests {
 			bin = filepath.Join(work, "pkg.test")
-			build = exec.Command("go", "test", "-c", "-vet=off", "-gcflags=-e", "-overlay", overlay, "-o", bin, ".")
+			build = exec.CommandContext(ctx, "go", "test", "-c", "-vet=off", "-gcflags=-e", "-overlay", overlay, "-o", bin, ".")
 		}
 		build.Dir = dir
+		workIn(build, work)
 		out, err := combined("schema: build the package's tests", build)
 		if err == nil {
 			s.Overlay, s.Binary = overlay, bin
 			return s, nil
+		}
+		// A build the cancellation killed names no edit, and would move them all to Alone.
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		refused := refusedBy(string(out), s.Built)
 		if len(refused) == 0 {
@@ -365,19 +371,23 @@ func writeSchema(dir string, ms []Mutation, work string) (string, error) {
 // Ask runs a test binary in the tree's copy of dir, a package's directory, with mutation id
 // switched on, stopping at the first test that fails: only, when it names any, and every test
 // when it is nil.
-func Ask(tree *Tree, bin, dir string, id int, timeout string, only []string) (Outcome, string, error) {
-	cmd := exec.Command(bin, testArgs(timeout, only)...) //nolint:gosec // a test binary this run built
+func Ask(ctx context.Context, tree *Tree, bin, dir string, id int, timeout string, only []string) (Outcome, string, error) {
+	cmd := exec.CommandContext(ctx, bin, testArgs(timeout, only)...) //nolint:gosec // a test binary this run built
 	cmd.Env = testEnv(switchEnv + "=" + strconv.Itoa(id))
 	var (
 		out      []byte
 		exceeded bool
 		runErr   error
 	)
-	if err := tree.in(dir, func(at, tmp string) {
+	if err := tree.in(ctx, dir, func(at, tmp string) {
 		cmd.Dir, cmd.Env = at, append(cmd.Env, "TMPDIR="+tmp)
 		out, exceeded, runErr = bounded("schema: run one edit", cmd)
 	}); err != nil {
 		return 0, "", err
+	}
+	// A test binary the cancellation killed failed, and would read as the edit refused.
+	if err := ctx.Err(); err != nil {
+		return 0, string(out), err
 	}
 	countTests(dir, out)
 	if exceeded {
@@ -392,14 +402,15 @@ func Ask(tree *Tree, bin, dir string, id int, timeout string, only []string) (Ou
 // ImporterBinary builds the tests of importer, a package named from the module's root, at out,
 // with the schema overlay puts in place of the package it imports, and says the directory they
 // run in. Empty where it has no tests.
-func ImporterBinary(importer, overlay, out string) (string, string, error) {
+func ImporterBinary(ctx context.Context, importer, overlay, out string) (string, string, error) {
 	root, err := moduleRoot(".")
 	// mutate-exempt: there is no go.mod above only outside a module, where no importer is named.
 	if err != nil {
 		return "", "", err
 	}
-	build := exec.Command("go", "test", "-c", "-vet=off", "-overlay", overlay, "-o", out, importer)
+	build := exec.CommandContext(ctx, "go", "test", "-c", "-vet=off", "-overlay", overlay, "-o", out, importer)
 	build.Dir = root
+	workIn(build, filepath.Dir(out))
 	if said, err := combined("schema: build an importer's tests", build); err != nil {
 		return "", "", fmt.Errorf("mutate: building %s's tests with the schema: %w: %s", importer, err, said)
 	}
