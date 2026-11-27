@@ -39,8 +39,8 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
-	"syscall"
 
+	"github.com/spin-stack/go-tools/internal/interrupt"
 	"github.com/spin-stack/go-tools/internal/release"
 	"github.com/spin-stack/go-tools/internal/toolcache"
 	"github.com/spin-stack/go-tools/versions"
@@ -60,9 +60,9 @@ const (
 var pins []byte
 
 func main() {
-	err := run(context.Background(), os.Args[1:], goTools, own(), ownTask(), os.Stderr, syscall.Exec) // mutate-exempt: the process's own arguments; run is what the test drives
-	fmt.Fprintln(os.Stderr, "task:", err)                                                             //nolint:errcheck // the error is the exit status's reason; stderr failing changes no status
-	os.Exit(2)                                                                                        // mutate-exempt: main is reached only when the exec failed, which no test makes it do; run is what the tests drive
+	err := run(interrupt.Context(), os.Args[1:], goTools, own(), ownTask(runtime.GOOS, runtime.GOARCH), os.Stderr, execTask) // mutate-exempt: the process's own arguments; run is what the test drives
+	fmt.Fprintln(os.Stderr, "task:", err)                                                                                    //nolint:errcheck // the error is the exit status's reason; stderr failing changes no status
+	os.Exit(2)                                                                                                               // mutate-exempt: main is reached only when the exec failed, which no test makes it do; run is what the tests drive
 }
 
 // own is the module version this command was compiled from: the one a repository's go.mod
@@ -75,12 +75,18 @@ func own() string {
 	return info.Main.Version
 }
 
-// ownTask is the Task this command carries, which a test holds to the platforms a release is built
-// for.
-func ownTask() versions.Entry {
+// ownTask is the Task this command carries for goos/goarch: the entry of versions.yaml that pins
+// that platform, task itself when none does, which says so when it is installed. A test holds
+// the file to the platforms a release is built for.
+func ownTask(goos, goarch string) versions.Entry {
 	v, err := versions.Parse(pins)
 	if err != nil {
 		panic(err)
+	}
+	for _, e := range v.Entries {
+		if _, ok := e.Pins[goos+"/"+goarch]; ok {
+			return e
+		}
 	}
 	e, err := v.Get("task")
 	if err != nil {
@@ -89,8 +95,8 @@ func ownTask() versions.Entry {
 	return e
 }
 
-// execFunc replaces the process with argv[0]'s program: syscall.Exec, and a recorder in a test.
-type execFunc func(path string, argv []string, env []string) error
+// execFunc becomes argv[0]'s program: execTask, and a recorder in a test.
+type execFunc func(ctx context.Context, path string, argv []string, env []string) error
 
 // run installs task - or the `task` of the repository's versions.yaml, when it has one - and the
 // latest release of the tools at base - none before the release that version, this command's
@@ -127,10 +133,18 @@ func run(ctx context.Context, args []string, base, version string, task versions
 			"%s/releases/latest ten minutes after its last answer: run this again then, or when that address can be reached.\n",
 			tools, tasks, tasksEnv, base)
 	}
-	bin := filepath.Join(taskDir, "task")
+	bin := filepath.Join(taskDir, "task"+exe(runtime.GOOS))
 	path := tools + string(os.PathListSeparator) + os.Getenv("PATH")
 	env := with(with(os.Environ(), "PATH", path), tasksEnv, common)
-	return exec(bin, append([]string{bin}, args...), env)
+	return exec(ctx, bin, append([]string{bin}, args...), env)
+}
+
+// exe is what a program's file name ends in on goos.
+func exe(goos string) string {
+	if goos == "windows" {
+		return ".exe"
+	}
+	return ""
 }
 
 // with is env with key set to value: replaced where it is, since a program that reads the

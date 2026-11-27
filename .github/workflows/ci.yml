@@ -112,3 +112,39 @@ jobs:
           archive: false
           retention-days: 7
           if-no-files-found: ignore
+
+  platforms:
+    # What differs by platform, on the two the Gate does not run on: the Task go tool task runs
+    # there and how it runs it, the archives it unpacks, and the interrupt every command stops on.
+    name: Platforms (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            task-sha: TASK_WINDOWS_SHA256_WINDOWS_AMD64
+          - os: macos-latest
+            task-sha: TASK_SHA256_DARWIN_ARM64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        # Windows' runner has Git's bash, and the redirect below is bash's.
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Task's pin
+        run: go run ./cmd/versions env -file cmd/task/versions.yaml task task-windows >> "$GITHUB_ENV"
+
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          checksum: ${{ env[matrix.task-sha] }}
+
+      - name: Test
+        run: task test:platform

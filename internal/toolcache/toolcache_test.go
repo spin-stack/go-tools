@@ -2,15 +2,18 @@ package toolcache
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -60,9 +63,15 @@ func tarball(t *testing.T, members ...member) ([]byte, string) {
 // release serves body at /v1/tool_<os>_<arch>.tar.gz and counts the downloads.
 func release(t *testing.T, body []byte) (string, *atomic.Int32) {
 	t.Helper()
+	return releaseAs(t, body, ".tar.gz")
+}
+
+// releaseAs is release, its file named with ext.
+func releaseAs(t *testing.T, body []byte, ext string) (string, *atomic.Int32) {
+	t.Helper()
 	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/tool_linux_amd64.tar.gz" {
+		if r.URL.Path != "/v1/tool_linux_amd64"+ext {
 			http.NotFound(w, r)
 			return
 		}
@@ -70,8 +79,77 @@ func release(t *testing.T, body []byte) (string, *atomic.Int32) {
 		_, _ = w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
-	return srv.URL + "/v{version}/tool_{os}_{arch}.tar.gz", &n
+	return srv.URL + "/v{version}/tool_{os}_{arch}" + ext, &n
 }
+
+// zipOf is a .zip of members, and its sha256.
+func zipOf(t *testing.T, members ...member) ([]byte, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, m := range members {
+		h := &zip.FileHeader{Name: m.name}
+		h.SetMode(fs.FileMode(m.mode))
+		if m.kind == tar.TypeDir {
+			h.SetMode(fs.ModeDir | fs.FileMode(m.mode))
+		}
+		if m.kind == tar.TypeSymlink {
+			h.SetMode(fs.ModeSymlink | 0o777)
+		}
+		w, err := zw.CreateHeader(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(m.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := sha256.Sum256(buf.Bytes())
+	return buf.Bytes(), hex.EncodeToString(s[:])
+}
+
+// Upstream releases Windows' programs as .zip: one is unpacked as a .tar.gz is, its files and
+// directories and no link, and one that would write outside its directory leaves nothing.
+func TestAZipIsUnpackedAsATarballIs(t *testing.T) {
+	body, pin := zipOf(t,
+		member{name: "completion/", kind: tar.TypeDir, mode: 0o755},
+		member{name: "task.exe", body: "MZ", mode: 0o755, kind: tar.TypeReg},
+		member{name: "completion/task.ps1", body: "x", mode: 0o644, kind: tar.TypeReg},
+		member{name: "link", body: "/etc/passwd", kind: tar.TypeSymlink})
+	source, _ := releaseAs(t, body, ".zip")
+	root := t.TempDir()
+	dir, err := install(t.Context(), entry(source, pin), root, "linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "task.exe")); err != nil || string(got) != "MZ" {
+		t.Errorf("task.exe holds %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "completion", "task.ps1")); err != nil {
+		t.Errorf("completion/task.ps1: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "link")); err == nil {
+		t.Error("a link in the archive was made")
+	}
+
+	escape, escapePin := zipOf(t, member{name: "../outside", body: "x", mode: 0o644, kind: tar.TypeReg})
+	escapeSource, _ := releaseAs(t, escape, ".zip")
+	root = t.TempDir()
+	if _, err := install(t.Context(), entry(escapeSource, escapePin), root, "linux", "amd64"); err == nil ||
+		!strings.Contains(err.Error(), "would be written outside the directory") {
+		t.Errorf("err = %v", err)
+	}
+	if left, _ := os.ReadDir(filepath.Join(root, "tool")); len(left) != 0 {
+		t.Errorf("left in the cache: %v", left)
+	}
+}
+
+// modes is whether this platform's files keep the permission bits they are written with: Windows
+// has none, and says 0666 of every file.
+var modes = runtime.GOOS != "windows"
 
 func entry(source, pin string) versions.Entry {
 	return versions.Entry{Name: "tool", Kind: versions.Download, Version: "1", Source: source,
@@ -96,13 +174,13 @@ func TestAReleaseIsUnpackedOnceByItsPin(t *testing.T) {
 		t.Errorf("installed in %s", dir)
 	}
 	st, err := os.Stat(filepath.Join(dir, "bin", "task"))
-	if err != nil || st.Mode().Perm() != 0o755 {
+	if err != nil || modes && st.Mode().Perm() != 0o755 {
 		t.Errorf("bin/task: %v, %v", st, err)
 	}
 	if body, err := os.ReadFile(filepath.Join(dir, "bin", "task")); err != nil || string(body) != "#!/bin/sh\n" {
 		t.Errorf("bin/task holds %q, %v", body, err)
 	}
-	if st, err := os.Stat(filepath.Join(dir, "LICENSE")); err != nil || st.Mode().Perm() != 0o644 {
+	if st, err := os.Stat(filepath.Join(dir, "LICENSE")); err != nil || modes && st.Mode().Perm() != 0o644 {
 		t.Errorf("LICENSE: %v, %v", st, err)
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "bin", "link")); err == nil {
@@ -140,8 +218,8 @@ func TestWhatIsNotThePinnedReleaseLeavesNothing(t *testing.T) {
 		{"no gzip", entry(notGzipSource, sumOf(notGzip)), "gzip"},
 		{"a platform not pinned", versions.Entry{Name: "tool", Kind: versions.Download, Source: goodSource, Version: "1",
 			Pins: map[string]string{"darwin/arm64": pin}}, "pins no file for linux/amd64"},
-		{"no archive", versions.Entry{Name: "tool", Kind: versions.Download, Source: "http://x/{version}/tool.zip", Version: "1", Pin: pin},
-			"only a .tar.gz is unpacked"},
+		{"no archive", versions.Entry{Name: "tool", Kind: versions.Download, Source: "http://x/{version}/tool.7z", Version: "1", Pin: pin},
+			"only a .tar.gz or a .zip is unpacked"},
 		{"no download", versions.Entry{Name: "tool", Kind: versions.Git, Version: "1"}, "not a download"},
 		{"nothing there", entry(strings.Replace(goodSource, "/v{version}/", "/gone-{version}/", 1), pin), "404"},
 	} {

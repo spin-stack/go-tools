@@ -4,11 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,8 +62,9 @@ const (
 func repositoryAt(t *testing.T, latest *string) (repo, base string, own versions.Entry) {
 	t.Helper()
 	platform := runtime.GOOS + "_" + runtime.GOARCH
-	taskArchive, taskPin := archive(t, "task")
-	ownArchive, ownPin := archive(t, "task", "LICENSE")
+	program := "task" + exe(runtime.GOOS)
+	taskArchive, taskPin := archive(t, program)
+	ownArchive, ownPin := archive(t, program, "LICENSE")
 	toolsArchive, toolsPin := archive(t, "mutate")
 	withTasks, withTasksPin := archive(t, "mutate", "tasks.yml")
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +135,7 @@ type call struct {
 	called    bool
 }
 
-func (c *call) exec(path string, argv, env []string) error {
+func (c *call) exec(_ context.Context, path string, argv, env []string) error {
 	c.path, c.argv, c.env, c.called = path, argv, env, true
 	return nil
 }
@@ -169,10 +170,11 @@ func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	if warned.Len() != 0 {
 		t.Errorf("a release with its tasks was warned of: %s", &warned)
 	}
-	if filepath.Base(c.path) != "task" || !slices.Equal(c.argv, []string{c.path, "lint", "--", "-v"}) {
+	if filepath.Base(c.path) != "task"+exe(runtime.GOOS) || !slices.Equal(c.argv, []string{c.path, "lint", "--", "-v"}) {
 		t.Errorf("exec'd %s %v", c.path, c.argv)
 	}
-	if st, err := os.Stat(c.path); err != nil || st.Mode().Perm()&0o100 == 0 {
+	// Windows runs a file by its name, not by a mode it has none of.
+	if st, err := os.Stat(c.path); err != nil || runtime.GOOS != "windows" && st.Mode().Perm()&0o100 == 0 {
 		t.Errorf("Task is not an executable there: %v, %v", st, err)
 	}
 	paths := pathOf(c.env)
@@ -294,9 +296,16 @@ func TestTheTaskCarriedIsForEveryReleasedPlatform(t *testing.T) {
 	if len(released) == 0 {
 		t.Fatal("the Taskfile names no release PLATFORMS")
 	}
-	own := ownTask()
-	if got := slices.Sorted(maps.Keys(own.Pins)); !slices.Equal(got, slices.Sorted(slices.Values(released))) {
-		t.Errorf("cmd/task/versions.yaml pins task for %v; a release is built for %v", got, released)
+	for _, p := range released {
+		goos, goarch, _ := strings.Cut(p, "/")
+		e, err := ownTask(goos, goarch).For(goos, goarch)
+		if err != nil {
+			t.Errorf("a release is built for %s: %v", p, err)
+			continue
+		}
+		if !strings.HasSuffix(e.URL(), ".tar.gz") && !strings.HasSuffix(e.URL(), ".zip") {
+			t.Errorf("%s's Task is %s, which is no archive go tool task unpacks", p, e.URL())
+		}
 	}
 }
 
@@ -338,4 +347,23 @@ func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 			t.Errorf("err = %v, exec'd %v", err, c.called)
 		}
 	})
+}
+
+// A program's file on Windows is named with .exe, which is the name Task's .zip has it under, and
+// on every other platform with nothing.
+func TestAProgramIsNamedAsItsPlatformNamesIt(t *testing.T) {
+	for goos, want := range map[string]string{"windows": ".exe", "linux": "", "darwin": ""} {
+		if got := exe(goos); got != want {
+			t.Errorf("exe(%q) = %q, want %q", goos, got, want)
+		}
+	}
+}
+
+// On a platform nothing pins, go tool task carries task itself, which says what is missing when it
+// is installed rather than failing before it can.
+func TestAPlatformNothingPinsIsSaidByTask(t *testing.T) {
+	e := ownTask("plan9", "amd64")
+	if _, err := e.For("plan9", "amd64"); e.Name != "task" || err == nil || !strings.Contains(err.Error(), "pins no file for plan9/amd64") {
+		t.Errorf("ownTask is %s, and For says %v", e.Name, err)
+	}
 }
