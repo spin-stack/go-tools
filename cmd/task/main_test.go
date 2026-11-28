@@ -52,10 +52,12 @@ func repository(t *testing.T) (repo, base string, own versions.Entry) {
 	return repositoryAt(t, &latest)
 }
 
-// The releases repositoryAt serves: one from before a release carried tasks.yml, and one with it.
+// The releases repositoryAt serves: one from before a release carried tasks.yml, one with it, and
+// one that also carries its build of this command.
 const (
-	before = "v20261110.01"
-	after  = "v20261122.04"
+	before   = "v20261110.01"
+	after    = "v20261122.04"
+	withShim = "v20261128.01"
 )
 
 // repositoryAt is repository with go-tools' latest release the one *latest names when asked.
@@ -67,6 +69,7 @@ func repositoryAt(t *testing.T, latest *string) (repo, base string, own versions
 	ownArchive, ownPin := archive(t, program, "LICENSE")
 	toolsArchive, toolsPin := archive(t, "mutate")
 	withTasks, withTasksPin := archive(t, "mutate", "tasks.yml")
+	shimmed, shimmedPin := archive(t, "mutate", "tasks.yml", shim+"/"+program)
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/task/v3.54.0/task_" + platform + ".tar.gz":
@@ -83,6 +86,10 @@ func repositoryAt(t *testing.T, latest *string) (repo, base string, own versions
 			_, _ = w.Write([]byte(withTasksPin + "  go-tools_" + platform + ".tar.gz\n"))
 		case "/go-tools/releases/download/" + after + "/go-tools_" + platform + ".tar.gz":
 			_, _ = w.Write(withTasks)
+		case "/go-tools/releases/download/" + withShim + "/checksums.txt":
+			_, _ = w.Write([]byte(shimmedPin + "  go-tools_" + platform + ".tar.gz\n"))
+		case "/go-tools/releases/download/" + withShim + "/go-tools_" + platform + ".tar.gz":
+			_, _ = w.Write(shimmed)
 		default:
 			http.NotFound(w, r)
 		}
@@ -125,7 +132,7 @@ func ran(t *testing.T, dir, base string, own versions.Entry) (string, error) {
 	t.Helper()
 	t.Chdir(dir)
 	var c call
-	err := run(t.Context(), nil, base, "", own, io.Discard, c.exec)
+	err := run(t.Context(), nil, base, "", "", own, io.Discard, c.exec)
 	if err == nil && !c.called {
 		t.Fatal("run returned without exec'ing Task or an error")
 	}
@@ -167,7 +174,7 @@ func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	t.Setenv("GO_TOOLS_TASKS", "/a/release/before")
 	var c call
 	var warned strings.Builder
-	if err := run(t.Context(), []string{"lint", "--", "-v"}, base, "", own, &warned, c.exec); err != nil {
+	if err := run(t.Context(), []string{"lint", "--", "-v"}, base, "", "", own, &warned, c.exec); err != nil {
 		t.Fatal(err)
 	}
 	if warned.Len() != 0 {
@@ -217,7 +224,7 @@ func TestAReleaseFromBeforeThisCommandIsNotRunForBeingFresh(t *testing.T) {
 		t.Helper()
 		var c call
 		var w strings.Builder
-		if err := run(t.Context(), nil, base, version, own, &w, c.exec); err != nil || !c.called {
+		if err := run(t.Context(), nil, base, version, "", own, &w, c.exec); err != nil || !c.called {
 			t.Fatalf("a command of %q: %v, exec'd %t", version, err, c.called)
 		}
 		named := tasksOf(c.env)
@@ -248,6 +255,51 @@ func TestAReleaseFromBeforeThisCommandIsNotRunForBeingFresh(t *testing.T) {
 	tasks, warned := ran("v0.20261122.4")
 	if _, err := os.Stat(tasks); err != nil || warned != "" {
 		t.Errorf("a command of the new release runs %s (%v), and said: %q", tasks, err, warned)
+	}
+}
+
+// A command installed once, from an older release, runs the latest release's build of itself with
+// the same arguments and environment, and installs no Task of its own. That build, run, is the end
+// of the chain: it runs Task. A release without a build, or a command that cannot say what file it
+// is, runs Task itself.
+func TestAnInstalledCommandRunsTheLatestReleasesBuildOfItself(t *testing.T) {
+	program := "task" + exe(runtime.GOOS)
+	for _, tc := range []struct {
+		name, latest string
+		self         func(release string) string
+		forwards     bool
+	}{
+		{"an older command, the release has a build", withShim, func(string) string { return os.Args[0] }, true},
+		{"the release's build itself", withShim, func(release string) string { return filepath.Join(release, shim, program) }, false},
+		{"a command that cannot say what file it is", withShim, func(string) string { return "" }, false},
+		{"a release with no build", after, func(string) string { return os.Args[0] }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			latest := tc.latest
+			repo, base, own := repositoryAt(t, &latest)
+			t.Chdir(repo)
+			// The release's directory, unpacked by a first run that cannot forward.
+			var first call
+			if err := run(t.Context(), nil, base, "", "", own, io.Discard, first.exec); err != nil {
+				t.Fatal(err)
+			}
+			release := strings.SplitN(pathOf(first.env)[0], string(os.PathListSeparator), 2)[0]
+			t.Setenv("SPIN_MARK", "kept")
+			var c call
+			if err := run(t.Context(), []string{"lint", "-v"}, base, "", tc.self(release), own, io.Discard, c.exec); err != nil {
+				t.Fatal(err)
+			}
+			next := filepath.Join(release, shim, program)
+			if forwarded := c.path == next; forwarded != tc.forwards {
+				t.Fatalf("exec'd %s, forwarded %t, want %t", c.path, forwarded, tc.forwards)
+			}
+			if !slices.Equal(c.argv[1:], []string{"lint", "-v"}) || !slices.Contains(c.env, "SPIN_MARK=kept") {
+				t.Errorf("exec'd %v with an environment that lost the caller's", c.argv)
+			}
+			if tc.forwards && len(tasksOf(c.env)) != 0 {
+				t.Errorf("the forward set GO_TOOLS_TASKS, which is the build's to set: %v", tasksOf(c.env))
+			}
+		})
 	}
 }
 
@@ -335,7 +387,7 @@ func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 			}
 			t.Chdir(dir)
 			var c call
-			err := run(t.Context(), nil, tc.base, "", own, io.Discard, c.exec)
+			err := run(t.Context(), nil, tc.base, "", "", own, io.Discard, c.exec)
 			if err == nil || !strings.Contains(err.Error(), tc.says) || c.called {
 				t.Errorf("err = %v, exec'd %v; want %q", err, c.called, tc.says)
 			}
@@ -345,7 +397,7 @@ func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 		repo, base, own := repository(t)
 		t.Chdir(repo)
 		var c call
-		err := run(t.Context(), nil, base+"/none", "", own, io.Discard, c.exec)
+		err := run(t.Context(), nil, base+"/none", "", "", own, io.Discard, c.exec)
 		if err == nil || !strings.Contains(err.Error(), "the latest release of") || c.called {
 			t.Errorf("err = %v, exec'd %v", err, c.called)
 		}

@@ -1,31 +1,29 @@
 // Command task is Task at the version go-tools pins, with go-tools' commands on its PATH:
-// `go tool task lint` runs the released Task, and a Taskfile says `mutate` where it would say
+// `task lint` runs the released Task, and a Taskfile says `mutate` where it would say
 // `go tool mutate`.
 //
-//	go tool task [Task's arguments]
+//	task [Task's arguments]
 //
-// A repository takes this one command in its go.mod instead of Task's and go-tools' own: compiling
-// those is about 450 modules and a minute or more on a runner, for programs their authors already
-// release. This one links versions.yaml's reader and a download. It puts the Task it carries
-// (versions.yaml, embedded) in the user's cache, held to its sha256, and go-tools' latest release,
-// held to the sha256 its checksums give - every repository runs the newest commands main has
-// passed its gate with, and none bumps them - each unpacked once (internal/toolcache). Then it
-// becomes Task: the same process, so a signal, the terminal and the exit status are Task's.
+// It is installed outside any repository - the action at go-tools' root in a workflow, `go
+// install github.com/spin-stack/go-tools/cmd/task@latest` on a laptop - so no go.mod pins it and
+// no release of go-tools is a pull request anywhere. It puts the Task it carries (versions.yaml,
+// embedded) in the user's cache, held to its sha256, and go-tools' latest release, held to the
+// sha256 its checksums give, each unpacked once (internal/toolcache). The release carries its own
+// build of this command, and an older one runs that in its place (forward): installed once, it
+// runs the latest release's Task and commands from then on. Then it becomes Task: the same
+// process, so a signal, the terminal and the exit status are Task's.
 //
-// A repository pins nothing for it: the Task is go-tools', for every platform a release is built
-// for, and it moves with the go-tools version a go.mod requires: one pin, so no repository's copy
-// lacks a platform another person works on. A repository whose versions.yaml has a `task` runs
-// that one instead.
+// The Task is go-tools', for every platform a release is built for, so no repository's copy lacks
+// a platform another person works on. A repository whose versions.yaml has a `task` runs that one
+// instead.
 //
 // The release also carries the tasks every repository has (internal/tasks' tasks.yml), and
 // GO_TOOLS_TASKS names the unpacked copy: a Taskfile includes '{{.GO_TOOLS_TASKS}}' and has
 // `versions`, `bump`, `release`, `lint:workflows` and `consumers` as every other repository has
 // them, at the release its commands are from.
 //
-// The release it runs is never one before its own: this command is compiled from the module
-// version a go.mod requires, which is a release's, and a cache that still names an earlier one as
-// the latest is asked again. So a repository that takes something a release added - tasks.yml was
-// one - requires that release in the same commit, and no machine runs the two apart.
+// The release it runs is never one before its own, when it was built as a module version: a cache
+// that still names an earlier one as the latest is asked again.
 package main
 
 import (
@@ -60,13 +58,17 @@ const (
 var pins []byte
 
 func main() {
-	err := run(interrupt.Context(), os.Args[1:], goTools, own(), ownTask(runtime.GOOS, runtime.GOARCH), os.Stderr, execTask) // mutate-exempt: the process's own arguments; run is what the test drives
-	fmt.Fprintln(os.Stderr, "task:", err)                                                                                    //nolint:errcheck // the error is the exit status's reason; stderr failing changes no status
-	os.Exit(2)                                                                                                               // mutate-exempt: main is reached only when the exec failed, which no test makes it do; run is what the tests drive
+	self, _ := os.Executable()                                                                                                     // mutate-exempt: "" when unknown, which only forgoes the forward; run is what the tests drive
+	err := run(interrupt.Context(), os.Args[1:], goTools, own(), self, ownTask(runtime.GOOS, runtime.GOARCH), os.Stderr, execTask) // mutate-exempt: the process's own arguments; run is what the test drives
+	fmt.Fprintln(os.Stderr, "task:", err)                                                                                          //nolint:errcheck // the error is the exit status's reason; stderr failing changes no status
+	os.Exit(2)                                                                                                                     // mutate-exempt: main is reached only when the exec failed, which no test makes it do; run is what the tests drive
 }
 
-// own is the module version this command was compiled from: the one a repository's go.mod
-// requires, when `go tool task` built it there.
+// shim is the directory of a release that holds its build of this command: not the one on Task's
+// PATH, where a second task would stand in front of Task.
+const shim = "shim"
+
+// own is the module version this command was compiled from, when `go install` or a go.mod built it.
 func own() string {
 	info, _ := debug.ReadBuildInfo() // mutate-exempt: the build's own record, which a test's binary has none of; run is what the tests drive
 	if info == nil {
@@ -98,12 +100,26 @@ func ownTask(goos, goarch string) versions.Entry {
 // execFunc becomes argv[0]'s program: execTask, and a recorder in a test.
 type execFunc func(ctx context.Context, path string, argv []string, env []string) error
 
-// run installs task - or the `task` of the repository's versions.yaml, when it has one - and the
-// latest release of the tools at base - none before the release that version, this command's
-// own, is the module version of - and execs Task with args. It returns only when that fails: on
-// success the process is Task's. A release with no tasks.yml is said on warn and run all the same:
-// only a Taskfile that includes it needs it, and whether this repository's does is Task's to read.
-func run(ctx context.Context, args []string, base, version string, task versions.Entry, warn io.Writer, exec execFunc) error {
+// run installs the latest release of the tools at base - none before the release that version,
+// this command's own, is the module version of - and task, or the `task` of the repository's
+// versions.yaml when it has one, and execs Task with args. When the release's own build of this
+// command is not self, the file this process runs, that build is exec'd with args instead. It
+// returns only when the exec fails: on success the process is Task's. A release with no tasks.yml
+// is said on warn and run all the same: only a Taskfile that includes it needs it, and whether
+// this repository's does is Task's to read.
+func run(ctx context.Context, args []string, base, version, self string, task versions.Entry, warn io.Writer, exec execFunc) error {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(cache, "spin-stack", "tools")
+	tools, err := toolcache.Latest(ctx, base, "go-tools", root, release.Named(version))
+	if err != nil {
+		return err
+	}
+	if next := filepath.Join(tools, shim, "task"+exe(runtime.GOOS)); forward(self, next) {
+		return exec(ctx, next, append([]string{next}, args...), os.Environ())
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -112,16 +128,7 @@ func run(ctx context.Context, args []string, base, version string, task versions
 	if err != nil {
 		return err
 	}
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return err
-	}
-	root := filepath.Join(cache, "spin-stack", "tools")
 	taskDir, err := toolcache.Install(ctx, task, root)
-	if err != nil {
-		return err
-	}
-	tools, err := toolcache.Latest(ctx, base, "go-tools", root, release.Named(version))
 	if err != nil {
 		return err
 	}
@@ -137,6 +144,18 @@ func run(ctx context.Context, args []string, base, version string, task versions
 	path := tools + string(os.PathListSeparator) + os.Getenv("PATH")
 	env := with(with(os.Environ(), "PATH", path), tasksEnv, common)
 	return exec(ctx, bin, append([]string{bin}, args...), env)
+}
+
+// forward is whether next, the latest release's build of this command, runs in place of self: it
+// carries that release's Task, which a command installed months ago does not. Not when self is
+// next, which ends the chain, nor when self is unknown, nor when the release has no build.
+func forward(self, next string) bool {
+	n, err := os.Stat(next)
+	if self == "" || err != nil {
+		return false
+	}
+	s, err := os.Stat(self)
+	return err == nil && !os.SameFile(s, n)
 }
 
 // exe is what a program's file name ends in on goos.

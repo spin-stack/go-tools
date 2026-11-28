@@ -105,7 +105,7 @@ func (g Gate) Check() error {
 			}
 		}
 	}
-	taskCommand(files["go.mod"], used)
+	taskCommand(files, used)
 	errs = append(errs, commonTasks(v, files, tasks.File, used)...)
 	for _, e := range v.Entries {
 		if !used[e.Name] {
@@ -132,17 +132,26 @@ func apart(v *versions.Versions) []error {
 	return errs
 }
 
-// TaskCommand is the go-tools command a go.mod takes as `go tool task`: the Task go-tools pins, or
-// versions.yaml's `task` when there is one, with go-tools' latest release on its PATH.
+// TaskCommand is go-tools' task command: the Task go-tools pins, or versions.yaml's `task` when
+// there is one, with go-tools' latest release on its PATH.
 const TaskCommand = "github.com/spin-stack/go-tools/cmd/task"
 
-// taskCommand marks versions.yaml's `task` used when go.mod takes go-tools' task command: the
-// command reads that entry, which no line of the repository spells as a read. A repository owes
-// none, since the command carries its own Task; go-tools itself is its latest release, which no
+// taskAction is what a workflow step uses to install TaskCommand.
+var taskAction = regexp.MustCompile(`(?m)^\s*(?:-\s+)?uses:\s*["']?spin-stack/go-tools@`)
+
+// taskCommand marks versions.yaml's `task` used when the repository runs go-tools' task command -
+// a workflow or composite action uses the action that installs it, or go.mod takes it: the command
+// reads that entry, which no line of the repository spells as a read. A repository owes none,
+// since the command carries its own Task; go-tools itself is its latest release, which no
 // versions.yaml pins.
-func taskCommand(gomod string, used map[string]bool) {
-	if slices.ContainsFunc(strings.Fields(gomod), func(f string) bool { return f == TaskCommand }) {
+func taskCommand(files map[string]string, used map[string]bool) {
+	if slices.ContainsFunc(strings.Fields(files["go.mod"]), func(f string) bool { return f == TaskCommand }) {
 		used["task"] = true
+	}
+	for rel, body := range files {
+		if strings.HasPrefix(rel, ".github/") && taskAction.MatchString(body) {
+			used["task"] = true
+		}
 	}
 }
 

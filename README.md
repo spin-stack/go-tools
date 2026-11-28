@@ -2,8 +2,9 @@
 
 [![CI](https://github.com/spin-stack/go-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/spin-stack/go-tools/actions/workflows/ci.yml)
 
-Checks for what a green build doesn't prove. Small Go tools the spin-stack repositories run from
-their `go.mod`; each fails CI with a specific finding and says how to resolve it.
+Checks for what a green build doesn't prove. Small Go tools the spin-stack repositories run at
+their latest release, pinned in no `go.mod`; each fails CI with a specific finding and says how to
+resolve it.
 
 **Documentation: <https://spin-stack.github.io/go-tools/>**
 
@@ -24,8 +25,8 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`proven`](https://spin-stack.github.io/go-tools/proven/) | what CI already proved about a commit, by its tree: the run that answers for it, what a run on main is of, whether it may be released, each test's time, which failed tests are flaky |
 | [`exposure`](https://spin-stack.github.io/go-tools/exposure/) | what a repository would show if made public: secrets and private values in every ref's commits, pull request heads included, and in its issues, comments and releases |
 | [`planguard`](https://spin-stack.github.io/go-tools/planguard/) | an OpenTofu plan that takes something away - a delete, a replacement, a forget - which an installation applying on a schedule leaves to a person, and applies the rest |
-| [`task`](https://spin-stack.github.io/go-tools/start/) | not a check: Task at the version `versions.yaml` pins, with every other go-tools command on its `PATH`, the tools at their latest release - both downloaded as binaries; the one command a repository's `go.mod` takes, so neither Task's modules nor the tools' are compiled or cached |
-| [the common tasks](https://spin-stack.github.io/go-tools/tasks/) | not a check: `versions`, `bump`, `release`, `lint:workflows` and `consumers`, written once and included by every repository's Taskfile from the release `go tool task` unpacks - the same names, arguments and meaning in each |
+| [`task`](https://spin-stack.github.io/go-tools/start/) | not a check: Task at the version `versions.yaml` pins, with every other go-tools command on its `PATH`, the tools at their latest release - both downloaded as binaries; installed once (`go install`, or the action at this repository's root in a workflow), and in no repository's `go.mod`, so no release of go-tools is a pull request anywhere |
+| [the common tasks](https://spin-stack.github.io/go-tools/tasks/) | not a check: `versions`, `bump`, `release`, `lint:workflows` and `consumers`, written once and included by every repository's Taskfile from the release `task` unpacks - the same names, arguments and meaning in each |
 | [`release`](https://spin-stack.github.io/go-tools/release/) | not a check: the name of a repository's next release, `v<YYYYMMDD>.<NN>`, and a refusal for a commit already released |
 | [`consumers`](https://spin-stack.github.io/go-tools/consumers/) | not a check: which commit of a repository each place that copies from it is on, whether its copies are that commit's, and whether its npm packages are the ones pinned there |
 | [`gencache`](https://spin-stack.github.io/go-tools/gencache/) | not a check: `go generate` with each mockgen directive answered from a cache when nothing its mock is made from has changed |
@@ -33,8 +34,8 @@ their `go.mod`; each fails CI with a specific finding and says how to resolve it
 | [`provenance`, `sbom`, `attestgate`, `trustroot`, `sigcheck`, `catalog`](https://spin-stack.github.io/go-tools/supply-chain/) | releases published without SLSA provenance or an SBOM; a signature by any workflow but the one named; a Spin OS image catalog its release did not sign |
 
 ```sh
-go get -tool github.com/spin-stack/go-tools/cmd/task   # and task in versions.yaml
-go tool task mutate                                    # a task that runs `mutate -base origin/main`
+go install github.com/spin-stack/go-tools/cmd/task@latest   # once; in a workflow, uses: spin-stack/go-tools
+task mutate                                                 # a task that runs `mutate -base origin/main`
 ```
 
 [Getting started](https://spin-stack.github.io/go-tools/start/) has the `versions.yaml` entry.

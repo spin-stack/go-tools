@@ -1,0 +1,34 @@
+# What a workflow runs before `task`: cmd/task from go-tools' latest release, on PATH. No go.mod
+# pins it, so a release of go-tools is in every repository's next run, and Dependabot moves this
+# action's pin with the other `uses:`: running an older pin runs the same latest release, since
+# what it installs is asked of /releases/latest, not of the pin. Held to the release's checksums,
+# as cmd/task holds what it downloads; a job that runs it twice installs once.
+name: go-tools
+description: Task, with every go-tools command on its PATH, from go-tools' latest release.
+runs:
+  using: composite
+  steps:
+    - name: go-tools' task
+      shell: bash
+      env:
+        # gh asks the API with the job's token: GitHub sheds anonymous downloads under load
+        # (2026-11-09), and one call names one release for both files.
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        if [ -n "${GO_TOOLS_TASK:-}" ] && [ -x "$GO_TOOLS_TASK" ]; then exit 0; fi
+        case "$RUNNER_OS" in Linux) os=linux ;; macOS) os=darwin ;; Windows) os=windows ;; *) os=$RUNNER_OS ;; esac
+        case "$RUNNER_ARCH" in X64) arch=amd64 ;; ARM64) arch=arm64 ;; *) arch=$RUNNER_ARCH ;; esac
+        archive="go-tools_${os}_${arch}.tar.gz"
+        dir="$RUNNER_TEMP/go-tools"
+        mkdir -p "$dir"
+        cd "$dir"
+        gh release download --repo spin-stack/go-tools --clobber --pattern checksums.txt --pattern "$archive"
+        sum=sha256sum
+        command -v sha256sum >/dev/null || sum="shasum -a 256"
+        grep "  $archive\$" checksums.txt | $sum -c -
+        tar -xzf "$archive" ./shim
+        exe=""
+        [ "$os" = windows ] && exe=.exe
+        echo "$dir/shim" >> "$GITHUB_PATH"
+        echo "GO_TOOLS_TASK=$dir/shim/task$exe" >> "$GITHUB_ENV"
