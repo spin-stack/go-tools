@@ -366,7 +366,7 @@ jobs:
 	assert.Equal(t, ".github/workflows/ci.yml:4: job gate runs on \"runs-on/fleet=docker8/env=production\", which is not one of GitHub's labels and .github/actionlint.yaml does not name: "+
 		"lint:workflows fails on it. Write in .github/actionlint.yaml `self-hosted-runner: {labels: [runs-on/fleet=docker8/env=production]}`, with a comment that says whose runners those are",
 		got["common:label:runs-on/fleet=docker8/env=production"])
-	assert.Contains(t, got["common:label:runs-on/fleet=kvm/env=production"], ".github/workflows/ci.yml:12: job kvm runs on")
+	assert.Contains(t, got["common:label:runs-on/fleet=kvm/env=production"], ".github/workflows/ci.yml:13: job kvm runs on")
 
 	for file, labels := range map[string]string{
 		".github/actionlint.yaml": "self-hosted-runner:\n  labels:\n    - runs-on/fleet=docker8/env=production\n    - runs-on/fleet=kvm/env=production\n",
