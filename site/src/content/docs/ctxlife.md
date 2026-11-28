@@ -19,7 +19,7 @@ func (h *Host) Start(ctx context.Context) error {
 ```
 
 ```sh
-go tool ctxlife        # the module, or name directories
+ctxlife        # the module, or name directories
 ```
 
 ## Three answers

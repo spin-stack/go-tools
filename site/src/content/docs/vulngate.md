@@ -14,8 +14,8 @@ and should act on today:
 | no fixed version exists yet | listed, passes |
 
 ```sh
-go tool vulngate ./...
-go tool vulngate -tags=integration ./...   # govulncheck flags, each as -flag=value
+vulngate ./...
+vulngate -tags=integration ./...   # govulncheck flags, each as -flag=value
 ```
 
 For the standard library, the upgrade is the `toolchain` line in `go.mod`.

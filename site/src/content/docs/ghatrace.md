@@ -10,10 +10,9 @@ All of that is in GitHub's API or in the job itself. A hosted backend - an OpenT
 collector, Honeycomb, Datadog - would draw it, and ghatrace draws it from the run alone:
 
 ```sh
-go get -tool github.com/spin-stack/go-tools/cmd/ghatrace
-go tool ghatrace run                          # in the run's last job
-go tool ghatrace span -name e2e:up -- task e2e:up   # inside any step, to time a part of it
-go tool ghatrace sample                       # a step near a job's start: its machine, every second
+ghatrace run                          # in the run's last job
+ghatrace span -name e2e:up -- task e2e:up   # inside any step, to time a part of it
+ghatrace sample                       # a step near a job's start: its machine, every second
 ```
 
 ## What it looks like
@@ -77,9 +76,9 @@ and answer in JSON. A wrapper in front of go test - a script that starts a datab
 run as it is, and its go test is given `-json` by whoever wrote it:
 
 ```sh
-go tool ghatrace gotest -- go test -v -count=1 ./internal/e2e/...
-go tool ghatrace gotest -name unit -min 2s -- go test -race ./...
-go tool ghatrace gotest -- with-db.sh go test -json ./store/...
+ghatrace gotest -- go test -v -count=1 ./internal/e2e/...
+ghatrace gotest -name unit -min 2s -- go test -race ./...
+ghatrace gotest -- with-db.sh go test -json ./store/...
 ```
 
 It writes what go test would have written, with `-v` or without, so a log and whatever reads one
@@ -162,9 +161,10 @@ jobs:
   lane:
     # ...
     steps:
-      # ... the checkout and setup that go tool needs, then:
-      - run: go tool ghatrace sample
-      # ... steps that run `go tool ghatrace span -name ... -- ...` somewhere inside
+      # ... the checkout, then go-tools' task, whose Task has ghatrace on its PATH:
+      - uses: spin-stack/go-tools@...
+      - run: task trace:sample   # a task that runs `ghatrace sample`
+      # ... steps that run `ghatrace span -name ... -- ...` somewhere inside
       - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -180,8 +180,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@...
-      - uses: actions/setup-go@...
-      - run: go tool ghatrace run
+      - uses: spin-stack/go-tools@...
+      - run: task trace          # a task that runs `ghatrace run`
         env:
           GH_TOKEN: ${{ github.token }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

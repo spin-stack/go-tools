@@ -1,7 +1,7 @@
 // Package consumers reads a repository's consumers.toml: who copies what the repository makes.
 //
 // A repository whose outputs are copied - brand's stylesheets and marks into the dashboard, the
-// website and the blog - names every place that copies them in one table, and `go tool task
+// website and the blog - names every place that copies them in one table, and `task
 // consumers` (cmd/consumers) says which of its commits each is on. The repository's own tests
 // read the table with Load to hold it to the tree: that every file a row copies is one it has.
 //

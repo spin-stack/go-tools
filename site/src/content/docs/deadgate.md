@@ -9,7 +9,7 @@ call, by `golang.org/x/tools/cmd/deadcode`, and every package no binary imports.
 then a decision somebody has to write down.
 
 ```sh
-go tool deadgate -allow hack/deadcode-allow.txt -pending hack/deadcode-pending.txt \
+deadgate -allow hack/deadcode-allow.txt -pending hack/deadcode-pending.txt \
   -deadcode .tools/bin/deadcode -roots ./cmd/... -skip ./cmd/proxy -packages ./internal/...
 ```
 
@@ -73,5 +73,5 @@ tasks:
   deadcode:
     deps: [tools:deadcode]
     cmds:
-      - go tool deadgate -deadcode {{.TOOLS_BIN}}/deadcode -roots ./cmd/... -skip ./cmd/proxy -packages ./internal/... -allow hack/deadcode-allow.txt -pending hack/deadcode-pending.txt
+      - deadgate -deadcode {{.TOOLS_BIN}}/deadcode -roots ./cmd/... -skip ./cmd/proxy -packages ./internal/... -allow hack/deadcode-allow.txt -pending hack/deadcode-pending.txt
 ```

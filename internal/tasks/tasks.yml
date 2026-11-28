@@ -1,6 +1,6 @@
 # The tasks every spin-stack repository has, written once: the same names, the same arguments and
 # the same meaning in each. It ships in go-tools' release beside the commands it calls, and
-# `go tool task` (cmd/task) names the unpacked copy in GO_TOOLS_TASKS, so a repository's Taskfile
+# go-tools' `task` (cmd/task) names the unpacked copy in GO_TOOLS_TASKS, so a repository's Taskfile
 # takes it in one include and commits no copy:
 #
 #   includes:

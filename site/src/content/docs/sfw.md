@@ -9,21 +9,17 @@ before any review or test. A compromised release of a popular package is in thou
 stands between the package manager and the registry and refuses a package Socket has confirmed
 as malware before it is downloaded. It needs no account.
 
-`go tool sfw` makes that the only way a spin-stack repository installs packages, and pnpm the
+`sfw` makes that the only way a spin-stack repository installs packages, and pnpm the
 only package manager it installs them with:
 
 ```sh
-go tool sfw pnpm install --frozen-lockfile   # the install, through the firewall
-go tool sfw check                            # fails on an install that isn't
+sfw pnpm install --frozen-lockfile   # the install, through the firewall
+sfw check                            # fails on an install that isn't
 ```
 
 ## Running an install through it
 
-```sh
-go get -tool github.com/spin-stack/go-tools/cmd/sfw
-```
-
-`go tool sfw <package manager> <args>...` runs the command through the firewall and exits with its
+`sfw <package manager> <args>...` runs the command through the firewall and exits with its
 status. The firewall's binary is pinned by sha256 for each platform (linux and macOS, amd64 and
 arm64) in [`cmd/sfw/versions.yaml`](https://github.com/spin-stack/go-tools/blob/main/cmd/sfw/versions.yaml),
 which the command embeds. It is downloaded the first time into the user's cache directory and
@@ -34,19 +30,19 @@ says.
 
 ## The gate
 
-`go tool sfw check`, from `task lint`, reads the files git lists and fails on:
+`sfw check`, from `task lint`, reads the files git lists and fails on:
 
 | what | where | the fix |
 |---|---|---|
-| `npm`, `npx`, `yarn`, `bun`, `bunx`, through the firewall or not | Taskfiles, workflows, shell scripts, Dockerfiles | pnpm: `pnpm dlx` for `npx`, through `go tool sfw` when it fetches |
-| a pnpm command that fetches without the firewall: `install`, `add`, `update`, `dlx`, `import`, ... and `pnpx` | the same | `go tool sfw <the command>` |
+| `npm`, `npx`, `yarn`, `bun`, `bunx`, through the firewall or not | Taskfiles, workflows, shell scripts, Dockerfiles | pnpm: `pnpm dlx` for `npx`, through `sfw` when it fetches |
+| a pnpm command that fetches without the firewall: `install`, `add`, `update`, `dlx`, `import`, ... and `pnpx` | the same | `sfw <the command>` |
 | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `bun.lock` | anywhere | `pnpm import`, then delete it |
 | a `package.json` without `"packageManager": "pnpm@<version>"` | anywhere | name pnpm and its version |
 | a `pnpm-workspace.yaml` without `verifyDepsBeforeRun: error`, or a `package.json` with none beside or above it | anywhere | `verifyDepsBeforeRun: error` |
 
 `verifyDepsBeforeRun` is the one that is easy to miss. pnpm 11 checks the dependencies before
 `pnpm run` and `pnpm exec`, and installs whatever it finds missing - from the registry, around the
-firewall, because nothing wrapped that `pnpm run` in `go tool sfw`. Set to `error`, it fails and
+firewall, because nothing wrapped that `pnpm run` in `sfw`. Set to `error`, it fails and
 says to run the install instead, which the task does through the firewall.
 
 One package manager means one lockfile and one set of install rules, `pnpm-workspace.yaml`'s:
@@ -61,7 +57,7 @@ the same `task` a developer runs, and goes through the firewall in both places.
 ```yaml title="Taskfile.yml"
 site:
   cmds:
-    - go tool sfw pnpm --dir site install --frozen-lockfile
+    - sfw pnpm --dir site install --frozen-lockfile
     - pnpm --dir site build
 ```
 

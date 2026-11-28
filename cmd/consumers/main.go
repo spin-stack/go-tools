@@ -4,8 +4,8 @@
 // release it is on, how far behind main that is, whether each copy is what this repository made at
 // that commit, and whether the npm packages it installs are the ones versions.yaml pinned there.
 //
-//	go tool task consumers
-//	go tool task consumers -- -checkout spin-stack/spin=../spin -checkout spin-stack/t3code=../t3code@fork/spin
+//	task consumers
+//	task consumers -- -checkout spin-stack/spin=../spin -checkout spin-stack/t3code=../t3code@fork/spin
 //
 // A consumer is read through `gh api`, or from a checkout given by -checkout (at origin/HEAD, or
 // the ref after the @). This repository is read from the clone it runs in, which has to hold the

@@ -12,7 +12,7 @@ the package looks tested. `testquality` finds two kinds:
   A skip inside an `if` is a decision about the environment and is fine.
 
 ```sh
-go tool testquality ./...
+testquality ./...
 ```
 
 ## What it flags
@@ -68,7 +68,7 @@ github.com/spin-stack/spin/internal/api:TestTypesCompile  # the build is the ass
 ```
 
 ```sh
-go tool testquality -allow hack/testquality-allow.txt ./...
+testquality -allow hack/testquality-allow.txt ./...
 ```
 
 The key leaves out the line number so it survives edits above the test. An entry that matches

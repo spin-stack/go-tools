@@ -12,9 +12,8 @@ touched.
 gencache is `go generate` with a cache in front of each `go tool mockgen` directive:
 
 ```sh
-go get -tool github.com/spin-stack/go-tools/cmd/gencache
-go tool gencache ./...                    # the packages, as go generate takes them
-GOOS=linux go tool gencache -tags integration,e2e ./...
+gencache ./...                    # the packages, as go generate takes them
+GOOS=linux gencache -tags integration,e2e ./...
 ```
 
 ## What it keys a mock by

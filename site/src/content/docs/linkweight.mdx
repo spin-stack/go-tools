@@ -13,7 +13,7 @@ own dependencies, and a single call into a library can keep thousands of functio
 builds each binary of the repository and reads the answer from the linker itself.
 
 ```sh
-go tool linkweight -roots ./cmd/...
+linkweight -roots ./cmd/...
 ```
 
 For each main package it says four things:
@@ -36,7 +36,7 @@ A shop has two binaries: `cmd/api` serves a front page rendered by `internal/pag
 
 <Code code={page} lang="go" title="internal/page/page.go" />
 
-<Code code={report} lang="text" title="go tool linkweight -top 4 -allow linkweight-allow.txt" />
+<Code code={report} lang="text" title="linkweight -top 4 -allow linkweight-allow.txt" />
 
 `cmd/api` has method elimination off, and the chain says why: `cmd/api` imports `internal/page`,
 which imports `text/template`. `cmd/worker` keeps it on, and its one capability is `exec`.
@@ -92,7 +92,7 @@ the cuts are a report, not a gate: a pinned size would let each deletion pay for
 ## What it cannot see
 
 - The answer is for the GOOS, GOARCH, build tags and `CGO_ENABLED` it runs with: run it as the
-  release builds (`CGO_ENABLED=0 go tool linkweight -tags ...`). It reads ELF, so Linux binaries.
+  release builds (`CGO_ENABLED=0 linkweight -tags ...`). It reads ELF, so Linux binaries.
 - A capability is a function of the standard library or `golang.org/x/sys/unix` the binary links.
   A raw `syscall.Syscall` with a number of its own is not one of them.
 - A chain is the shortest path the linker took. When the compiler inlined a call, the imports in
@@ -110,7 +110,7 @@ tasks:
   linkweight:
     desc: What each binary links and why; fails on a capability nobody wrote down.
     cmds:
-      - CGO_ENABLED=0 go tool linkweight -roots ./cmd/... -allow hack/linkweight-allow.txt -json _output/linkweight.json
+      - CGO_ENABLED=0 linkweight -roots ./cmd/... -allow hack/linkweight-allow.txt -json _output/linkweight.json
 ```
 
 `CGO_ENABLED=0` on the command, not in the task's `env:`: a variable the caller's environment
