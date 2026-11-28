@@ -1,28 +1,35 @@
 ---
 title: Getting started
-description: Add go-tools to a repository as Go tools, run the gates from a Taskfile, and wire them into CI.
+description: Install go-tools' task once, run the gates from a Taskfile, and wire them into CI.
 ---
 
 Every tool here is a command under `cmd/`, released as binaries of main each time its gate passes
 (`v<YYYYMMDD>.<NN>`, named as spin-stack names its releases, and attested as built by
 `release.yml`). A repository runs the latest of them through Task, at the version go-tools pins.
-There is nothing to install globally, and nothing to compile.
+Nothing goes in a repository's `go.mod`, and nothing is compiled.
 
 ## Take Task and the tools
 
-One command in `go.mod`:
+Once on a laptop:
 
 ```sh
-go get -tool github.com/spin-stack/go-tools/cmd/task
+go install github.com/spin-stack/go-tools/cmd/task@latest
 ```
 
-`go tool task lint` then puts Task and go-tools' latest release for this machine in the user's
-cache - Task held to its pin, the tools to the sha256 their release's `checksums.txt` gives -
-unpacks each once, and runs Task with every go-tools command on its `PATH`: a Taskfile says
+and in a workflow, before the first `task`, the action at go-tools' root
+([GitHub Actions](../github-actions/) has the whole workflow):
+
+```yaml
+- uses: spin-stack/go-tools@<commit> # Dependabot moves it
+```
+
+`task lint` then puts Task and go-tools' latest release for this machine in the user's cache -
+Task held to its pin, the tools to the sha256 their release's `checksums.txt` gives - unpacks each
+once, and runs Task with every go-tools command on its `PATH`: a Taskfile says
 `mutate -base origin/main`. The first run on a machine takes a second or two. Which release is the
-latest is asked at most every ten minutes - and again at once when the cache names one from
-before the release `go.mod` requires - and a machine that cannot ask goes on with the one it
-has. Task's and the tools' own modules - about 450 together - are in no `go.mod` and no CI cache.
+latest is asked at most every ten minutes, and a machine that cannot ask goes on with the one it
+has. The release carries its own build of `task`, and an older one runs it in its place, so what
+was installed once runs the latest release's Task from then on.
 
 Ctrl+C stops a command and every process it started, on Linux, macOS and Windows, and the command
 removes what it wrote to the temporary directory before it exits. So does a SIGTERM sent to the
@@ -32,20 +39,20 @@ without waiting for that cleanup.
 The Task is go-tools' own: [`cmd/task/versions.yaml`](https://github.com/spin-stack/go-tools/blob/main/cmd/task/versions.yaml),
 pinned by the sha256 of its archive for every platform a release is built for (Linux, macOS and
 Windows, amd64 and arm64), and carried in the command. A repository writes no pin for it, and takes
-a newer Task with the go-tools version its `go.mod` requires. A repository whose `versions.yaml` has
+a newer Task with go-tools' next release. A repository whose `versions.yaml` has
 a `task` entry runs that one instead, on the platforms it lists: another platform is refused, and
 deleting the entry runs go-tools' Task. Upstream releases Task for Windows as a `.zip`, which a
 `task` entry's source cannot name beside the `.tar.gz` of the others: on Windows a repository with
 the entry is refused, and one without it runs go-tools' Task.
 
-On Windows, `go tool task` runs Task as a process of its own, since Windows replaces no process
-with another, and exits as Task did. The commands it puts on Task's `PATH` are `.exe` files of the
+On Windows, `task` runs Task as a process of its own, since Windows replaces no process with
+another, and exits as Task did. The commands it puts on Task's `PATH` are `.exe` files of the
 release, and a Taskfile names them as it does elsewhere: `mutate`, not `mutate.exe`.
 
 No repository bumps the tools: a release of go-tools is in every repository's next run. What a
 repository imports of go-tools as a library - `versions`, `provenance` - is `go.mod`'s. Each
 release is also tagged `v0.<YYYYMMDD>.<N>`, a module version, so Dependabot's `gomod` updates
-move it as any dependency, and `go get github.com/spin-stack/go-tools@latest` takes the newest.
+move it as any dependency, in the week's group.
 
 ## Take the tasks every repository has
 

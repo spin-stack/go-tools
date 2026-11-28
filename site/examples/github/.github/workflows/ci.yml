@@ -27,10 +27,14 @@ jobs:
           # mutate diffs against the branch point, which a shallow clone does not have.
           fetch-depth: 0
 
-      # Go's module and build caches. Task is a tool of go.mod's, so it comes with them.
+      # Go's module and build caches.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+
+      # Task and every go-tools command, from go-tools' latest release: no go.mod pins them, and
+      # an older pin of this action installs the same release.
+      - uses: spin-stack/go-tools@069c8b257b8e2df92563e2528772cf56472dea5f # v20261127.15
 
       # gencache's mocks and golangci-lint's analysis, each keyed by content inside, so any older
       # copy is safe to start from: saved under the commit, restored from the newest - main's for
@@ -54,16 +58,16 @@ jobs:
           restore-keys: mutate-${{ github.head_ref }}-
 
       - name: Generated code
-        run: go tool task generate
+        run: task generate
 
       - name: Lint
-        run: go tool task lint
+        run: task lint
 
       - name: Test
-        run: go tool task test
+        run: task test
 
       # After the tests are green, what they would have refused.
       - name: What this change broke, and whether a test noticed
         env:
           BEFORE: ${{ github.event.before }}
-        run: go tool task mutate
+        run: task mutate

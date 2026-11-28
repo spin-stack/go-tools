@@ -1,6 +1,7 @@
-# A repository that runs go-tools from its go.mod, as the site's CI page shows it. CI runs these
-# tasks and nothing else, so a developer runs exactly what CI does. TestTheSitesCIExamplePasses
-# holds it to taskgate, and task lint:workflows its workflow to actionlint.
+# A repository that runs go-tools, as the site's CI page shows it: go-tools' task puts every
+# command on Task's PATH. CI runs these tasks and nothing else, so a developer runs exactly what CI
+# does. TestTheSitesCIExamplePasses holds it to taskgate, and task lint:workflows its workflow to
+# actionlint.
 version: '3'
 
 tasks:
@@ -9,7 +10,7 @@ tasks:
     cmds:
       # go generate, with each mockgen directive answered from gencache's cache when nothing its
       # mock is made from changed.
-      - go tool gencache ./...
+      - gencache ./...
       - git diff --exit-code
 
   lint:
@@ -22,14 +23,14 @@ tasks:
         -v "$(go env GOMODCACHE)":/go/pkg/mod -v "$(go env GOCACHE)":/cache/go-build
         -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/cache/go-build -e GOLANGCI_LINT_CACHE=/work/_output/golangci-lint
         -e HOME=/tmp -e GOTOOLCHAIN=local
-        $(go tool versions ref golangci-lint) golangci-lint run ./...
-      - go tool ctxlife
-      - go tool testquality ./...
-      - go tool refs
-      - go tool mutate -stale-exempts
-      - go tool sfw check
-      - go tool taskgate
-      - go tool vulngate ./...
+        $(versions ref golangci-lint) golangci-lint run ./...
+      - ctxlife
+      - testquality ./...
+      - refs
+      - mutate -stale-exempts
+      - sfw check
+      - taskgate
+      - vulngate ./...
 
   test:
     desc: The tests, under the race detector, with their coverage in coverage.out.
@@ -51,4 +52,4 @@ tasks:
           base="${BEFORE:-}"
           git rev-parse --verify -q "$base^{commit}" >/dev/null || base=HEAD~1
         fi
-        go tool mutate -base "${base:-origin/main}" -max 200 $cache
+        mutate -base "${base:-origin/main}" -max 200 $cache

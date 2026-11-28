@@ -1,12 +1,14 @@
 # AGENTS.md - go-tools
 
-The Go the spin-stack repositories build with (`README.md` says what each is). spin-ami and
-spin-machine take it by the version their go.mod pins, and spin will.
+The Go the spin-stack repositories build with (`README.md` says what each is).
 
-- **A change here is a new version for every repository that uses it**, taken by each of them
-  in its own commit - the pull request Dependabot opens for the release's module version,
-  `v0.<YYYYMMDD>.<N>` - and checked there as that repository says. A change to the format of versions.yaml - a field, a kind, a track - is read
-  by all of them: it adds, it does not rename.
+- **A command's release is in every repository's next run**, with no pull request there: each
+  runs go-tools' latest release through `task` (`cmd/task`, installed by the root `action.yml` or
+  `go install`, in no go.mod). So a release that adds a finding fails every repository that has
+  it at once: a finding a repository could not have answered yet lands after each has. A package
+  another repository imports - `versions`, `provenance` - is the exception, taken by its go.mod
+  in Dependabot's week. A change to the format of versions.yaml - a field, a kind, a track - is
+  read by all of them: it adds, it does not rename.
 - **Decisions are Go, and tested.** A track is a function with a test that needs no network.
 - **Comments say why.** Not what the line does, and never what it used to be.
 - **What a tool does for a reader is on the site** (`site/`, Astro Starlight, published to

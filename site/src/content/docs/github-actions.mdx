@@ -7,7 +7,7 @@ import { Code } from '@astrojs/starlight/components';
 import taskfile from '../../../examples/github/Taskfile.yml?raw';
 import workflow from '../../../examples/github/.github/workflows/ci.yml?raw';
 
-A repository that takes go-tools from its `go.mod` needs one job in CI: the tasks a developer
+A repository that runs go-tools needs one job in CI: the tasks a developer
 runs, one a step, so what CI does and what a laptop does are the same commands. The two files
 below are that repository's. They are files in go-tools, not copies: a test fails when
 [taskgate](../taskgate/) would refuse them, actionlint reads the workflow on every change, and
@@ -17,22 +17,18 @@ Dependabot keeps its pins current.
 
 <Code code={workflow} lang="yaml" title=".github/workflows/ci.yml" />
 
-Add the tools it runs, Task among them:
-
-```sh
-go get -tool github.com/go-task/task/v3/cmd/task
-for t in ctxlife gencache mutate refs sfw taskgate testquality versions vulngate; do
-  go get -tool github.com/spin-stack/go-tools/cmd/$t
-done
-```
+Nothing goes in `go.mod`: the action installs go-tools' task, and Task finds every command on its
+PATH. On a laptop, `go install github.com/spin-stack/go-tools/cmd/task@latest` once does the same.
 
 ## Why each part is there
 
 **The whole history** (`fetch-depth: 0`). [mutate](../mutate/) breaks what the change touched,
 and finds it by diffing against the branch point, which a shallow clone does not have.
 
-**Task from `go.mod`.** `go tool task` is the version the module pins, built from Go's caches,
-which setup-go restores. Nothing else is installed.
+**Task from go-tools' latest release.** `uses: spin-stack/go-tools` puts go-tools' task on PATH:
+the Task go-tools pins, with the latest release's commands. A release of go-tools is in the next
+run, with no pull request in the repository; the action's own pin moves with Dependabot's other
+`uses:`, and an older pin installs the same release.
 
 **What a run already answered.** A runner starts empty, and setup-go keeps only Go's module and
 build caches, so without the cache steps every run redoes work no change asked for:
