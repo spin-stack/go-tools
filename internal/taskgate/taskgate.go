@@ -257,7 +257,7 @@ func firstLine(n *yaml.Node) int {
 	return n.Line
 }
 
-// isTask is a line that runs Task and nothing else: task, or the Task go.mod pins (go tool task),
+// isTask is a line that runs Task and nothing else: task, or a go.mod's (go tool task), which is a finding of its own,
 // with what it is given.
 func isTask(line string) bool {
 	line = strings.TrimPrefix(line, "go tool ")

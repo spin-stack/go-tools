@@ -2,7 +2,7 @@
 # release of that day (internal/release), and tagged v0.<YYYYMMDD>.<N> too: the module version a
 # repository's go.mod names and Dependabot moves. Made of main each time CI passes on it - the commit that
 # passed, not whatever main is when this starts - and published last: a release is its files, built
-# and attested here, then the tag. What a repository's `go tool task` (cmd/task) runs is the latest.
+# and attested here, then the tag. What a repository's `task` (cmd/task) runs is the latest.
 name: Release
 
 on:

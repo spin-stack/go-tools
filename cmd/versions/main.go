@@ -337,7 +337,7 @@ func check(w io.Writer, rows []upstream.Status, byTask bool) error {
 	case behind > 0:
 		bump := "versions bump <name>"
 		if byTask {
-			bump = "go tool task bump NAME=<name>"
+			bump = "task bump NAME=<name>"
 		}
 		switch named {
 		case 0:

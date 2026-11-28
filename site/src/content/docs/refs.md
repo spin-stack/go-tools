@@ -16,12 +16,12 @@ references against the tree:
 | `pkg.Symbol` of an `internal/` package | the package still exists |
 
 ```sh
-go tool refs
+refs
 ```
 
 It reads `AGENTS.md CLAUDE.md */AGENTS.md */CLAUDE.md` by default; `-files` names others. It asks
-`TASK_EXE` for task names when that is set, else the Task the module's go.mod pins (`go tool task`,
-which puts no `task` on PATH), else `task` on PATH; `-task` names another.
+`TASK_EXE` for task names when that is set, as it is under Task, else `task` on PATH; `-task`
+names another.
 
 ## On purpose
 

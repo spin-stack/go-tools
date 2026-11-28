@@ -195,7 +195,7 @@ func repositorys(dir string, own versions.Entry) (versions.Entry, error) {
 				return own, nil
 			}
 			if _, err := v.Entries[i].For(runtime.GOOS, runtime.GOARCH); err != nil {
-				return versions.Entry{}, fmt.Errorf("%w: %s's task is the Task `go tool task` runs here. Without that entry go-tools' runs, which is pinned for every platform", err, p)
+				return versions.Entry{}, fmt.Errorf("%w: %s's task is the Task `task` runs here. Without that entry go-tools' runs, which is pinned for every platform", err, p)
 			}
 			return v.Entries[i], nil
 		}

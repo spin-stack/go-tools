@@ -34,7 +34,7 @@ jobs:
 
       # Task and every go-tools command, from go-tools' latest release: no go.mod pins them, and
       # an older pin of this action installs the same release.
-      - uses: spin-stack/go-tools@069c8b257b8e2df92563e2528772cf56472dea5f # v20261127.15
+      - uses: spin-stack/go-tools@116dfa6befab594f25ad4553e375061e3fa80f27 # v20261128.01
 
       # gencache's mocks and golangci-lint's analysis, each keyed by content inside, so any older
       # copy is safe to start from: saved under the commit, restored from the newest - main's for

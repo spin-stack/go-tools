@@ -13,7 +13,7 @@ assignment dropped, a constant off by one - and runs your tests against each. A 
 still pass is behaviour nothing holds.
 
 ```sh
-go tool mutate -base origin/main
+mutate -base origin/main
 ```
 
 ## An example: 100% coverage, one bug no test would catch
@@ -33,7 +33,7 @@ ok  	example.com/ratelimit	0.002s	coverage: 100.0% of statements
 
 Green, fully covered, ready to merge. Here is what `mutate` says:
 
-<Example path="survived.txt" title="go tool mutate -base origin/main" wrap mark={2} />
+<Example path="survived.txt" title="mutate -base origin/main" wrap mark={2} />
 
 It made two edits to `Allow`. Turning `<` into `>=` broke a test, so that line is held.
 **Deleting `l.last = now` broke nothing.** That deletion is a real bug: a limiter that never
@@ -47,7 +47,7 @@ The test that was missing is the one that describes what a limiter is for:
 
 <Example path="answer/limiter_test.go" title="limiter_test.go" ins={{ range: '22-32' }} />
 
-<Example path="answered.txt" title="go tool mutate -base origin/main" wrap />
+<Example path="answered.txt" title="mutate -base origin/main" wrap />
 
 <Aside type="note" title="This example is real">
 The code, the tests and both outputs on this page are files in
@@ -78,7 +78,7 @@ for _, sub := range m.re.FindAllStringSubmatch(text, -1) { // mutate-exempt: any
 func Mount(v Volume) error {
 ```
 
-An exemption has to stay true. `go tool mutate -stale-exempts` lists every `mutate-exempt`
+An exemption has to stay true. `mutate -stale-exempts` lists every `mutate-exempt`
 over a line `mutate` would not edit anyway, and fails if it finds one, so reasons don't pile up
 after the code under them changed. It needs no diff and runs in seconds, so it belongs in
 `task lint`.
@@ -158,11 +158,8 @@ outside its package.
 
 ## Running it
 
-Add it to the repository's `go.mod` as a tool:
-
-```sh
-go get -tool github.com/spin-stack/go-tools/cmd/mutate
-```
+It is on Task's PATH under go-tools' `task` ([Getting started](../start/)): a task runs
+`mutate -base origin/main`, and a developer runs `task mutate`.
 
 In CI it runs after the tests pass, against what a pull request merges into or, on a push, what
 the branch was before it. [GitHub Actions](../github-actions/) has the task and the step, and the
@@ -235,7 +232,7 @@ test process is limited to its share of the memory that was free when the run st
 On Linux, run it in a cgroup systemd delegates:
 
 ```sh
-systemd-run --user --scope -p Delegate=yes go tool mutate
+systemd-run --user --scope -p Delegate=yes mutate
 ```
 
 With that, each test process gets a child cgroup the kernel holds to its memory, with no swap and

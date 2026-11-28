@@ -11,7 +11,7 @@ commits, the lane timed out, and nothing on main could pass again until somebody
 `proven` is those functions in Go, with their tables, and one small client for the API.
 
 ```sh
-go tool proven tree|base|release|times|flakes|tests [flags]
+proven tree|base|release|times|flakes|tests [flags]
 ```
 
 Every command takes the repository from `-repo` or `$GITHUB_REPOSITORY`, the commit from `-sha`
@@ -37,7 +37,7 @@ it does not - a pull request's head is nowhere in a checkout of main.
 - id: proven
   env:
     GH_TOKEN: ${{ github.token }}
-  run: go tool task kvm:proven   # go tool proven tree
+  run: task kvm:proven   # proven tree
 ```
 
 `proven=true` when the gate passed on the commit's tree, `proven=false` when it did not or never
@@ -63,7 +63,7 @@ proof.
   env:
     GH_TOKEN: ${{ github.token }}
     GITHUB_REF: ${{ github.ref }}
-  run: go tool task ci:base      # go tool proven base
+  run: task ci:base      # proven base
 ```
 
 What a run on main is of. The newest of main's commits (`-depth` of them, first-parent) that a
@@ -82,7 +82,7 @@ on its pull request's branch as the same tree.
 ```yaml title=".github/workflows/release.yml"
 - env:
     GH_TOKEN: ${{ github.token }}
-  run: go tool task release:green   # go tool proven release
+  run: task release:green   # proven release
 ```
 
 Refuses (exits 1) a commit the gate did not pass on, by tree, and a commit the lanes that run on
@@ -104,7 +104,7 @@ it did. The job needs `actions: write` to dispatch.
 - id: times
   env:
     GH_TOKEN: ${{ github.token }}
-  run: go tool task ci:times     # go tool proven times
+  run: task ci:times     # proven times
 ```
 
 `times=<lines>`, each `<seconds> <test>` as `go test` printed them in the logs of the jobs whose
@@ -117,7 +117,7 @@ by measured time rather than by count; with none, it splits by name.
 ```yaml title=".github/workflows/release.yml"
 - env:
     GH_TOKEN: ${{ github.token }}
-  run: go tool task release:evidence   # go tool proven tests -out dist/evidence.json
+  run: task release:evidence   # proven tests -out dist/evidence.json
 ```
 
 Every test the runs that answer for the commit logged, as one JSON document: the gate's run on
@@ -141,7 +141,7 @@ difference is what a rerun answers and what it does not, and reading it off the 
 runs by hand is where a flake stays a rumour.
 
 ```sh
-go tool proven flakes -limit 100          # the last 100 runs of ci.yml, and of -also (kvm.yml)
+proven flakes -limit 100          # the last 100 runs of ci.yml, and of -also (kvm.yml)
 ```
 
 For every run that failed, the tests its kept logs say failed: the run's artifacts first - a

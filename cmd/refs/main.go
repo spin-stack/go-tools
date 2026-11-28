@@ -6,6 +6,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,12 +28,12 @@ func main() {
 	allowPath := flag.String("allow", "", "references made on purpose to something that is not here (none by default)")
 	pathspecs := flag.String("files", "AGENTS.md CLAUDE.md */AGENTS.md */CLAUDE.md",
 		"the prose to read, as git pathspecs separated by spaces: a tracked file one names is read")
-	taskExe := flag.String("task", os.Getenv("TASK_EXE"), "the task binary to ask for names: TASK_EXE by default, else the Task go.mod pins (go tool task), else task on PATH")
+	taskExe := flag.String("task", cmp.Or(os.Getenv("TASK_EXE"), "task"), "the task binary to ask for names: TASK_EXE by default, else task on PATH")
 	decisions := flag.String("decisions", "docs/decisions", "the directory an ADR-NNNN resolves in")
 	flag.Parse()
 
 	ctx := interrupt.Context()
-	if err := run(ctx, ".", *allowPath, strings.Fields(*pathspecs), refs.TaskCommand(ctx, *taskExe), *decisions); err != nil {
+	if err := run(ctx, ".", *allowPath, strings.Fields(*pathspecs), []string{*taskExe}, *decisions); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -16,7 +16,7 @@ lines, and the scripts a task calls to being scripts - a program that *decides* 
 what it reads has an answer a test could hold, and belongs in Go.
 
 ```sh
-go tool taskgate [-common] [-allow file] [-task path] [-command cmd]... [-max-lines n] [-max-script-lines n] [dir]
+taskgate [-common] [-allow file] [-task path] [-command cmd]... [-max-lines n] [-max-script-lines n] [dir]
 ```
 
 ## What a step looks like
@@ -29,12 +29,12 @@ steps:
   - uses: actions/setup-go@<commit> # v7.0.0
     with:
       go-version-file: go.mod
-  - run: go tool task lint
-  - run: go tool task test
+  - run: task lint
+  - run: task test
   - name: What this change broke, and whether a test noticed
     env:
       BEFORE: ${{ github.event.before }}
-    run: go tool task mutate
+    run: task mutate
 ```
 
 `uses:` steps set the machine up, `env:` hands the task what only the workflow knows, and the
@@ -43,7 +43,7 @@ steps:
 A task reads `GITHUB_ACTIONS`, `GITHUB_EVENT_NAME` and the rest of a run's environment to do what
 only CI does.
 
-A step passes when its `run:` is a single `task ...` or `go tool task ...` line, with whatever
+A step passes when its `run:` is a single `task ...` or `task ...` line, with whatever
 arguments and variables it is given. It fails on a second line, on `&&`, `||`, `;` or `|` after the
 task, and on output redirected with `>`.
 
@@ -53,7 +53,7 @@ A repository whose interface is a command of its own - spin-ami's `spin-os build
 upgrade` - names it with `-command`, one flag for each way a step spells it:
 
 ```sh
-go tool taskgate -command "go run ./cmd/spin-os" -command spin-os
+taskgate -command "go run ./cmd/spin-os" -command spin-os
 ```
 
 A step that is one invocation of it passes as a task does: the same command a developer types,
@@ -77,7 +77,7 @@ resolves a name is the one the workflow runs:
 ```yaml title="Taskfile.yml"
 lint:workflows:
   cmds:
-    - go tool taskgate -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
+    - taskgate -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
 ```
 
 Every word after `task` is a name, up to a `--`, except a flag, a `VAR=value`, and what only a run
@@ -126,19 +126,20 @@ about it.
 ## The common tasks (-common)
 
 `-common` also holds the repository to [the common tasks](../tasks/) as every repository has
-them. It is asked of a repository whose `go.mod` takes `go tool task`, that has a
-`versions.yaml`, or whose Taskfile includes the tasks; of any other it asks nothing and says so.
+them. It is asked of a repository whose workflows use `spin-stack/go-tools` (or whose `go.mod`
+still takes go-tools' task command), that has a `versions.yaml`, or whose Taskfile includes the
+tasks; of any other it asks nothing and says so.
 It reads the files and runs nothing, Task least of all: a repository with a second task of a
 common name is one Task refuses to load, and the finding is the one that names the file.
 
 | rule | the finding's key |
 |---|---|
-| `go.mod` requires a go-tools from `v0.20261122.4` or later, the first whose `go tool task` sets `GO_TOOLS_TASKS` | `common:go-tools` |
+| `go.mod` does not take go-tools' task command: a go.mod that pins it makes each go-tools release a pull request in the repository | `common:tool` |
 | the root Taskfile includes `{{.GO_TOOLS_TASKS}}`, with `flatten: true`, so the names are `versions` and not `common:versions` | `common:include` |
 | the include has no `excludes` | `common:excludes` |
 | no Taskfile of the repository's defines a common name: in the root, or in a file an include gives a namespace (`workflows` in a file included as `lint` is `lint:workflows`) | `common:<file>:<task>` |
 | no Taskfile of the repository's states, in its own `vars:`, a var the common tasks read (`RELEASE`, `VERSIONS_FILES`, `WORKFLOWS_ALSO`, `CONSUMERS`, `GO_TOOLS`, `TO`, `NAME`, `FILE`, `BACK`, `SHA`, `RELEASE_DRY`): an included task reads that one, not the include's, so a root `RELEASE` that is a directory leaves `release` saying the include states none. Rename it after what it holds | `common:<file>:vars:<var>` |
-| in a repository that takes `go tool task`, no step runs a bare `task` or installs Task with `go-task/setup-task` | `common:<file>/<job>/<step>/task`, `.../setup-task` |
+| in a repository that runs go-tools' task, a step that runs `task` has a step before it in its job that uses `spin-stack/go-tools`, directly or through a composite action of the repository; no step runs `go tool task` or installs Task with `go-task/setup-task` | `common:<file>/<job>/<step>/task`, `.../go-tool`, `.../setup-task` |
 | `RELEASE` is stated: `{proof, jobs}`, `{elsewhere}` or `{none}` | `common:RELEASE` |
 | each key of `RELEASE` is `proof`, `jobs`, `files`, `elsewhere` or `none`, with a value. In a flow map an unquoted comma ends a value, and the rest of the sentence is a key of its own: `{none: "a, b"}` | `common:RELEASE/key/<key>` |
 | `proof` is a workflow the repository has, and each of `jobs` starts the name of one of its jobs | `common:RELEASE/proof`, `common:RELEASE/jobs/<job>` |
@@ -156,7 +157,7 @@ the finding with why.
 ```yaml title="Taskfile.yml"
 lint:
   cmds:
-    - go tool taskgate -common -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
+    - taskgate -common -allow .github/taskgate-allow.txt -task {{.TASK_EXE}}
     - task: lint:workflows
 ```
 
@@ -183,12 +184,15 @@ file's own `vars:` as `vars`. A script is its path. A finding of `-common` print
 so the list only shrinks - and a block or a script listed is work owed with its reason, not a
 decision that it belongs where it is.
 
-## Task from go.mod
+## Task from go-tools, not go.mod
 
-`go get -tool github.com/go-task/task/v3/cmd/task` pins Task like any other tool, so CI needs only
-`setup-go` and no step to install Task, and every developer has the same version with `go tool
-task`. That is what an application repository should do.
+A step that runs `task` has, before it in its job, a step that uses `spin-stack/go-tools`
+(directly or in a composite action of the repository): it installs go-tools' task, the Task
+go-tools pins with every command on its PATH. Without it, `task` is whatever the runner has, with
+no `GO_TOOLS_TASKS`. `-common` refuses a go.mod that takes go-tools' task command, a step that runs
+`go tool task`, and `go-task/setup-task`: each pins Task in the repository, so each go-tools release
+would be a pull request there.
 
-A library is the exception: its tools' modules would be in the module graph of every repository
-that imports it. go-tools itself installs Task with `go-task/setup-task`, from its pin in
-`versions.yaml`, and the step that reads that pin is its one exemption.
+go-tools itself is the exception: its CI runs the tree's commands, not a release's, and installs
+Task with `go-task/setup-task` from its pin in `cmd/task/versions.yaml`; the step that reads that
+pin is its one exemption.

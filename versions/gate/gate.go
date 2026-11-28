@@ -132,22 +132,15 @@ func apart(v *versions.Versions) []error {
 	return errs
 }
 
-// TaskCommand is go-tools' task command: the Task go-tools pins, or versions.yaml's `task` when
-// there is one, with go-tools' latest release on its PATH.
-const TaskCommand = "github.com/spin-stack/go-tools/cmd/task"
-
-// taskAction is what a workflow step uses to install TaskCommand.
+// taskAction is what a workflow step uses to install go-tools' task command: the Task go-tools
+// pins, or versions.yaml's `task` when there is one, with go-tools' latest release on its PATH.
 var taskAction = regexp.MustCompile(`(?m)^\s*(?:-\s+)?uses:\s*["']?spin-stack/go-tools@`)
 
-// taskCommand marks versions.yaml's `task` used when the repository runs go-tools' task command -
-// a workflow or composite action uses the action that installs it, or go.mod takes it: the command
-// reads that entry, which no line of the repository spells as a read. A repository owes none,
-// since the command carries its own Task; go-tools itself is its latest release, which no
-// versions.yaml pins.
+// taskCommand marks versions.yaml's `task` used when a workflow or composite action of the
+// repository uses the action that installs go-tools' task command: the command reads that entry,
+// which no line of the repository spells as a read. A repository owes none, since the command
+// carries its own Task; go-tools itself is its latest release, which no versions.yaml pins.
 func taskCommand(files map[string]string, used map[string]bool) {
-	if slices.ContainsFunc(strings.Fields(files["go.mod"]), func(f string) bool { return f == TaskCommand }) {
-		used["task"] = true
-	}
 	for rel, body := range files {
 		if strings.HasPrefix(rel, ".github/") && taskAction.MatchString(body) {
 			used["task"] = true
@@ -156,7 +149,7 @@ func taskCommand(files map[string]string, used map[string]bool) {
 }
 
 // tasksInclude is what a Taskfile includes to have go-tools' common tasks: the variable
-// `go tool task` names the release's tasks.yml in.
+// go-tools' task names the release's tasks.yml in.
 const tasksInclude = "{{.GO_TOOLS_TASKS}}"
 
 // commonTasks is what a repository whose Taskfile includes go-tools' common tasks owes

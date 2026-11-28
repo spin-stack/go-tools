@@ -35,7 +35,7 @@ includes:
       # release.yml runs `task release` once ci.yml's Gate has passed on the commit.
       RELEASE:
         map: {proof: ci.yml, jobs: Gate, files: _output/release/*.tar.gz _output/release/checksums.txt}
-      # The others are the pins go tool sfw, go tool exposure and go tool task embed for every
+      # The others are the pins sfw, exposure and task embed for every
       # repository.
       VERSIONS_FILES: versions.yaml cmd/sfw/versions.yaml cmd/exposure/versions.yaml cmd/task/versions.yaml
       # The site's CI page shows this workflow for a repository to copy.
@@ -50,7 +50,7 @@ vars:
 tasks:
 
   test:platform:
-    desc: The tests of what differs by platform - the Task go tool task runs and how it runs it, the archives it unpacks, the interrupt every command stops on - on this machine's. CI runs it on Windows and macOS, beside the Gate on Linux.
+    desc: The tests of what differs by platform - the Task go-tools' task runs and how it runs it, the archives it unpacks, the interrupt every command stops on - on this machine's. CI runs it on Windows and macOS, beside the Gate on Linux.
     cmds:
       - go test ./cmd/task/ ./internal/toolcache/ ./internal/interrupt/
 

@@ -15,12 +15,15 @@ import (
 	"github.com/spin-stack/go-tools/internal/taskgate"
 )
 
-// held is a repository as every one that has the common tasks has them: go.mod takes `go tool
-// task` at a go-tools that names the tasks, the root Taskfile includes them once and flattened,
-// says it does not release, and the task CI runs reaches lint:workflows.
+// goTools is the step that puts go-tools' task on PATH, as a workflow pins it.
+const goTools = "spin-stack/go-tools@0123456789012345678901234567890123456789 # v20261128.01"
+
+// held is a repository as every one that has the common tasks has them: a workflow runs `task`
+// after go-tools' action, the root Taskfile includes them once and flattened, says it does not
+// release, and the task CI runs reaches lint:workflows.
 func held() map[string]string {
 	return map[string]string{
-		"go.mod": "module example.com/r\n\ngo 1.27\n\ntool github.com/spin-stack/go-tools/cmd/task\n\nrequire github.com/spin-stack/go-tools v0.20261122.6\n",
+		"go.mod": "module example.com/r\n\ngo 1.27\n",
 		"Taskfile.yml": `version: '3'
 includes:
   common:
@@ -34,7 +37,7 @@ tasks:
     cmds:
       - task: lint:workflows
 `,
-		".github/workflows/ci.yml": "on: pull_request\njobs:\n  gate:\n    name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: go tool task lint\n",
+		".github/workflows/ci.yml": "on: pull_request\njobs:\n  gate:\n    name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - uses: " + goTools + "\n      - run: task lint\n",
 	}
 }
 
@@ -101,10 +104,10 @@ func TestARepositoryThatHasTheCommonTasksPasses(t *testing.T) {
 	assert.Empty(t, findings, "a bare `task` in a repository that does not take `go tool task`, or the included file's own tasks")
 }
 
-// Of a repository with no `go tool task`, no versions.yaml and no include nothing is asked, and
-// it is said so. One that pins in versions.yaml is asked for the include, as one that takes
-// `go tool task` is, and told how.
-func TestOnlyARepositoryThatRunsGoToolTaskOrPinsIsAsked(t *testing.T) {
+// Of a repository that runs no go-tools' task, has no versions.yaml and no include nothing is
+// asked, and it is said so. One that pins in versions.yaml is asked for the include, as one whose
+// workflows use go-tools' action is, and told how.
+func TestOnlyARepositoryThatRunsGoToolsTaskOrPinsIsAsked(t *testing.T) {
 	got, said := common(t, map[string]string{"go.mod": "module example.com/r\n", "Taskfile.yml": "version: '3'\ntasks:\n  release:\n    cmds: [make]\n"})
 	assert.Empty(t, got)
 	assert.Equal(t, "the common tasks: not asked of this repository, whose workflows do not use spin-stack/go-tools, whose go.mod does not take "+
@@ -125,7 +128,7 @@ func TestOnlyARepositoryThatRunsGoToolTaskOrPinsIsAsked(t *testing.T) {
 
 	got, _ = common(t, with(map[string]string{"Taskfile.yml": "", "versions.yaml": "[]\n"}))
 	assert.Equal(t, []string{"common:include"}, slices.Sorted(maps.Keys(got)))
-	assert.Equal(t, "Taskfile.yml: go.mod takes github.com/spin-stack/go-tools/cmd/task, and this Taskfile does not include go-tools' common tasks. "+
+	assert.Equal(t, "Taskfile.yml: its workflows use spin-stack/go-tools, and this Taskfile does not include go-tools' common tasks. "+
 		"Add to its includes `common: {taskfile: \"{{.GO_TOOLS_TASKS}}\", flatten: true, vars: {RELEASE: {map: {none: <why it does not release>}}}}`, "+
 		"with RELEASE as the repository is released, and delete or rename its own tasks of those names", got["common:include"])
 }
@@ -170,25 +173,29 @@ func TestTheIncludeIsTheRootsFlattenedAndWhole(t *testing.T) {
 	}
 }
 
-// A go.mod whose go-tools is from before its `go tool task` named the tasks makes the include a
-// cycle for every task: it is refused, and the command that moves it said.
-func TestAGoToolsFromBeforeTheTasksIsAFinding(t *testing.T) {
-	for require, refused := range map[string]bool{
-		"require github.com/spin-stack/go-tools v0.20261122.3\n":                              true,
-		"require (\n\tgithub.com/spin-stack/go-tools v0.0.0-20261109214710-b4b5f4a78a45\n)\n": true,
-		"require github.com/spin-stack/go-tools v0.20261122.4\n":                              false,
-		"require (\n\tgithub.com/spin-stack/go-tools v0.20261123.1 // indirect\n)\n":          false,
-		"": false,
+// A go.mod that takes go-tools' task command, on a tool line or in a block, makes each release a
+// pull request in the repository: it is refused, with what removes it. One that requires go-tools
+// for its packages is not.
+func TestAGoModThatTakesTheTaskCommandIsAFinding(t *testing.T) {
+	for _, tc := range []struct {
+		name, gomod string
+		refused     bool
+	}{
+		{"a tool line", "module example.com/r\n\ntool github.com/spin-stack/go-tools/cmd/task\n", true},
+		{"a tool block", "module example.com/r\n\ntool (\n\tgithub.com/spin-stack/go-tools/cmd/task\n\tgo.uber.org/mock/mockgen\n)\n", true},
+		{"the packages alone", "module example.com/r\n\nrequire github.com/spin-stack/go-tools v0.20261128.1\n", false},
 	} {
-		got, _ := common(t, with(map[string]string{"go.mod": "module example.com/r\n\ntool github.com/spin-stack/go-tools/cmd/task\n\n" + require}))
-		if !refused {
-			assert.Empty(t, got, require)
-			continue
-		}
-		assert.Equal(t, []string{"common:go-tools"}, slices.Sorted(maps.Keys(got)), require)
-		assert.Contains(t, got["common:go-tools"], "go.mod: requires github.com/spin-stack/go-tools v0.")
-		assert.Contains(t, got["common:go-tools"], "from before v0.20261122.4")
-		assert.Contains(t, got["common:go-tools"], "`go get github.com/spin-stack/go-tools@latest && go mod tidy`")
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := common(t, with(map[string]string{"go.mod": tc.gomod}))
+			if !tc.refused {
+				assert.Empty(t, got)
+				return
+			}
+			assert.Equal(t, []string{"common:tool"}, slices.Sorted(maps.Keys(got)))
+			assert.Equal(t, "go.mod: takes github.com/spin-stack/go-tools/cmd/task, which makes each go-tools release a pull request here: "+
+				"`go get -tool github.com/spin-stack/go-tools/cmd/task@none && go mod tidy`, run `task` in workflows after a step that uses spin-stack/go-tools, "+
+				"and `go install github.com/spin-stack/go-tools/cmd/task@latest` once on a laptop", got["common:tool"])
+		})
 	}
 }
 
@@ -219,54 +226,28 @@ func TestACommonNameOfTheRepositorysOwnIsFound(t *testing.T) {
 	assert.Contains(t, got["common:taskfiles/build/Taskfile.yml:bump"], "task bump is bump through the include `build`")
 }
 
-// In a repository that takes `go tool task`, a step that runs Task is that one: a bare `task` is
-// whatever Task the runner has, which sets no GO_TOOLS_TASKS, and setup-task installs one.
-func TestAStepRunsTheTaskGoModTakes(t *testing.T) {
-	got, _ := common(t, with(map[string]string{".github/workflows/ci.yml": `on: push
-jobs:
-  gate:
-    steps:
-      - uses: go-task/setup-task@0123456789012345678901234567890123456789 # v1
-      - uses: go-task/setup-task
-        id: again
-      - uses: actions/setup-go@0123456789012345678901234567890123456789 # v6
-      - run: go tool task lint
-      - name: Test
-        run: task test
-      - run: |
-          go version
-          task
-      - run: tasks
-`, ".github/actions/setup/action.yml": "runs:\n  using: composite\n  steps:\n    - run: task setup\n      shell: bash\n"}))
-	assert.Equal(t, []string{
-		"common:.github/actions/setup/action.yml/#1/task",
-		"common:.github/workflows/ci.yml/gate/#1/setup-task",
-		"common:.github/workflows/ci.yml/gate/#6/task",
-		"common:.github/workflows/ci.yml/gate/Test/task",
-		"common:.github/workflows/ci.yml/gate/again/setup-task",
-	}, slices.Sorted(maps.Keys(got)))
-	assert.Equal(t, ".github/workflows/ci.yml:11: step \"Test\" runs `task test` with nothing before it that installs go-tools' task: write `go tool task test`, "+
-		"or add a step before it that uses spin-stack/go-tools (`uses: spin-stack/go-tools@<commit>`), which puts go-tools' task on PATH. "+
-		"A bare `task` is whatever Task the runner has, with no GO_TOOLS_TASKS, and stops at `include cycle detected`", got["common:.github/workflows/ci.yml/gate/Test/task"])
-	assert.Contains(t, got["common:.github/workflows/ci.yml/gate/#1/setup-task"], ".github/workflows/ci.yml:5: step \"#1\" installs Task with go-task/setup-task")
-}
-
-// In a repository whose go.mod does not take the command, a step that runs `task` has go-tools'
-// action before it in its job: directly, or through a composite action of the repository that
-// uses it, which may run `task` itself after it. A job, or a composite, without it is a finding,
-// and so is a step before it.
+// A step that runs `task` has go-tools' action before it in its job: directly, or through a
+// composite action of the repository that uses it, which may run `task` itself after it. A job,
+// or a composite, without it is a finding, and so is a step before it: a bare `task` is whatever
+// Task the runner has, which sets no GO_TOOLS_TASKS. `go tool task` is the go.mod's Task and
+// setup-task installs another, so each is a finding wherever it is.
 func TestAStepRunsTaskAfterTheGoToolsAction(t *testing.T) {
-	const pin = "spin-stack/go-tools@0123456789012345678901234567890123456789 # v20261128.01"
 	got, _ := common(t, with(map[string]string{
-		"go.mod": "module example.com/r\n",
 		".github/workflows/ci.yml": `on: push
 jobs:
   direct:
     steps:
       - name: Early
         run: task early
-      - uses: ` + pin + `
+      - uses: go-task/setup-task@0123456789012345678901234567890123456789 # v1
+      - uses: ` + goTools + `
       - run: task lint
+      - name: Old
+        run: go tool task test -v
+      - run: |
+          go version
+          task
+      - run: tasks
   composite:
     steps:
       - uses: ./.github/actions/setup
@@ -277,16 +258,22 @@ jobs:
       - name: Bare
         run: task test
 `,
-		".github/actions/setup/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + pin + "\n    - run: task setup\n      shell: bash\n",
+		".github/actions/setup/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + goTools + "\n    - run: task setup\n      shell: bash\n",
 		".github/actions/plain/action.yml": "runs:\n  using: composite\n  steps:\n    - run: task plain\n      shell: bash\n",
 	}))
 	assert.Equal(t, []string{
 		"common:.github/actions/plain/action.yml/#1/task",
+		"common:.github/workflows/ci.yml/direct/#2/setup-task",
 		"common:.github/workflows/ci.yml/direct/Early/task",
+		"common:.github/workflows/ci.yml/direct/Old/go-tool",
 		"common:.github/workflows/ci.yml/other/Bare/task",
 	}, slices.Sorted(maps.Keys(got)))
-	assert.Contains(t, got["common:.github/workflows/ci.yml/other/Bare/task"], "runs `task test` with nothing before it that installs go-tools' task: add a step before it that uses spin-stack/go-tools")
-	assert.NotContains(t, got["common:.github/workflows/ci.yml/other/Bare/task"], "go tool", "a go.mod without the command has no `go tool task` to write")
+	assert.Equal(t, ".github/workflows/ci.yml:24: step \"Bare\" runs `task test` with nothing before it that installs go-tools' task: "+
+		"add a step before it that uses spin-stack/go-tools (`uses: spin-stack/go-tools@<commit>`), which puts go-tools' task on PATH. "+
+		"A bare `task` is whatever Task the runner has, with no GO_TOOLS_TASKS, and stops at `include cycle detected`", got["common:.github/workflows/ci.yml/other/Bare/task"])
+	assert.Equal(t, ".github/workflows/ci.yml:11: step \"Old\" runs `go tool task test -v`, the Task a go.mod takes: write `task test -v` after a step that uses spin-stack/go-tools",
+		got["common:.github/workflows/ci.yml/direct/Old/go-tool"])
+	assert.Contains(t, got["common:.github/workflows/ci.yml/direct/#2/setup-task"], ".github/workflows/ci.yml:7: step \"#2\" installs Task with go-task/setup-task")
 }
 
 // lint:workflows is reached from what a workflow runs, by any way a task runs another: a `task:`
@@ -425,7 +412,7 @@ func TestReleaseIsStatedAndTrue(t *testing.T) {
 		"none, and gh":                      {files: map[string]string{"Taskfile.yml": release(none), ".github/workflows/up.yml": "on: push\njobs:\n  up:\n    steps:\n      - run: gh release create v1 --notes x\n"}, want: "common:RELEASE/none/up.yml", says: "step \"#1\" runs `gh release create`"},
 		"none, and a tag made":              {files: map[string]string{"Taskfile.yml": release(none), ".github/workflows/up.yml": "on: push\njobs:\n  up:\n    steps:\n      - run: git tag -a v1 -m v1\n"}, want: "common:RELEASE/none/up.yml", says: "runs `git tag -a`"},
 		"none, and tags listed":             {files: map[string]string{"Taskfile.yml": release(none), ".github/workflows/up.yml": "on: push\njobs:\n  up:\n    steps:\n      - run: git tag -l\n"}, says: "RELEASE says none"},
-		"none, and a task":                  {files: map[string]string{"Taskfile.yml": taskfile(strings.Replace(includeNone, "its outputs are copied", "no", 1), lint+"  up:\n    cmds:\n      - task: push\n  push:\n    cmds: [git push origin --tags]\n"), ".github/workflows/up.yml": "on: push\njobs:\n  up:\n    steps:\n      - run: go tool task up\n"}, want: "common:RELEASE/none/up.yml", says: "it runs task push, which runs `git push origin --tags` (Taskfile.yml:"},
+		"none, and a task":                  {files: map[string]string{"Taskfile.yml": taskfile(strings.Replace(includeNone, "its outputs are copied", "no", 1), lint+"  up:\n    cmds:\n      - task: push\n  push:\n    cmds: [git push origin --tags]\n"), ".github/workflows/up.yml": "on: push\njobs:\n  up:\n    steps:\n      - uses: " + goTools + "\n      - run: task up\n"}, want: "common:RELEASE/none/up.yml", says: "it runs task push, which runs `git push origin --tags` (Taskfile.yml:"},
 		"none, and a task unrun":            {files: map[string]string{"Taskfile.yml": taskfile(includeNone, lint+"  push:\n    cmds: [git push origin --tags]\n")}, says: "RELEASE says none"},
 	} {
 		t.Run(name, func(t *testing.T) {

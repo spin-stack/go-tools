@@ -12,7 +12,7 @@ Tuesday night. `planguard` draws the line between the two from the plan itself.
 ```sh
 tofu plan -out=plan.bin
 tofu show -json plan.bin > plan.json
-go tool planguard [-replaceable aws_launch_template,...] plan.json
+planguard [-replaceable aws_launch_template,...] plan.json
 ```
 
 | the plan | verdict |
@@ -30,9 +30,9 @@ also `verdict=<it>` in `$GITHUB_OUTPUT`, for a step's `if:`. Every verdict exits
 a person's is not a failed run - and what cannot be read exits 2, never `nothing`.
 
 ```yaml title=".github/workflows/auto.yml"
-- run: go tool task plan:json      # tofu plan -out, tofu show -json
+- run: task plan:json      # tofu plan -out, tofu show -json
 - id: guard
-  run: go tool task guard          # go tool planguard plan.json
+  run: task guard          # planguard plan.json
 - if: steps.guard.outputs.verdict == 'apply'
-  run: go tool task apply:saved    # tofu apply plan.bin: what was judged is what is applied
+  run: task apply:saved    # tofu apply plan.bin: what was judged is what is applied
 ```

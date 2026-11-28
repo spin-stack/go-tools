@@ -13,26 +13,23 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
-	"golang.org/x/mod/semver"
 
 	"github.com/spin-stack/go-tools/internal/shell"
 	common "github.com/spin-stack/go-tools/internal/tasks"
 )
 
 // CommonInclude is the taskfile a repository's include names to have go-tools' common tasks: the
-// variable `go tool task` names the release's tasks.yml in.
+// variable go-tools' task names the release's tasks.yml in.
 const CommonInclude = "{{.GO_TOOLS_TASKS}}"
 
 const (
-	// taskCommand is what a go.mod takes to run `go tool task`.
+	// taskCommand is go-tools' task command, which no go.mod takes: a go.mod that did was a pull
+	// request in every repository for each release.
 	taskCommand = "github.com/spin-stack/go-tools/cmd/task"
-	// action is what a workflow step uses to put go-tools' task on PATH, outside any go.mod.
+	// action is what a workflow step uses to put go-tools' task on PATH.
 	action = "spin-stack/go-tools"
 	// install is what puts it there on a laptop.
 	install = "go install " + taskCommand + "@latest"
-	module  = "github.com/spin-stack/go-tools"
-	// firstWithTasks is the first version of the module whose `go tool task` sets GO_TOOLS_TASKS.
-	firstWithTasks = "v0.20261122.4"
 	// lintWorkflows is the common task that reads the workflows: the one a repository's CI has to reach.
 	lintWorkflows = "lint:workflows"
 )
@@ -56,7 +53,8 @@ func (u Uncommon) String() string { return u.At + ": " + u.Says }
 // go-tools itself the tree's own file.
 //
 // It holds a repository that runs go-tools' task - its workflows use the action, or its go.mod
-// takes the command - or includes the tasks; of any other it asks nothing, and says so. All of it
+// still takes the command, which is a finding - or includes the tasks; of any other it asks
+// nothing, and says so. All of it
 // is read from the tree: nothing is run, Task least of all, since a repository with a second task
 // of a common name is one Task stops at.
 func Common(ctx context.Context, root, included string) ([]Finding, string, error) {
@@ -87,10 +85,12 @@ func Common(ctx context.Context, root, included string) ([]Finding, string, erro
 
 	var out []Uncommon
 	if tool {
-		out = append(out, requirement(string(gomod))...)
+		out = append(out, Uncommon{"tool", "go.mod", "takes " + taskCommand + ", which makes each go-tools release a pull request here: " +
+			"`go get -tool " + taskCommand + "@none && go mod tidy`, run `task` in workflows after a step that uses " + action +
+			", and `" + install + "` once on a laptop"})
 	}
 	if tool || installed {
-		out = append(out, bare(flows, installs, tool)...)
+		out = append(out, bare(flows, installs)...)
 	}
 	out = append(out, own(t)...)
 	out = append(out, hidden(t)...)
@@ -169,19 +169,6 @@ func list(ctx context.Context, root string) (listed map[string]bool, workflows [
 		}
 	}
 	return listed, workflows, nil
-}
-
-// required is the version of this module a go.mod requires, in a require block or on a line of its own.
-var required = regexp.MustCompile(`(?m)^\s*(?:require\s+)?` + regexp.QuoteMeta(module) + `\s+(v\S+)`)
-
-// requirement is a go.mod whose go-tools is from before its `go tool task` named the tasks.
-func requirement(gomod string) []Uncommon {
-	m := required.FindStringSubmatch(gomod)
-	if m == nil || semver.Compare(m[1], firstWithTasks) >= 0 {
-		return nil
-	}
-	return []Uncommon{{"go-tools", "go.mod", "requires " + module + " " + m[1] + ", from before " + firstWithTasks + ", the first whose `go tool task` sets GO_TOOLS_TASKS: " +
-		"with it an include of the common tasks is `include cycle detected` for every task. `go get " + module + "@latest && go mod tidy`"}}
 }
 
 // commonNames is the common tasks' names, from the tasks' own file at the version this gate is of.
@@ -391,14 +378,10 @@ func (f flow) key(j job, s step) string {
 
 // bare is each step of a repository that runs go-tools' task which runs Task another way: a line
 // that starts with `task` with nothing before it in its job that installs go-tools' task, which is
-// whatever Task the runner has and knows no GO_TOOLS_TASKS, and the action that installs one.
-// tool is a go.mod that takes the command, where `go tool task` is the other way to write it.
-func bare(flows []flow, installs func(file string) bool, tool bool) []Uncommon {
+// whatever Task the runner has and knows no GO_TOOLS_TASKS, a line that runs `go tool task`, which
+// is the go.mod's, and the action that installs another Task.
+func bare(flows []flow, installs func(file string) bool) []Uncommon {
 	var out []Uncommon
-	fix := "add a step before it that uses " + action + " (`uses: " + action + "@<commit>`), which puts go-tools' task on PATH"
-	if tool {
-		fix = "write `go tool <line>`, or " + fix
-	}
 	for _, f := range flows {
 		for _, j := range f.Jobs {
 			installed := false
@@ -410,10 +393,16 @@ func bare(flows []flow, installs func(file string) bool, tool bool) []Uncommon {
 							" installs the Task go-tools pins with go-tools' commands on its PATH"})
 				}
 				for _, l := range s.Run {
+					if goTool, ok := strings.CutPrefix(l.Text+" ", "go tool task "); ok {
+						out = append(out, Uncommon{f.key(j, s) + "/go-tool", f.File + ":" + strconv.Itoa(l.Line),
+							"step " + strconv.Quote(s.Name) + " runs `" + l.Text + "`, the Task a go.mod takes: write `" + strings.TrimSpace("task "+goTool) +
+								"` after a step that uses " + action})
+					}
 					if !installed && strings.HasPrefix(l.Text+" ", "task ") {
 						out = append(out, Uncommon{f.key(j, s) + "/task", f.File + ":" + strconv.Itoa(l.Line),
-							"step " + strconv.Quote(s.Name) + " runs `" + l.Text + "` with nothing before it that installs go-tools' task: " +
-								strings.ReplaceAll(fix, "<line>", l.Text) + ". A bare `task` is whatever Task the runner has, with no GO_TOOLS_TASKS, and stops at `include cycle detected`"})
+							"step " + strconv.Quote(s.Name) + " runs `" + l.Text + "` with nothing before it that installs go-tools' task: add a step before it that uses " +
+								action + " (`uses: " + action + "@<commit>`), which puts go-tools' task on PATH. " +
+								"A bare `task` is whatever Task the runner has, with no GO_TOOLS_TASKS, and stops at `include cycle detected`"})
 					}
 				}
 			}
@@ -634,7 +623,7 @@ func releaseKey(file string, k, v *yaml.Node) (Uncommon, bool) {
 
 // stated is release's reading of the map's known keys.
 func stated(inc *include, at string, state map[string]string, listed map[string]bool, flows []flow, t *taskfiles) ([]Uncommon, string) {
-	const forms = "`RELEASE: {map: {proof: <workflow>, jobs: <jobs>}}` where `go tool task release` cuts the releases, " +
+	const forms = "`RELEASE: {map: {proof: <workflow>, jobs: <jobs>}}` where `task release` cuts the releases, " +
 		"`{map: {elsewhere: <workflow>}}` where a workflow of the repository's own does, `{map: {none: <why>}}` where it does not release"
 	switch {
 	case state["elsewhere"] != "":

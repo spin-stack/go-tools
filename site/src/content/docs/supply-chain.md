@@ -10,7 +10,7 @@ verifier check the signatures without reaching the network.
 ## provenance: what it was built from
 
 ```sh
-go tool provenance -version <release> -out provenance.json
+provenance -version <release> -out provenance.json
 cosign attest-blob --type slsaprovenance1 --predicate provenance.json <files>
 ```
 
@@ -23,7 +23,7 @@ inputs of its own (`Build`'s extra).
 ## sbom: what is inside
 
 ```sh
-go tool sbom <kind> -name <subject> -version <v> -out <file> ...
+sbom <kind> -name <subject> -version <v> -out <file> ...
 ```
 
 Writes a CycloneDX 1.6 SBOM from what a build actually read:
@@ -65,7 +65,7 @@ A workflow can't say which files a glob matched, so the step right before an upl
 directory itself:
 
 ```sh
-go tool attestgate files -require provenance -except checksums.txt dist/
+attestgate files -require provenance -except checksums.txt dist/
 ```
 
 It fails on a file with no `<file>.provenance.sigstore.json` beside it.
@@ -77,7 +77,7 @@ timestamp authorities a bundle is checked against - embedded exactly as TUF serv
 is verified with nothing reached over the network.
 
 Every repository gets the same root through its go-tools version. Renewing it is
-`go run ./cmd/trustroot -write` here, a commit, and a go-tools bump there. `go tool trustroot -check`
+`go run ./cmd/trustroot -write` here, a commit, and a go-tools bump there. `trustroot -check`
 fails when TUF serves anything else, byte for byte; it needs the network, and this repository's
 `task lint` runs it.
 

@@ -4,7 +4,7 @@ description: Go tools that hold a repository to what it claims - tests that noti
 template: splash
 hero:
   title: Checks for what a green build doesn't prove.
-  tagline: Small Go tools the spin-stack repositories run from their go.mod. Each one fails CI with a specific finding and says how to resolve it.
+  tagline: Small Go tools the spin-stack repositories run at their latest release, pinned in no go.mod. Each one fails CI with a specific finding and says how to resolve it.
   actions:
     - text: Getting started
       link: start/
@@ -107,9 +107,10 @@ if it were wrong.
 ## How they fit in
 
 <CardGrid>
-	<Card title="A Go tool, pinned like a dependency" icon="seti:go">
-		`go get -tool github.com/spin-stack/go-tools/cmd/<name>`, then `go tool <name>`. The version
-		is in go.mod, so every developer and every CI run uses the same one.
+	<Card title="The latest release, with no bump" icon="seti:go">
+		`go install github.com/spin-stack/go-tools/cmd/task@latest` once, or `uses: spin-stack/go-tools`
+		in a workflow, and every command is on Task's PATH at go-tools' latest release: a release is in
+		every repository's next run, with no pull request there.
 	</Card>
 	<Card title="A finding says what to do" icon="approve-check">
 		Each failure names the file and line, why it matters, and the fix. Where there are exceptions,

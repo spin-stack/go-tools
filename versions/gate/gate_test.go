@@ -151,27 +151,26 @@ func TestAGateOutsideARepositorySaysWhatGitSaid(t *testing.T) {
 	}
 }
 
-// A repository that runs go-tools' task command - a workflow or composite action uses the action
-// that installs it, or go.mod takes it - reads versions.yaml's task through it, and owes none: the
-// command carries its own. One that does neither reads no task, and a line that only names the
-// action, or a file outside .github that uses it, reads none either.
+// A repository whose workflow or composite action uses the action that installs go-tools' task
+// command reads versions.yaml's task through it, and owes none: the command carries its own. One
+// that does not reads no task: not a go.mod that takes the command, which no repository runs, not
+// a line that only names the action, and not a file outside .github that uses it.
 func TestTheTaskCommandReadsTask(t *testing.T) {
 	const task = "- name: task\n  kind: download\n  source: https://x/v{version}/task_{os}_{arch}.tar.gz\n  version: 3.54.0\n  pins:\n    linux/amd64: " +
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  track: github-release https://github.com/go-task/task\n"
-	const tool = "module x\n\ntool (\n\tgithub.com/spin-stack/go-tools/cmd/task\n)\n"
 	const uses = "      - uses: spin-stack/go-tools@0123456789012345678901234567890123456789 # v20261128.01\n"
+	const ci = ".github/workflows/ci.yml"
 	const unread = "pins task, and nothing reads it"
 	for _, tc := range []struct {
 		name, gomod, file string
 		also              map[string]string
 		says              []string
 	}{
-		{"the command and its task", tool, task, nil, nil},
-		{"the command on a tool line of its own", "module x\n\ntool " + TaskCommand + "\n", task, nil, nil},
-		{"the command and no task", tool, "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n", nil,
+		{"the action and no task", "module x\n", "- name: go\n  kind: date\n  version: \"1\"\n  track: today\n", map[string]string{ci: uses},
 			[]string{"pins go, and nothing reads it"}},
-		{"no command: nothing reads the task", "module x\n", task, nil, []string{unread}},
-		{"a workflow uses the action", "module x\n", task, map[string]string{".github/workflows/ci.yml": "jobs:\n  a:\n    steps:\n" + uses}, nil},
+		{"nothing reads the task", "module x\n", task, nil, []string{unread}},
+		{"a go.mod that takes the command", "module x\n\ntool github.com/spin-stack/go-tools/cmd/task\n", task, nil, []string{unread}},
+		{"a workflow uses the action", "module x\n", task, map[string]string{ci: "jobs:\n  a:\n    steps:\n" + uses}, nil},
 		{"a composite action uses it", "module x\n", task, map[string]string{".github/actions/setup/action.yml": "runs:\n  steps:\n    - uses: \"spin-stack/go-tools@main\"\n"}, nil},
 		{"a workflow only names it", "module x\n", task, map[string]string{".github/workflows/ci.yml": "# spin-stack/go-tools@main installs task\n"}, []string{unread}},
 		{"a page outside .github uses it", "module x\n", task, map[string]string{"docs/ci.md": uses}, []string{unread}},

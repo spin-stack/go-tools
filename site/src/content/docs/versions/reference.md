@@ -108,7 +108,7 @@ has, spelled as spin-ami's entry spells its own.
   version: v20261114.01
   pin: 51f7e0dea53e6f85aa855753766b688634487168
   track: github-release
-  bump: go tool task sources:bump
+  bump: task sources:bump
 ```
 
 Some entries move with rules the shared bump does not have. website's `sources:bump` waits for a
@@ -117,13 +117,13 @@ release to carry the screenshots the site needs and generates data again; spin-a
 `spin-machine-dev bump` prints what a new machine type changes. `bump` is that command, one line,
 as a person types it. Then:
 
-- `versions bump spin`, `go tool task bump NAME=spin` and `versions refresh spin` refuse, and
-  name it: ``spin is moved by `go tool task sources:bump`, as its entry says (bump:), and not by
+- `versions bump spin`, `task bump NAME=spin` and `versions refresh spin` refuse, and
+  name it: ``spin is moved by `task sources:bump`, as its entry says (bump:), and not by
   this command``. `-back` does not change that.
-- `versions check` says it in the entry's row, `` moved by `go tool task sources:bump` ``, behind
+- `versions check` says it in the entry's row, `` moved by `task sources:bump` ``, behind
   or not.
 - When every row behind names a command of its own, `check`'s last line says so, and names no
-  `bump`: ``1 behind; the command its row names moves each, and go tool task bump NAME=<name> moves
+  `bump`: ``1 behind; the command its row names moves each, and task bump NAME=<name> moves
   none of them``.
 - The repository's command is not refused. A command built on `versions/upstream`'s `Bump`
   (website's, spin-ami's) is not asked: the library does not read the field. A command that shells
@@ -131,15 +131,16 @@ as a person types it. Then:
   `machine:propose`) says who it is with `-by`, in the entry's words, and the entry moves:
 
 ```sh
-go tool versions bump -by "spin-machine-dev bump" qemu
-go tool versions refresh -by "spin-machine-dev refresh" -propose kernel
+versions bump -by "spin-machine-dev bump" qemu
+versions refresh -by "spin-machine-dev refresh" -propose kernel
 ```
 
 `-by` is for the command the entry names. A person, or the common `bump`, does not pass it, and
 is refused; a `-by` that names another command is refused too, and the refusal says both names.
 
-A `versions` from before the field refuses a file that has it (`field bump not found`), and
-`go tool task` reads `versions.yaml` with the go-tools `go.mod` requires. So the field is added in
-the commit that moves `go.mod` to a release that knows it, or after. `-by` is newer than the field: a
-command that shells out marks its entries in the commit that moves `go.mod` to a release that has
-`-by`, the same commit that adds `-by` to the command.
+A `versions` from before the field refuses a file that has it (`field bump not found`): `task`
+reads `versions.yaml` with go-tools' latest release, and a repository's tests with the go-tools its
+`go.mod` requires. So the field is added once a release knows it, in the commit that moves `go.mod`
+there when the repository's tests read the file. `-by` is newer than the field: a command that
+shells out marks its entries once a release has `-by`, in the same commit that adds `-by` to the
+command.

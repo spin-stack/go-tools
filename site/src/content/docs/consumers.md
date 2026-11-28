@@ -22,8 +22,8 @@ packages = "package.json" # optional: held to the npm packages versions.yaml pin
 ```
 
 ```sh
-go tool task consumers
-go tool task consumers -- -checkout spin-stack/spin=../spin -checkout spin-stack/t3code=../t3code@fork/spin
+task consumers
+task consumers -- -checkout spin-stack/spin=../spin -checkout spin-stack/t3code=../t3code@fork/spin
 ```
 
 For each consumer, read at its default branch through `gh api`, or from a checkout given with

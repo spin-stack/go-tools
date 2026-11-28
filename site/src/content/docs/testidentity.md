@@ -13,7 +13,7 @@ From then on every commit made there, from every worktree of it, is that test's:
 test's, before it is pushed and merged:
 
 ```sh
-go tool testidentity [-base origin/main] [-allow file] [dir]
+testidentity [-base origin/main] [-allow file] [dir]
 ```
 
 It checks every commit in `BASE..HEAD`, its author and its committer, as git wrote them - before a
@@ -58,7 +58,7 @@ lint:
     - testidentity -base origin/main
 ```
 
-Under `go tool task` the command is on Task's `PATH`; a repository with no `go.mod` runs
+Under `task` the command is on Task's `PATH`; a repository with no `go.mod` runs
 `go run github.com/spin-stack/go-tools/cmd/testidentity@<commit>`. On main the range is empty and
 it passes.
 

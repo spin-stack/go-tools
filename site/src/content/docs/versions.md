@@ -41,17 +41,13 @@ one, and `note` tells whoever bumps it what to test afterwards. The
 ## Using the pins
 
 ```sh
-go get -tool github.com/spin-stack/go-tools/cmd/versions
-```
-
-```sh
-go tool versions args debian kernel   # --build-arg DEBIAN_IMAGE=... --build-arg KERNEL_VERSION=... --build-arg KERNEL_SHA256=...
-go tool versions env  debian kernel   # the same, as KEY=value lines
-go tool versions ref  debian          # debian:trixie@sha256:...
-go tool versions url  kernel          # the download's URL at its version
-go tool versions fetch kernel _cache  # _cache/linux-7.2.8.tar.xz, only as the bytes it pins
-go tool versions version kernel       # 7.2.8
-go tool versions newer kernel 7.2.9   # 7.2.9: newer than the pin; nothing when not, an error when not of its form
+versions args debian kernel   # --build-arg DEBIAN_IMAGE=... --build-arg KERNEL_VERSION=... --build-arg KERNEL_SHA256=...
+versions env  debian kernel   # the same, as KEY=value lines
+versions ref  debian          # debian:trixie@sha256:...
+versions url  kernel          # the download's URL at its version
+versions fetch kernel _cache  # _cache/linux-7.2.8.tar.xz, only as the bytes it pins
+versions version kernel       # 7.2.8
+versions newer kernel 7.2.9   # 7.2.9: newer than the pin; nothing when not, an error when not of its form
 ```
 
 A Dockerfile declares the arguments with no default, and the Taskfile passes them:
@@ -65,7 +61,7 @@ ARG KERNEL_SHA256
 
 ```yaml title="Taskfile.yml"
 vars:
-  VERSIONS: go tool versions
+  VERSIONS: versions
 tasks:
   image:
     cmds:
@@ -85,7 +81,7 @@ tasks:
 ```
 
 Inside `$( )` a refusal is only the command's: in a script, `set -e` sees it when the path is
-assigned on a line of its own, `file=$(go tool versions fetch kernel _cache)`.
+assigned on a line of its own, `file=$(versions fetch kernel _cache)`.
 
 ### A server having a bad moment
 
@@ -112,14 +108,14 @@ that arrived whole: a file that is not the pin is refused, not tried again.
 
 ## Keeping up
 
-In a repository that includes [the common tasks](../tasks/), these are `go tool task versions`
-and `go tool task bump NAME=kernel [TO=7.2.9]`: the same commands, over every file of pins the
+In a repository that includes [the common tasks](../tasks/), these are `task versions`
+and `task bump NAME=kernel [TO=7.2.9]`: the same commands, over every file of pins the
 repository has, with `gh`'s token. The commands themselves:
 
 ```sh
-go tool versions check                # what is behind; exits 1 when anything is, 2 when an entry could not be read
-go tool versions bump kernel          # to the newest the track finds
-go tool versions bump kernel 7.2.9    # or to a version you name
+versions check                # what is behind; exits 1 when anything is, 2 when an entry could not be read
+versions bump kernel          # to the newest the track finds
+versions bump kernel 7.2.9    # or to a version you name
 ```
 
 A bump downloads what the new version names and pins its hash; for an image, it asks the registry
@@ -130,7 +126,7 @@ for the digest. It builds nothing, and the entry's `note` says what to run befor
 A bump does not move a pin to something older than it, named or found:
 
 ```
-$ go tool versions bump spin v20261024.01
+$ versions bump spin v20261024.01
 versions: spin is at v20261114.01, and v20261024.01 is older: a bump does not move a pin backwards (versions bump -back, or BACK=1 to the task, moves it there all the same)
 ```
 
@@ -150,12 +146,12 @@ versions: spin is at v20261114.01, and v20261024.01 is older: a bump does not mo
 
 A version that starts with no number (a date, a word) and a `git` entry of another host are not
 ordered, and move as asked. An entry tracked `with` another goes where that one is.
-`go tool versions bump -back <name> <version>` is the bump of a person who means it.
+`versions bump -back <name> <version>` is the bump of a person who means it.
 
 `GITHUB_TOKEN` or `GH_TOKEN`, when set, is sent to api.github.com, which answers only sixty
 unauthenticated requests an hour, and nothing of a private repository. Through
-[the common tasks](../tasks/) a person needs neither: `go tool task versions` and
-`go tool task bump` take `gh`'s token when no token is set and `gh` is logged in, as `release`
+[the common tasks](../tasks/) a person needs neither: `task versions` and
+`task bump` take `gh`'s token when no token is set and `gh` is logged in, as `release`
 does.
 
 ### An entry check could not read
@@ -212,7 +208,7 @@ jobs:
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-        run: go tool task refresh
+        run: task refresh
 ```
 
 The branch is `refresh/<label>-<the file's sum>`, so a set of versions is proposed once: open,
@@ -259,8 +255,8 @@ Excused: the files `Elsewhere` names, tests, `_output/`, dot-directories other t
 GitHub Actions pinned by commit (Dependabot moves those, as `go.sum` is Go's). An entry is read
 when some file runs `versions args|env|version|ref <name>...` or `{{.VERSIONS}} ...`, a test
 included; `Gate.Reads` changes what counts. Two reads are in no file of the repository, and the
-gate counts them from what it knows of go-tools: `task`, which `go tool task` reads when `go.mod`
-takes it, and what the common tasks read when a Taskfile includes `{{.GO_TOOLS_TASKS}}` - found
+gate counts them from what it knows of go-tools: `task`, which go-tools' `task` reads when a
+workflow or composite action under `.github` uses `spin-stack/go-tools`, and what the common tasks read when a Taskfile includes `{{.GO_TOOLS_TASKS}}` - found
 in those tasks' own file, at the go-tools version `go.mod` requires. The include has to be one, in
 single quotes or double: a comment that names the variable reads nothing.
 

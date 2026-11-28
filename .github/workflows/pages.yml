@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # The Task go tool task runs in every repository, cmd/task/versions.yaml: TASK_VERSION and
+      # The Task go-tools' task runs in every repository, cmd/task/versions.yaml: TASK_VERSION and
       # each platform's TASK_SHA256_<OS>_<ARCH>.
       - name: Task's pin
         run: go run ./cmd/versions env -file cmd/task/versions.yaml task >> "$GITHUB_ENV"

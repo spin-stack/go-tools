@@ -160,7 +160,7 @@ func pathOf(env []string) []string {
 	return paths
 }
 
-// From anywhere under the repository, `go tool task` is the pinned Task, given the arguments it
+// From anywhere under the repository, `task` is the pinned Task, given the arguments it
 // was given, with the latest go-tools first on a PATH that is there once.
 func TestTaskIsThePinnedTaskWithTheLatestToolsOnItsPath(t *testing.T) {
 	latest := after
@@ -336,7 +336,7 @@ func TestTaskIsGoToolsUnlessTheRepositoryPinsOne(t *testing.T) {
 }
 
 // go-tools' Task is pinned for each platform a release is built for: a release on a platform
-// without it would unpack commands no `go tool task` there can run.
+// without it would unpack commands no `task` there can run.
 func TestTheTaskCarriedIsForEveryReleasedPlatform(t *testing.T) {
 	taskfile, err := os.ReadFile("../../Taskfile.yml")
 	if err != nil {
@@ -359,12 +359,12 @@ func TestTheTaskCarriedIsForEveryReleasedPlatform(t *testing.T) {
 			continue
 		}
 		if !strings.HasSuffix(e.URL(), ".tar.gz") && !strings.HasSuffix(e.URL(), ".zip") {
-			t.Errorf("%s's Task is %s, which is no archive go tool task unpacks", p, e.URL())
+			t.Errorf("%s's Task is %s, which is no archive task unpacks", p, e.URL())
 		}
 	}
 }
 
-// What `go tool task` cannot run is said, and nothing is exec'd: a versions.yaml that does not
+// What `task` cannot run is said, and nothing is exec'd: a versions.yaml that does not
 // read, one whose task is not for this platform, no go-tools release to be had.
 func TestWhatCannotRunTaskIsSaid(t *testing.T) {
 	_, base, own := repository(t)
@@ -414,7 +414,7 @@ func TestAProgramIsNamedAsItsPlatformNamesIt(t *testing.T) {
 	}
 }
 
-// On a platform nothing pins, go tool task carries task itself, which says what is missing when it
+// On a platform nothing pins, task carries task itself, which says what is missing when it
 // is installed rather than failing before it can.
 func TestAPlatformNothingPinsIsSaidByTask(t *testing.T) {
 	e := ownTask("plan9", "amd64")

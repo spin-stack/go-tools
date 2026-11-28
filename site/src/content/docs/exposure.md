@@ -12,7 +12,7 @@ assets, and every Actions log and artifact still kept.
 `exposure` reads all of it before the switch:
 
 ```sh
-go tool exposure -gitleaks-config hack/gitleaks.toml -allow hack/exposure-allow.txt spin-stack/spin
+exposure -gitleaks-config hack/gitleaks.toml -allow hack/exposure-allow.txt spin-stack/spin
 ```
 
 ```text
@@ -85,8 +85,7 @@ Some things no pattern can judge, and `exposure` lists them rather than pretendi
 ## Running it
 
 ```sh
-go get -tool github.com/spin-stack/go-tools/cmd/exposure
-go tool exposure [-allow file] [-patterns file] [-gitleaks-config path] [-mirror dir] [-private repos] <owner/repo>
+exposure [-allow file] [-patterns file] [-gitleaks-config path] [-mirror dir] [-private repos] <owner/repo>
 ```
 
 | flag | |
