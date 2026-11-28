@@ -89,7 +89,9 @@ func Common(ctx context.Context, root, included string) ([]Finding, string, erro
 			"`go get -tool " + taskCommand + "@none && go mod tidy`, run `task` in workflows after a step that uses " + action +
 			", and `" + install + "` once on a laptop"})
 	}
-	if tool || installed {
+	// Every repository asked runs go-tools' task, whether or not a workflow installs it yet: the
+	// one whose only workflow lost the step is the one to catch. go-tools runs its tree's commands.
+	if included == CommonInclude {
 		out = append(out, bare(flows, installs)...)
 	}
 	out = append(out, own(t)...)

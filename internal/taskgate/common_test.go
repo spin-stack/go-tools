@@ -276,38 +276,45 @@ jobs:
 	assert.Contains(t, got["common:.github/workflows/ci.yml/direct/#2/setup-task"], ".github/workflows/ci.yml:7: step \"#2\" installs Task with go-task/setup-task")
 }
 
+// A repository whose only workflow lost go-tools' action is still asked: no workflow left that
+// installs go-tools' task is the case the step's finding is for.
+func TestAWorkflowWithoutTheActionIsFoundWhenNoneHasIt(t *testing.T) {
+	got, _ := common(t, with(map[string]string{".github/workflows/ci.yml": "on: pull_request\njobs:\n  gate:\n    name: Gate\n    steps:\n      - run: task lint\n"}))
+	assert.Equal(t, []string{"common:.github/workflows/ci.yml/gate/#1/task"}, slices.Sorted(maps.Keys(got)))
+}
+
 // lint:workflows is reached from what a workflow runs, by any way a task runs another: a `task:`
 // of its cmds, a dep, a line of its shell that is Task, from a namespace's file too. Nothing runs
 // a common task unless the repository's own do.
 func TestLintWorkflowsIsInWhatAWorkflowRuns(t *testing.T) {
 	step := func(run string) string {
-		return "on: push\njobs:\n  gate:\n    steps:\n      - run: " + run + "\n"
+		return "on: push\njobs:\n  gate:\n    steps:\n      - uses: " + goTools + "\n      - run: " + run + "\n"
 	}
 	for name, tc := range map[string]struct {
 		run, tasks string
 		files      map[string]string
 		unreached  bool
 	}{
-		"a step":                    {run: "go tool task lint:workflows"},
-		"a step, of several":        {run: "go tool task test lint:workflows"},
-		"a task:":                   {run: "go tool task lint", tasks: lint},
-		"through two tasks":         {run: "go tool task check", tasks: "  check:\n    cmds:\n      - task: lint\n" + lint},
-		"a dep":                     {run: "go tool task lint", tasks: "  lint:\n    deps: [lint:workflows]\n"},
-		"a dep with vars":           {run: "go tool task lint", tasks: "  lint:\n    deps:\n      - task: lint:workflows\n        vars: {X: y}\n"},
-		"Task in the shell":         {run: "go tool task lint", tasks: "  lint:\n    cmds:\n      - \"{{.TASK_EXE}} lint:workflows\"\n"},
-		"go tool task in the shell": {run: "go tool task lint", tasks: "  lint:\n    cmds:\n      - go vet ./...\n      - go tool task lint:workflows\n"},
-		"a namespace's task, by the root's name": {run: "go tool task ci:lint", files: map[string]string{
+		"a step":                    {run: "task lint:workflows"},
+		"a step, of several":        {run: "task test lint:workflows"},
+		"a task:":                   {run: "task lint", tasks: lint},
+		"through two tasks":         {run: "task check", tasks: "  check:\n    cmds:\n      - task: lint\n" + lint},
+		"a dep":                     {run: "task lint", tasks: "  lint:\n    deps: [lint:workflows]\n"},
+		"a dep with vars":           {run: "task lint", tasks: "  lint:\n    deps:\n      - task: lint:workflows\n        vars: {X: y}\n"},
+		"Task in the shell":         {run: "task lint", tasks: "  lint:\n    cmds:\n      - \"{{.TASK_EXE}} lint:workflows\"\n"},
+		"go tool task in the shell": {run: "task lint", tasks: "  lint:\n    cmds:\n      - go vet ./...\n      - go tool task lint:workflows\n"},
+		"a namespace's task, by the root's name": {run: "task ci:lint", files: map[string]string{
 			"taskfiles/ci.yml": "version: '3'\ntasks:\n  lint:\n    cmds:\n      - task: :lint:workflows\n",
 		}},
-		"a namespace's task, by its own": {run: "go tool task ci:all", files: map[string]string{
+		"a namespace's task, by its own": {run: "task ci:all", files: map[string]string{
 			"taskfiles/ci.yml": "version: '3'\ntasks:\n  all:\n    cmds:\n      - task: lint\n  lint:\n    cmds:\n      - task: :lint:workflows\n",
 		}},
-		"no task that reaches it": {run: "go tool task lint", tasks: "  lint:\n    cmds:\n      - go vet ./...\n      - task: test\n  test:\n    cmds: [go test ./...]\n", unreached: true},
-		"a name a template makes": {run: "go tool task lint", tasks: "  lint:\n    cmds:\n      - task: \"{{.WHICH}}\"\n", unreached: true},
-		"a namespace's task of the same name": {run: "go tool task ci:all", files: map[string]string{
+		"no task that reaches it": {run: "task lint", tasks: "  lint:\n    cmds:\n      - go vet ./...\n      - task: test\n  test:\n    cmds: [go test ./...]\n", unreached: true},
+		"a name a template makes": {run: "task lint", tasks: "  lint:\n    cmds:\n      - task: \"{{.WHICH}}\"\n", unreached: true},
+		"a namespace's task of the same name": {run: "task ci:all", files: map[string]string{
 			"taskfiles/ci.yml": "version: '3'\ntasks:\n  all:\n    cmds:\n      - task: lint\n  lint:\n    cmds: [go vet ./...]\n",
 		}, tasks: lint, unreached: true},
-		"a task no workflow runs": {run: "go tool task test", tasks: lint + "  test:\n    cmds: [go test ./...]\n", unreached: true},
+		"a task no workflow runs": {run: "task test", tasks: lint + "  test:\n    cmds: [go test ./...]\n", unreached: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := map[string]string{
@@ -338,7 +345,8 @@ jobs:
   gate:
     runs-on: runs-on/fleet=docker8/env=production
     steps:
-      - run: go tool task lint
+      - uses: ` + goTools + `
+      - run: task lint
   again:
     runs-on: [self-hosted, runs-on/fleet=docker8/env=production, linux, arm64]
   kvm:
@@ -379,7 +387,7 @@ func TestReleaseIsStatedAndTrue(t *testing.T) {
 		return taskfile("  common:\n    taskfile: \"{{.GO_TOOLS_TASKS}}\"\n    flatten: true\n    vars:\n      RELEASE:\n        map: "+m+"\n", lint)
 	}
 	const none = "{none: \"nothing is released\"}"
-	gate := "on: push\njobs:\n  gate:\n    name: Gate\n    steps:\n      - run: go tool task lint\n  test:\n    name: Test ${{ matrix.os }}\n    steps:\n      - run: go tool task test\n  build:\n    steps:\n      - run: go tool task build\n"
+	gate := "on: push\njobs:\n  gate:\n    name: Gate\n    steps:\n      - uses: " + goTools + "\n      - run: task lint\n  test:\n    name: Test ${{ matrix.os }}\n    steps:\n      - uses: " + goTools + "\n      - run: task test\n  build:\n    steps:\n      - uses: " + goTools + "\n      - run: task build\n"
 	for name, tc := range map[string]struct {
 		files map[string]string
 		want  string // the finding's key, "" for none
@@ -477,7 +485,7 @@ func TestReleasesKeysAreTheTasksEachWithAValue(t *testing.T) {
 	runbooks := func(m string) map[string]string {
 		return with(map[string]string{
 			"Taskfile.yml":             taskfile("  common:\n    taskfile: \"{{.GO_TOOLS_TASKS}}\"\n    flatten: true\n    vars:\n      RELEASE:\n        map: "+m+"\n", lint),
-			".github/workflows/ci.yml": "on: pull_request\njobs:\n  gate:\n    name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: go tool task lint\n",
+			".github/workflows/ci.yml": "on: pull_request\njobs:\n  gate:\n    name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - uses: " + goTools + "\n      - run: task lint\n",
 		})
 	}
 	const sentence = "spin pins a commit of main and copies the runbooks in, so no tag or release names a version of them"
